@@ -1,6 +1,8 @@
 # Busy Magpie
 
-**把 magpie 正在做的路由决定，放到桌面上。 / Put magpie's live routing decisions on your desktop.**
+**magpie 实时路由桌面挂件**
+
+**A transparent, click-through live routing perch for your desktop.**
 
 一张透明、无边框、鼠标可以穿透的实时卡片。它读取 magpie 本机 trace，显示当前 Agent 经过了哪些路由、最终落到哪个账号，以及这段时间用了多少 token。
 
