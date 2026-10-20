@@ -132,6 +132,22 @@ Windows 安装包是 **per-user** 安装（`nsis.perMachine: false`），默认�
 
 如果安装到了自定义目录，设置 `BUSY_MAGPIE_APP` 即可；默认路径下不需要配置。
 
+### 卸载插件时会发生什么
+
+magpie 插件没有卸载生命周期钩子，所以**移除插件不会自动删除 Busy Magpie 桌面应用**。插件只是启动器；应用是单独安装的程序，卸载插件后它会继续留在：
+
+```text
+%LOCALAPPDATA%\Programs\Busy Magpie
+```
+
+要移除应用，使用 Windows「设置 → 应用」里的 Busy Magpie 卸载，或运行：
+
+```text
+%LOCALAPPDATA%\Programs\Busy Magpie\Uninstall Busy Magpie.exe
+```
+
+如果希望插件和桌面应用一起删，需要把应用改成插件目录内的便携版；当前版本没有这样做。
+
 ## 交互
 
 ### 移动
