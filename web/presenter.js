@@ -154,6 +154,54 @@ function tokenInfo(route) {
   return { total, detail: detail.join(' · '), title, contextPct };
 }
 
+// The account's own allowance, as its order entry carries it: "known" says
+// the vendor told magpie what is left, "used" is the share of the window
+// the model counts against. A key with no subscription has neither.
+function quotaInfo(picked) {
+  if (!picked || !picked.known) return null;
+  const used = Number(picked.used);
+  if (!Number.isFinite(used)) return null;
+  const renews = Array.isArray(picked.renews) ? picked.renews : [];
+  return {
+    used: Math.max(0, Math.min(100, used)),
+    remaining: Math.max(0, Math.min(100, 100 - used)),
+    renewAt: picked.usedRenews || renews[0] || '',
+    amount: Number(picked.amount) || 0,
+    limit: Number(picked.limit) || 0,
+    unit: String(picked.unit || ''),
+  };
+}
+
+// How long the request took to start answering, and where the wait sat.
+function timingInfo(route, lastTry) {
+  const net = lastTry && lastTry.net ? lastTry.net : null;
+  const ms = Number(route.ms) || 0;
+  const ttft = Number(route.ttft) || Number(lastTry?.ttft) || 0;
+  if (!ms && !ttft) return null;
+  return {
+    ms,
+    ttft,
+    wait: Number(net?.wait) || 0,
+    own: Number(net?.own) || 0,
+    queued: Number(route.queued) || 0,
+  };
+}
+
+// How long until an allowance renews, in the fewest words that stay true.
+export function formatEta(iso) {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return '';
+  const ms = at.getTime() - Date.now();
+  if (ms <= 0) return '即将续期';
+  const hours = Math.floor(ms / 3_600_000);
+  if (hours < 1) return '1 小时内续';
+  if (hours < 48) return `${hours} 小时后续`;
+  const days = Math.round(ms / 86_400_000);
+  if (days < 30) return `${days} 天后续`;
+  const month = at.getMonth() + 1;
+  return `${month}/${at.getDate()} 续`;
+}
+
 export function timeOf(iso) {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '';
@@ -209,6 +257,8 @@ export function present(route, totals, maskAccounts) {
     tokenDetail: token.detail,
     tokenTitle: token.title,
     tokenPct: token.contextPct,
+    quota: quotaInfo(picked || lastTry),
+    timing: timingInfo(route, lastTry),
     timeText: timeOf(route.time),
     caption: caption(route, visibleWho, model, kind, count, single),
     story: story(route, agent, model, provider, visibleWho, accountModel, kind, storyState, inFlight, failed),

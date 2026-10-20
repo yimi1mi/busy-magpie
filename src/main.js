@@ -13,6 +13,19 @@ app.setName('Busy Magpie');
 
 const WIDTH = 632;
 const HEIGHT = 432;
+// The card is drawn on a 600×400 canvas inside 16px of padding. Keeping the
+// window at that shape is what lets the canvas scale up to fill it instead of
+// leaving dark bands above and below.
+const CARD_RATIO = 600 / 400;
+const CARD_PAD = 32;
+
+function heightForWidth(width) {
+  return Math.round((width - CARD_PAD) / CARD_RATIO) + CARD_PAD;
+}
+
+function widthForHeight(height) {
+  return Math.round((height - CARD_PAD) * CARD_RATIO) + CARD_PAD;
+}
 const ASSETS = path.join(__dirname, '..', 'assets');
 const RENDERER = path.join(__dirname, '..', 'web', 'index.html');
 const IS_MAC = process.platform === 'darwin';
@@ -64,6 +77,14 @@ let layoutMode = false;
 let layoutTimer = null;
 let hoverInteractive = false;
 let hoverKind = null;
+// The renderer measures the token pill and the drag strip, which are the
+// only places inside the card that take a pointer: the card is otherwise
+// click-through, so the pointer has to be let in exactly there. Both move
+// when the window is resized, since the card is scaled to fit it.
+let hitAreas = { pill: null, dragTop: 12, dragBottom: 46 };
+// How much the card's canvas is scaled; the settings drawer is drawn at the
+// same scale, so it has to grow with it.
+let uiScale = 1;
 let dragState = null;
 let resizeState = null;
 let hoverTimer = null;
@@ -91,19 +112,74 @@ function defaults() {
     gateway: null,
     checkUpdates: true,
     skippedUpdate: '',
+    usagePeriod: '30d',
+    enabledPeriods: [...USAGE_PERIODS],
+    pillMetric: 'total',
+    rollTokens: true,
+    showQuota: true,
+    showTiming: true,
   };
+}
+
+// The four windows magpie's /v1/magpie/usage answers, in the order a click
+// on the token pill walks them.
+const USAGE_PERIODS = ['today', '7d', '30d', 'all'];
+
+// What the pill's number counts.
+const PILL_METRICS = ['total', 'input', 'output', 'cache'];
+
+function normalizePeriod(value) {
+  const period = String(value || '').toLowerCase();
+  return USAGE_PERIODS.includes(period) ? period : '30d';
+}
+
+// The windows the pill may cycle through: at least one, in canonical order.
+function normalizePeriods(value) {
+  const wanted = Array.isArray(value) ? value.map((item) => String(item).toLowerCase()) : [];
+  const kept = USAGE_PERIODS.filter((period) => wanted.includes(period));
+  return kept.length ? kept : [...USAGE_PERIODS];
+}
+
+function normalizeMetric(value) {
+  const metric = String(value || '').toLowerCase();
+  return PILL_METRICS.includes(metric) ? metric : 'total';
+}
+
+// A stored size is snapped back to the card's shape, within the allowed
+// range, so a window saved before the shape was enforced still fits.
+function normalizeSize(width) {
+  let w = Math.max(600, Math.min(1600, Number(width) || WIDTH));
+  let h = heightForWidth(w);
+  if (h > 1200) {
+    h = 1200;
+    w = Math.max(600, Math.min(1600, widthForHeight(h)));
+  }
+  if (h < 432) {
+    h = 432;
+    w = Math.max(600, Math.min(1600, widthForHeight(h)));
+  }
+  return { width: w, height: h };
 }
 
 function loadSettings() {
   try {
     const raw = fs.readFileSync(settingsPath, 'utf8');
     const parsed = JSON.parse(raw);
+    const enabledPeriods = normalizePeriods(parsed.enabledPeriods);
+    const usagePeriod = normalizePeriod(parsed.usagePeriod);
+    const size = normalizeSize(parsed.width);
     return {
       ...defaults(),
       ...parsed,
       opacity: Math.min(1, Math.max(0.4, Number(parsed.opacity) || 1)),
-      width: Math.max(600, Math.min(1600, Number(parsed.width) || WIDTH)),
-      height: Math.max(432, Math.min(1200, Number(parsed.height) || HEIGHT)),
+      width: size.width,
+      height: size.height,
+      usagePeriod: enabledPeriods.includes(usagePeriod) ? usagePeriod : enabledPeriods[0],
+      enabledPeriods,
+      pillMetric: normalizeMetric(parsed.pillMetric),
+      rollTokens: parsed.rollTokens !== false,
+      showQuota: parsed.showQuota !== false,
+      showTiming: parsed.showTiming !== false,
     };
   } catch {
     return defaults();
@@ -180,8 +256,14 @@ function clampBounds(x, y, width = WIDTH, height = HEIGHT) {
 
 function createWindow() {
   const area = screen.getPrimaryDisplay().workArea;
-  const width = Math.min(settings.width || WIDTH, area.width - 20);
-  const height = Math.min(settings.height || HEIGHT, area.height - 20);
+  let width = Math.max(600, Math.min(settings.width || WIDTH, area.width - 20));
+  let height = heightForWidth(width);
+  const maxHeight = Math.min(area.height - 20, 1200);
+  if (height > maxHeight) {
+    height = Math.max(432, maxHeight);
+    width = Math.max(600, Math.min(area.width - 20, widthForHeight(height)));
+    height = heightForWidth(width);
+  }
   settings.width = width;
   settings.height = height;
   const fallback = defaultBounds(width, height);
@@ -302,6 +384,12 @@ function publicSettings() {
     topmost: settings.topmost,
     opacity: settings.opacity,
     gateway: displayAddress(resolveGateway()),
+    usagePeriod: settings.usagePeriod,
+    enabledPeriods: settings.enabledPeriods,
+    pillMetric: settings.pillMetric,
+    rollTokens: settings.rollTokens !== false,
+    showQuota: settings.showQuota !== false,
+    showTiming: settings.showTiming !== false,
   };
 }
 
@@ -716,9 +804,12 @@ function openSettingsPanel(mode = 'settings') {
         y: settingsBaseBounds.y,
       });
       const area = display.workArea;
-      const preferred = mode === 'about' ? 300 : 430;
+      const preferred = Math.round((mode === 'about' ? 300 : 640) * uiScale);
       const maxPane = Math.max(260, area.height - settingsBaseBounds.height - 16);
       const paneHeight = Math.min(preferred, maxPane);
+      // When the screen cannot give the drawer its scaled height, the drawer
+      // shrinks its own scale rather than growing a scrollbar over the form.
+      const paneScale = Math.min(uiScale, paneHeight / (mode === 'about' ? 300 : 640));
       const height = settingsBaseBounds.height + paneHeight;
       let y = settingsBaseBounds.y;
       if (y + height > area.y + area.height - 8) {
@@ -731,6 +822,7 @@ function openSettingsPanel(mode = 'settings') {
         mode,
         baseCardHeight: settingsBaseBounds.height - 32,
         paneHeight,
+        paneScale,
       });
       animateBounds(win.getBounds(), {
         x: settingsBaseBounds.x,
@@ -751,9 +843,10 @@ function openSettingsPanel(mode = 'settings') {
     y: settingsBaseBounds.y,
   });
   const area = display.workArea;
-  const preferred = mode === 'about' ? 300 : 430;
+  const preferred = Math.round((mode === 'about' ? 300 : 640) * uiScale);
   const maxPane = Math.max(260, area.height - settingsBaseBounds.height - 16);
   const paneHeight = Math.min(preferred, maxPane);
+  const paneScale = Math.min(uiScale, paneHeight / (mode === 'about' ? 300 : 640));
   settingsPaneHeight = paneHeight;
   const height = settingsBaseBounds.height + paneHeight;
   let y = settingsBaseBounds.y;
@@ -773,6 +866,7 @@ function openSettingsPanel(mode = 'settings') {
     mode,
     baseCardHeight: settingsBaseBounds.height - 32,
     paneHeight,
+    paneScale,
   });
   animateBounds(settingsBaseBounds, {
     x: settingsBaseBounds.x,
@@ -788,8 +882,25 @@ function closeSettingsPanel() {
   settingsClosing = true;
   settingsOpen = false;
   currentPanelMode = 'settings';
+  // A drag that was resizing the card must not keep the window tall once
+  // the drawer asks to fold back.
+  if (resizeState) {
+    clearInterval(resizeState.timer);
+    clearTimeout(resizeState.max);
+    resizeState = null;
+  }
   const from = win && !win.isDestroyed() ? win.getBounds() : settingsBaseBounds;
-  const to = settingsBaseBounds;
+  // A drawer that closed after its card bounds were lost still has to put
+  // the window back to the card's size, or a tall empty window is left.
+  const fallback = {
+    x: from ? from.x : (settings.left ?? 0),
+    y: from ? from.y : (settings.top ?? 0),
+    width: Math.max(600, Number(settings.width) || WIDTH),
+    height: Math.max(432, Number(settings.height) || HEIGHT),
+  };
+  const to = settingsBaseBounds || fallback;
+  log(`settings panel closed (bounds ${settingsBaseBounds ? 'known' : 'rebuilt'}, ` +
+    `${to.width}x${to.height})`);
   send('magpie:settings-panel', { open: false });
   if (!win || win.isDestroyed() || !to) {
     settingsBaseBounds = null;
@@ -859,11 +970,45 @@ function watchHover() {
     const onBorder = within && (north || south || west || east);
     const onTopBar = point.x >= bounds.x
       && point.x <= bounds.x + bounds.width
-      && point.y >= bounds.y + 12
-      && point.y <= bounds.y + 46;
-    const kind = onBorder ? 'resize' : onTopBar ? 'drag' : null;
+      && point.y >= bounds.y + hitAreas.dragTop
+      && point.y <= bounds.y + hitAreas.dragBottom;
+    // The token pill sits inside the top strip, but it takes a click rather
+    // than a drag, so it wins the hit test where the two overlap.
+    const onPill = Boolean(hitAreas.pill)
+      && point.x >= bounds.x + hitAreas.pill.x
+      && point.x <= bounds.x + hitAreas.pill.x + hitAreas.pill.width
+      && point.y >= bounds.y + hitAreas.pill.y
+      && point.y <= bounds.y + hitAreas.pill.y + hitAreas.pill.height;
+    const kind = onPill ? 'pill' : onBorder ? 'resize' : onTopBar ? 'drag' : null;
     setHoverInteractive(Boolean(kind), kind);
   }, 70);
+}
+
+// The pill is the only control on the card that is not in a panel, and the
+// renderer keeps it in step with the usage summary's width.
+function setHitAreas(raw) {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  const rect = source.pill && typeof source.pill === 'object' ? source.pill : null;
+  const numbers = rect
+    ? ['x', 'y', 'width', 'height'].map((key) => Number(rect[key]))
+    : [];
+  const valid = numbers.length === 4
+    && numbers.every(Number.isFinite)
+    && numbers[2] > 0
+    && numbers[3] > 0;
+  const top = Number(source.dragTop);
+  const bottom = Number(source.dragBottom);
+  const ui = Number(source.ui);
+  if (Number.isFinite(ui) && ui > 0) uiScale = Math.min(2.6, Math.max(0.5, ui));
+  hitAreas = {
+    pill: valid
+      ? { x: numbers[0], y: numbers[1], width: numbers[2], height: numbers[3] }
+      : null,
+    dragTop: Number.isFinite(top) ? top : 12,
+    dragBottom: Number.isFinite(bottom) && Number.isFinite(top) && bottom > top
+      ? bottom
+      : 46,
+  };
 }
 
 function startDrag() {
@@ -916,10 +1061,13 @@ function endDrag() {
 }
 
 function startResize(direction = 'se') {
-  if (!win || win.isDestroyed() || firstRunOpen || settingsOpen || settingsClosing || resizeState) return;
+  if (!win || win.isDestroyed() || firstRunOpen || settingsClosing || resizeState) return;
   const dir = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].includes(direction)
     ? direction
     : 'se';
+  // With the drawer open only the sides resize the card; the drawer keeps
+  // its own height and stays where it is.
+  if (settingsOpen && dir !== 'e' && dir !== 'w') return;
   const point = screen.getCursorScreenPoint();
   const bounds = win.getBounds();
   const display = screen.getDisplayNearestPoint(point);
@@ -930,6 +1078,7 @@ function startResize(direction = 'se') {
   win.focus();
   const state = {
     direction: dir,
+    paneHeight: settingsOpen ? settingsPaneHeight : 0,
     pointerX: point.x,
     pointerY: point.y,
     x: bounds.x,
@@ -957,8 +1106,10 @@ function startResize(direction = 'se') {
     const dx = now.x - state.pointerX;
     const dy = now.y - state.pointerY;
 
+    const pane = state.paneHeight || 0;
+    const maxCardH = Math.max(state.minHeight, state.maxH - pane);
     let width = state.width;
-    let height = state.height;
+    let height = state.height - pane;
     let x = state.x;
     let y = state.y;
 
@@ -966,20 +1117,55 @@ function startResize(direction = 'se') {
       width = Math.max(state.minWidth, Math.min(state.maxW, state.width + dx));
     } else if (dir.includes('w')) {
       width = Math.max(state.minWidth, Math.min(state.maxW, state.width - dx));
-      x = state.x + state.width - width;
     }
-    if (dir.includes('s')) {
-      height = Math.max(state.minHeight, Math.min(state.maxH, state.height + dy));
-    } else if (dir.includes('n')) {
-      height = Math.max(state.minHeight, Math.min(state.maxH, state.height - dy));
-      y = state.y + state.height - height;
+    if (!pane) {
+      if (dir.includes('s')) {
+        height = Math.max(state.minHeight, Math.min(maxCardH, height + dy));
+      } else if (dir.includes('n')) {
+        height = Math.max(state.minHeight, Math.min(maxCardH, height - dy));
+      }
     }
 
-    win.setBounds({ x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) }, false);
+    // The card keeps its shape, so the scaled canvas always fills it: a
+    // horizontal drag sets the width and the height follows, and the other
+    // way round for a vertical edge.
+    if (dir.includes('e') || dir.includes('w')) {
+      height = heightForWidth(width);
+      if (height > maxCardH) {
+        height = maxCardH;
+        width = widthForHeight(height);
+      } else if (height < state.minHeight) {
+        height = state.minHeight;
+        width = widthForHeight(height);
+      }
+    } else {
+      width = widthForHeight(height);
+      if (width > state.maxW) {
+        width = state.maxW;
+        height = heightForWidth(width);
+      } else if (width < state.minWidth) {
+        width = state.minWidth;
+        height = heightForWidth(width);
+      }
+    }
+    width = Math.max(state.minWidth, Math.min(state.maxW, width));
+    height = Math.max(state.minHeight, Math.min(maxCardH, height));
+    if (dir.includes('w')) x = state.x + state.width - width;
+    if (dir.includes('n') && !pane) y = state.y + state.height - height - pane;
+
+    win.setBounds({ x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height + pane) }, false);
     settings.left = Math.round(x);
     settings.top = Math.round(y);
     settings.width = Math.round(width);
     settings.height = Math.round(height);
+    if (pane) {
+      settingsBaseBounds = {
+        x: Math.round(x),
+        y: Math.round(y),
+        width: Math.round(width),
+        height: Math.round(height),
+      };
+    }
   }, 16);
   state.max = setTimeout(endResize, 15000);
   resizeState = state;
@@ -993,12 +1179,19 @@ function endResize() {
   resizeState = null;
   saveSettings();
   if (win && !win.isDestroyed()) {
-    win.setIgnoreMouseEvents(true, { forward: true });
-    win.setFocusable(false);
-    win.blur();
+    // The drawer leaves the window interactive; the bare card does not.
+    if (!settingsOpen) {
+      win.setIgnoreMouseEvents(true, { forward: true });
+      win.setFocusable(false);
+      win.blur();
+    }
     applyTopmost();
     const bounds = win.getBounds();
-    frame = { lanes: frame.lanes, cardHeight: bounds.height - 32, windowHeight: bounds.height };
+    // settings.height is always the card's height, pane excluded, so this
+    // holds whether or not the drawer is open — and whether it closed in
+    // the middle of the drag.
+    const cardHeight = Math.max(432, Number(settings.height) || bounds.height);
+    frame = { lanes: frame.lanes, cardHeight: cardHeight - 32, windowHeight: bounds.height };
     send('magpie:frame', frame);
     send('magpie:resize', false);
   }
@@ -1064,23 +1257,45 @@ async function refreshUsage() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 6000);
   try {
-    const response = await fetch(`${resolveGateway()}/v1/magpie/usage`, {
+    const period = normalizePeriod(settings.usagePeriod);
+    const response = await fetch(`${resolveGateway()}/v1/magpie/usage?period=${period}`, {
       signal: controller.signal,
       headers: { Accept: 'application/json' },
       cache: 'no-store',
     });
     if (!response.ok) {
       log(`usage answered ${response.status}`);
-      return;
+      return null;
     }
-    usageData = await response.json();
-    send('magpie:usage', usageData);
+    const data = await response.json();
+    usageData = data;
+    send('magpie:usage', data);
+    return data;
   } catch (error) {
     // A usage failure leaves the existing total on screen.
     log(`usage unavailable: ${error.message}`);
+    return null;
   } finally {
     clearTimeout(timeout);
   }
+}
+
+// The renderer's click on the token pill asks for the next window. The
+// answer carries the fresh summary so the pill can repaint at once instead
+// of waiting for the next poll. A failed fetch keeps the window on file:
+// the next poll retries it, and the pill still shows the old summary.
+async function setUsagePeriod(value) {
+  const period = normalizePeriod(value);
+  // A period the user switched off is not one the pill may cycle to.
+  if (!settings.enabledPeriods.includes(period)) {
+    return { period: settings.usagePeriod, usage: usageData };
+  }
+  if (period !== settings.usagePeriod) {
+    settings.usagePeriod = period;
+    saveSettings();
+  }
+  const usage = await refreshUsage();
+  return { period, usage };
 }
 
 class TraceClient {
@@ -1185,7 +1400,13 @@ function describeError(error) {
 function send(channel, payload) {
   if (!win || win.isDestroyed()) return;
   if (win.webContents.isDestroyed()) return;
-  win.webContents.send(channel, payload);
+  try {
+    win.webContents.send(channel, payload);
+  } catch (error) {
+    // A payload the serializer cannot clone (a menu item, a function) used
+    // to vanish without a trace: the window grew and the drawer stayed empty.
+    log(`send ${channel}: ${error.message}`);
+  }
 }
 
 function delay(ms) {
@@ -1255,7 +1476,9 @@ function buildTrayMenu() {
     { type: 'separator' },
     {
       label: '设置…',
-      click: openSettingsPanel,
+      // The menu passes (menuItem, window, event); leaving the item as the
+      // mode would put a function into the IPC payload and drop the panel.
+      click: () => openSettingsPanel('settings'),
     },
     {
       label: '调整位置…',
@@ -1366,12 +1589,21 @@ ipcMain.handle('settings:save', (_event, input) => {
       x: settings.left ?? 0,
       y: settings.top ?? 0,
     }).workArea;
-    const width = Math.max(600, Math.min(area.width - 20, Number(data.width) || settings.width || WIDTH));
-    const height = Math.max(432, Math.min(area.height - 20, Number(data.height) || settings.height || HEIGHT));
+    let width = Math.max(600, Math.min(area.width - 20, Number(data.width) || settings.width || WIDTH));
+    let height = heightForWidth(width);
+    if (height > Math.min(area.height - 20, 1200)) {
+      height = Math.max(432, Math.min(area.height - 20, 1200));
+      width = Math.max(600, Math.min(area.width - 20, widthForHeight(height)));
+      height = heightForWidth(width);
+    }
     const rawGateway = String(data.gateway ?? '').trim();
     const nextGateway = rawGateway ? normalizeGateway(rawGateway) : null;
     const gatewayChanged = nextGateway !== settings.gateway;
     const sizeChanged = width !== settings.width || height !== settings.height;
+    const nextPeriods = normalizePeriods(data.enabledPeriods ?? settings.enabledPeriods);
+    const requestedPeriod = normalizePeriod(data.usagePeriod ?? settings.usagePeriod);
+    const nextPeriod = nextPeriods.includes(requestedPeriod) ? requestedPeriod : nextPeriods[0];
+    const periodChanged = nextPeriod !== settings.usagePeriod;
 
     settings = {
       ...settings,
@@ -1384,6 +1616,18 @@ ipcMain.handle('settings:save', (_event, input) => {
       checkUpdates: data.checkUpdates === undefined
         ? settings.checkUpdates !== false
         : Boolean(data.checkUpdates),
+      usagePeriod: nextPeriod,
+      enabledPeriods: nextPeriods,
+      pillMetric: normalizeMetric(data.pillMetric ?? settings.pillMetric),
+      rollTokens: data.rollTokens === undefined
+        ? settings.rollTokens !== false
+        : Boolean(data.rollTokens),
+      showQuota: data.showQuota === undefined
+        ? settings.showQuota !== false
+        : Boolean(data.showQuota),
+      showTiming: data.showTiming === undefined
+        ? settings.showTiming !== false
+        : Boolean(data.showTiming),
     };
     saveSettings();
     applyTopmost();
@@ -1411,6 +1655,7 @@ ipcMain.handle('settings:save', (_event, input) => {
     }
     send('magpie:settings', publicSettings());
     if (gatewayChanged) rebuildClient();
+    else if (periodChanged) refreshUsage();
     saveSettings();
     refreshTrayMenu();
     let raw = '';
@@ -1439,6 +1684,13 @@ ipcMain.on('settings:open-file', () => {
 });
 
 ipcMain.on('settings:close', () => closeSettingsPanel());
+
+// While the slider is dragged the window follows it at once; nothing is
+// written until Save, and closing the panel puts the stored value back.
+ipcMain.on('settings:opacity', (_event, value) => {
+  if (!win || win.isDestroyed()) return;
+  win.setOpacity(Math.min(1, Math.max(0.4, Number(value) || 1)));
+});
 
 ipcMain.on('busy:ready', () => {
   rendererReady = true;
@@ -1489,6 +1741,8 @@ ipcMain.on('busy:drag-start', () => startDrag());
 ipcMain.on('busy:drag-end', () => endDrag());
 ipcMain.on('busy:resize-start', (_event, direction) => startResize(direction));
 ipcMain.on('busy:resize-end', () => endResize());
+ipcMain.on('busy:hit-areas', (_event, areas) => setHitAreas(areas));
+ipcMain.handle('usage:set-period', (_event, period) => setUsagePeriod(period));
 
 function init() {
   settingsPath = path.join(app.getPath('userData'), 'settings.json');

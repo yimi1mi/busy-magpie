@@ -14,18 +14,22 @@
     <div class="card" id="card">
       <div class="aurora aurora-a"></div>
       <div class="aurora aurora-b"></div>
-      <svg class="bird-sky" id="birdSky" aria-hidden="true"></svg>
-      <div class="drag-bar" id="dragBar" title="长按拖动面板">
-        <span class="drag-grip" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
-      </div>
-      <div class="resize-handle resize-n" data-resize="n"></div>
-      <div class="resize-handle resize-s" data-resize="s"></div>
-      <div class="resize-handle resize-w" data-resize="w"></div>
-      <div class="resize-handle resize-e" data-resize="e"></div>
-      <div class="resize-handle resize-nw" data-resize="nw"></div>
-      <div class="resize-handle resize-ne" data-resize="ne"></div>
-      <div class="resize-handle resize-sw" data-resize="sw"></div>
-      <div class="resize-handle resize-se" data-resize="se"></div>
+      <div class="stage-area" id="stageArea">
+        <div class="stage-canvas" id="stageCanvas">
+          <svg class="bird-sky" id="birdSky" aria-hidden="true"></svg>
+          <div class="drag-bar" id="dragBar" title="长按拖动面板">
+            <span class="drag-grip" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+          </div>
+
+      <button class="token-pill" id="tokenPill" type="button" title="单击切换时间窗" hidden>
+        <svg class="token-icon" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M3 11.5V8.5M8 11.5V5M13 11.5V2.5" />
+          <path d="M2.5 13.5h11" class="token-icon-base" />
+        </svg>
+        <b class="mono token-total" id="tokenTotal"></b>
+        <span class="token-window" id="tokenWindow"></span>
+        <i class="token-meter"><i id="tokenMeter"></i></i>
+      </button>
 
       <div class="content">
         <header class="topbar">
@@ -37,14 +41,6 @@
             <span class="live-word">路由</span>
             <span class="dot-sep">·</span>
             <strong id="liveState">实时</strong>
-          </div>
-          <div class="token-pill" id="tokenPill" hidden>
-            <svg class="token-icon" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M3 11.5V8.5M8 11.5V5M13 11.5V2.5" />
-              <path d="M2.5 13.5h11" class="token-icon-base" />
-            </svg>
-            <b class="mono token-total" id="tokenTotal"></b>
-            <i class="token-meter"><i id="tokenMeter"></i></i>
           </div>
           <div class="gateway">
             <span class="brand">MAGPIE</span>
@@ -76,10 +72,8 @@
               <svg class="bird" viewBox="0 0 44 44" aria-hidden="true">
                 <path id="birdPath" fill-rule="evenodd"></path>
               </svg>
-              <b>magpie</b>
-              <small class="mono" id="hubPort">127.0.0.1:3425</small>
+              <i class="hub-live"></i>
             </div>
-            <i class="hub-live"></i>
           </section>
 
           <div class="wire" id="wireOut" aria-hidden="true">
@@ -99,6 +93,10 @@
             <div class="account-state">
               <i class="status-dot accent" id="accountStateDot"></i>
               <span id="accountState">回答中…</span>
+            </div>
+            <div class="account-quota" id="accountQuota" hidden>
+              <i class="account-quota-bar"><i id="accountQuotaBar"></i></i>
+              <span class="mono" id="accountQuotaText"></span>
             </div>
             <div class="account-token mono" id="accountToken" hidden></div>
           </section>
@@ -121,10 +119,8 @@
                 <svg class="bird" viewBox="0 0 44 44" aria-hidden="true">
                   <path id="fanBirdPath" fill-rule="evenodd"></path>
                 </svg>
-                <b>magpie</b>
-                <small class="mono" id="fanHubPort">127.0.0.1:3425</small>
+                <i class="hub-live"></i>
               </div>
-              <i class="hub-live"></i>
             </div>
             <div class="fan-side fan-right" id="fanAccounts"></div>
           </div>
@@ -184,8 +180,20 @@
           <span>鼠标点击穿透</span>
         </footer>
       </div>
+        </div>
+      </div>
+
+      <div class="resize-handle resize-n" data-resize="n"></div>
+      <div class="resize-handle resize-s" data-resize="s"></div>
+      <div class="resize-handle resize-w" data-resize="w"></div>
+      <div class="resize-handle resize-e" data-resize="e"></div>
+      <div class="resize-handle resize-nw" data-resize="nw"></div>
+      <div class="resize-handle resize-ne" data-resize="ne"></div>
+      <div class="resize-handle resize-sw" data-resize="sw"></div>
+      <div class="resize-handle resize-se" data-resize="se"></div>
 
       <section class="settings-pane" id="settingsPane" hidden>
+        <div class="settings-inner">
         <header class="settings-head">
           <div>
             <b>设置 <em class="settings-version mono" id="settingsVersion">v1.1.0</em></b>
@@ -210,16 +218,59 @@
               <input type="range" id="settingsOpacity" min="40" max="100" step="1" value="100">
               <output id="settingsOpacityOut">100%</output>
             </div>
+          </section>
+
+          <section class="settings-group">
+            <h3>用量胶囊</h3>
+            <div class="settings-field">
+              <div class="settings-caption">
+                <b>时间窗</b><small>勾选的才会在单击胶囊时循环</small>
+              </div>
+              <div class="settings-chips" id="settingsPeriods" role="group" aria-label="时间窗">
+                <button type="button" class="settings-chip" data-period="today" aria-pressed="true">今日</button>
+                <button type="button" class="settings-chip" data-period="7d" aria-pressed="true">7 天</button>
+                <button type="button" class="settings-chip" data-period="30d" aria-pressed="true">30 天</button>
+                <button type="button" class="settings-chip" data-period="all" aria-pressed="true">全部</button>
+              </div>
+            </div>
+            <div class="settings-field">
+              <div class="settings-caption">
+                <b>数值</b><small>滚动的数字代表什么</small>
+              </div>
+              <div class="settings-chips" id="settingsMetrics" role="group" aria-label="胶囊数值">
+                <button type="button" class="settings-chip" data-metric="total" aria-pressed="true">总 token</button>
+                <button type="button" class="settings-chip" data-metric="input" aria-pressed="false">输入</button>
+                <button type="button" class="settings-chip" data-metric="output" aria-pressed="false">输出</button>
+                <button type="button" class="settings-chip" data-metric="cache" aria-pressed="false">缓存读</button>
+              </div>
+            </div>
             <label class="settings-switch">
-              <span><b>启动时检查更新</b><small>只检查应用，不自动下载</small></span>
-              <input type="checkbox" id="settingsCheckUpdates">
+              <span><b>数字滚动</b><small>关闭后直接替换，不做逐位动画</small></span>
+              <input type="checkbox" id="settingsRoll">
             </label>
           </section>
 
           <section class="settings-group">
-            <h3>网关</h3>
-            <input type="text" id="settingsGateway" class="settings-input" placeholder="留空自动检测">
-            <small class="settings-hint" id="settingsGatewayHint">留空自动读取 magpie 的端口。</small>
+            <h3>账号卡片</h3>
+            <label class="settings-switch">
+              <span><b>额度条</b><small>剩余额度与续期</small></span>
+              <input type="checkbox" id="settingsQuota">
+            </label>
+            <label class="settings-switch">
+              <span><b>耗时拆解</b><small>首字延迟写进明细行，悬停看全部</small></span>
+              <input type="checkbox" id="settingsTiming">
+            </label>
+          </section>
+
+          <section class="settings-group">
+            <h3>连接与更新</h3>
+            <label class="settings-row">
+              <span><b>网关</b><small id="settingsGatewayHint">留空自动读取 magpie 的端口</small></span>              <input type="text" id="settingsGateway" class="settings-input" placeholder="留空自动检测">
+            </label>
+            <label class="settings-switch">
+              <span><b>启动时检查更新</b><small>只检查应用，不自动下载</small></span>
+              <input type="checkbox" id="settingsCheckUpdates">
+            </label>
           </section>
 
           <section class="settings-group settings-file">
@@ -283,6 +334,7 @@
 
             <p class="about-error" id="aboutError" role="status"></p>
           </div>
+        </div>
         </div>
       </section>
 

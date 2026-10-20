@@ -1,6 +1,8 @@
 import {
   connecting,
   empty,
+  formatDuration,
+  formatEta,
   formatTokens,
   offline,
   present,
@@ -13,7 +15,8 @@ const el = {
   liveState: $('liveState'),
   gateway: $('gateway'),
   appVersion: $('appVersion'),
-  hubPort: $('hubPort'),
+  stageArea: $('stageArea'),
+  stageCanvas: $('stageCanvas'),
   birdSky: $('birdSky'),
   agentNode: $('agentNode'),
   agentGlyph: $('agentGlyph'),
@@ -29,8 +32,12 @@ const el = {
   accountDot: $('accountDot'),
   accountStateDot: $('accountStateDot'),
   accountToken: $('accountToken'),
+  accountQuota: $('accountQuota'),
+  accountQuotaBar: $('accountQuotaBar'),
+  accountQuotaText: $('accountQuotaText'),
   tokenPill: $('tokenPill'),
   tokenTotal: $('tokenTotal'),
+  tokenWindow: $('tokenWindow'),
   tokenMeter: $('tokenMeter'),
   providerIcon: $('providerIcon'),
   wireIn: $('wireIn'),
@@ -50,12 +57,20 @@ const el = {
   fanAgents: $('fanAgents'),
   fanAccounts: $('fanAccounts'),
   fanHub: $('fanHub'),
-  fanHubPort: $('fanHubPort'),
   fanBirdPath: $('fanBirdPath'),
   multiFooter: $('multiFooter'),
 };
 
-let settings = { maskAccounts: true, gateway: '127.0.0.1:3425' };
+let settings = {
+  maskAccounts: true,
+  gateway: '127.0.0.1:3425',
+  usagePeriod: '30d',
+  enabledPeriods: ['today', '7d', '30d', 'all'],
+  pillMetric: 'total',
+  rollTokens: true,
+  showQuota: true,
+  showTiming: true,
+};
 let lastTrace = null;
 let usageData = null;
 let connection = { online: false, detail: '正在连接' };
@@ -102,7 +117,55 @@ function applyFrame(next) {
   const root = document.documentElement;
   root.style.setProperty('--window-h', `${frame.windowHeight}px`);
   root.style.setProperty('--card-h', `${frame.cardHeight}px`);
-  requestAnimationFrame(drawFanWires);
+  // While the drawer is open the card keeps the height it had when it
+  // opened, and the drawer below takes the rest.
+  if (document.body.classList.contains('settings-open') && frame.cardHeight) {
+    root.style.setProperty('--base-content-h', `${Math.max(120, frame.cardHeight)}px`);
+  }
+  requestAnimationFrame(() => {
+    applyUiScale();
+    drawFanWires();
+    refreshFlightLegs();
+  });
+}
+
+// The card is drawn on a fixed canvas and scaled to fit the window, so a
+// bigger window means bigger text, nodes and wires rather than empty space.
+const CANVAS_W = 600;
+const CANVAS_H = 400;
+
+function uiScale() {
+  return Number(getComputedStyle(document.documentElement).getPropertyValue('--ui')) || 1;
+}
+
+// The drawer is drawn at the card's scale, or smaller when the screen cannot
+// give it its full height, so the whole form always fits.
+function updatePaneScale() {
+  const pane = $('settingsPane');
+  if (!pane || pane.hidden) {
+    document.documentElement.style.removeProperty('--ui-pane');
+    return;
+  }
+  if (document.body.classList.contains('can-resize')) return;
+  const base = pane.classList.contains('about') ? 300 : 640;
+  const height = pane.clientHeight;
+  if (height < 60) return;
+  const scale = Math.max(0.5, Math.min(uiScale(), height / base));
+  document.documentElement.style.setProperty('--ui-pane', scale.toFixed(4));
+}
+
+function applyUiScale() {
+  const area = el.stageArea?.getBoundingClientRect();
+  if (!area || area.width < 40 || area.height < 40) return;
+  const scale = Math.max(
+    0.5,
+    Math.min(2.6, Math.min(area.width / CANVAS_W, area.height / CANVAS_H)),
+  );
+  document.documentElement.style.setProperty('--ui', scale.toFixed(4));
+  requestAnimationFrame(() => {
+    reportHitAreas();
+    updatePaneScale();
+  });
 }
 
 function usageTotal(data) {
@@ -113,38 +176,80 @@ function usageTotal(data) {
     + (Number(data.cache_write) || 0);
 }
 
+// The four windows magpie answers, in the order a click on the pill walks
+// them. The short form is what the pill shows; the long one is the tooltip.
+const USAGE_PERIODS = ['today', '7d', '30d', 'all'];
+const PERIOD_SHORT = { today: '今日', '7d': '7 天', '30d': '30 天', all: '全部' };
+const PERIOD_LONG = { today: '今日', '7d': '近 7 天', '30d': '近 30 天', all: '全部' };
+
+// What the pill's rolling number counts: the whole total, or one part of it.
+const PILL_METRICS = {
+  total: { label: '总 token', pick: usageTotal },
+  input: { label: '输入 token', pick: (data) => Number(data.input) || 0 },
+  output: { label: '输出 token', pick: (data) => Number(data.output) || 0 },
+  cache: { label: '缓存读取', pick: (data) => Number(data.cache_read) || 0 },
+};
+
+function pillMetric() {
+  return PILL_METRICS[settings.pillMetric] ? settings.pillMetric : 'total';
+}
+
+// The windows a click on the pill walks: only the ones switched on, in the
+// order today, week, month, all. At least one always survives.
+function cyclePeriods() {
+  const kept = Array.isArray(settings.enabledPeriods)
+    ? settings.enabledPeriods.filter((period) => USAGE_PERIODS.includes(period))
+    : [];
+  return kept.length ? kept : USAGE_PERIODS.slice();
+}
+
+function activePeriod() {
+  const fromUsage = String(usageData?.period || '').toLowerCase();
+  if (USAGE_PERIODS.includes(fromUsage)) return fromUsage;
+  return USAGE_PERIODS.includes(settings.usagePeriod) ? settings.usagePeriod : '30d';
+}
+
 function usagePeriod(data) {
   const period = String(data?.period || '');
   const days = /^(\d+)d$/.exec(period);
   if (days) return `近 ${days[1]} 天`;
   if (period === '24h') return '近 24 小时';
+  if (period === 'today') return '今日';
+  if (period === 'all') return '全部';
   return '总计';
 }
 
 function applyUsageTokens() {
-  const total = usageTotal(usageData);
-  if (total > 0) {
+  if (usageData) {
+    const metricKey = pillMetric();
+    const metric = PILL_METRICS[metricKey];
+    const value = metric.pick(usageData);
     const input = Number(usageData.input) || 0;
     const output = Number(usageData.output) || 0;
     const cache = Number(usageData.cache_read) || 0;
     const cacheRate = input + cache > 0 ? cache / (input + cache) : null;
+    const period = activePeriod();
     applyTokenPill({
-      label: '总',
-      total,
-      pct: cacheRate,
-      title: `${usagePeriod(usageData)} · 输入 ${formatTokens(input)} · 输出 ${formatTokens(output)}`
+      total: value,
+      // The bar is the cache hit rate; asking for the cache itself would
+      // just repeat the number above it.
+      pct: metricKey === 'cache' ? null : cacheRate,
+      windowLabel: PERIOD_SHORT[period] || '',
+      title: `${PERIOD_LONG[period] || usagePeriod(usageData)} · ${metric.label} ${formatTokens(value)}`
+        + ` · 输入 ${formatTokens(input)} · 输出 ${formatTokens(output)}`
         + ` · 缓存 ${formatTokens(cache)}${cacheRate !== null ? `（${Math.round(cacheRate * 100)}%）` : ''}`
-        + ` · ${Number(usageData.calls || 0).toLocaleString()} 请求`,
+        + ` · ${Number(usageData.calls || 0).toLocaleString()} 请求`
+        + ' · 单击切换时间窗',
     });
     return;
   }
 
+  // No usage log: fall back to what the trace itself carried.
   const recent = Array.isArray(lastTrace?.routes) ? lastTrace.routes : [];
   const fallback = recent.reduce((sum, route) => (
     sum + (Number(route.tokens) || Number(route.prompt?.tokens) || 0)
   ), 0);
   applyTokenPill({
-    label: '总',
     total: fallback,
     title: `最近 ${recent.length} 个请求合计 ${formatTokens(fallback)}`,
   });
@@ -152,6 +257,56 @@ function applyUsageTokens() {
 
 let tokenText = '';
 const TOKEN_DIGIT_H = 21;
+
+function formatLatency(ms) {
+  const value = Number(ms) || 0;
+  if (!value) return '—';
+  return value < 1000 ? `${Math.round(value)}ms` : `${(value / 1000).toFixed(1)}s`;
+}
+
+// What the account card says under its state line: this request's tokens
+// and first-byte wait, then how much of the account's allowance is left.
+function renderAccountDetail(view) {
+  const timing = settings.showTiming !== false ? view.timing : null;
+  const parts = [];
+  if (view.tokenDetail) parts.push(view.tokenDetail);
+  if (timing && timing.ttft > 0) parts.push(`首字 ${formatLatency(timing.ttft)}`);
+  const detail = parts.join(' · ');
+  el.accountToken.textContent = detail;
+  el.accountToken.hidden = !detail;
+
+  const quota = settings.showQuota !== false ? view.quota : null;
+  el.accountQuota.hidden = !quota;
+  if (quota) {
+    const remaining = Math.max(0, Math.min(100, quota.remaining));
+    el.accountQuotaBar.style.width = `${Math.max(1.5, remaining).toFixed(1)}%`;
+    el.accountQuota.classList.toggle('low', remaining < 15);
+    const eta = formatEta(quota.renewAt);
+    el.accountQuotaText.textContent = `额度 ${Math.round(remaining)}%${eta ? ` · ${eta}` : ''}`;
+  }
+
+  const tip = [];
+  if (quota) {
+    const bits = [`剩 ${Math.round(quota.remaining)}%`];
+    if (quota.amount && quota.limit) {
+      const amount = `${Math.round(quota.amount).toLocaleString()} / ${Math.round(quota.limit).toLocaleString()}`;
+      bits.push(`${amount}${quota.unit ? ` ${quota.unit}` : ''}`);
+    }
+    const eta = formatEta(quota.renewAt);
+    if (eta) bits.push(eta);
+    tip.push(`额度：${bits.join(' · ')}`);
+  }
+  if (timing) {
+    const bits = [];
+    if (timing.ttft > 0) bits.push(`首字 ${formatLatency(timing.ttft)}`);
+    if (timing.ms > 0) bits.push(`总 ${formatDuration(timing.ms)}`);
+    if (timing.queued > 0) bits.push(`排队 ${formatDuration(timing.queued)}`);
+    else if (timing.wait > 0) bits.push(`等上游 ${formatDuration(timing.wait)}`);
+    if (timing.own > 0) bits.push(`magpie ${formatDuration(timing.own)}`);
+    if (bits.length) tip.push(`耗时：${bits.join(' · ')}`);
+  }
+  el.accountNode.title = tip.join('\n');
+}
 
 function staticTokenTrack(char) {
   const track = document.createElement('span');
@@ -163,11 +318,20 @@ function staticTokenTrack(char) {
   return track;
 }
 
-function setTokenTotal(text) {
+function setTokenTotal(text, animate = true) {
   if (!el.tokenTotal || !text) return;
   if (text === tokenText) return;
   const old = tokenText;
   tokenText = text;
+
+  if (!animate) {
+    const plain = document.createElement('span');
+    plain.className = 'token-plain';
+    plain.textContent = text;
+    el.tokenTotal.replaceChildren(plain);
+    return;
+  }
+
   const roll = document.createElement('span');
   roll.className = 'token-roll';
 
@@ -222,26 +386,93 @@ function setTokenTotal(text) {
   el.tokenTotal.replaceChildren(roll);
 }
 
-function applyTokenPill({ total = 0, pct = null, title = '', label = '本次' } = {}) {
+function applyTokenPill({ total = 0, pct = null, title = '', windowLabel = '' } = {}) {
   if (!el.tokenPill) return;
-  if (!total) {
+  // A usage summary is shown even at zero, so the pill stays reachable and
+  // the next click can walk back out of an empty window.
+  if (!total && !usageData) {
     el.tokenPill.hidden = true;
+    requestAnimationFrame(reportHitAreas);
     return;
   }
   el.tokenPill.hidden = false;
   const text = formatTokens(total);
-  setTokenTotal(text);
-  el.tokenPill.title = title || `${label} ${text}`;
+  setTokenTotal(text, settings.rollTokens !== false);
+  if (el.tokenWindow) el.tokenWindow.textContent = windowLabel;
+  el.tokenPill.title = title || `${text} token`;
   if (el.tokenMeter) {
     el.tokenMeter.parentElement.hidden = pct === null || pct === undefined;
     el.tokenMeter.style.width = pct === null || pct === undefined
       ? '0%'
       : `${Math.max(2, Math.min(100, pct * 100)).toFixed(1)}%`;
   }
+  requestAnimationFrame(reportHitAreas);
 }
 
-function create(tag, className, text) {
-  const node = document.createElement(tag);
+// The card is click-through: main only lets the pointer in over the pill
+// and the drag strip, so it has to be told where those currently sit.
+let lastHitKey = '';
+
+function reportHitAreas() {
+  if (!window.busy?.setHitAreas) return;
+  const canvas = el.stageCanvas?.getBoundingClientRect();
+  if (!canvas) return;
+  const scale = uiScale();
+  const pill = el.tokenPill;
+  let rect = null;
+  if (pill && !pill.hidden && pill.isConnected) {
+    const box = pill.getBoundingClientRect();
+    rect = {
+      x: Math.round(box.left),
+      y: Math.round(box.top),
+      width: Math.round(box.width),
+      height: Math.round(box.height),
+    };
+  }
+  const payload = {
+    pill: rect,
+    dragTop: Math.round(canvas.top),
+    dragBottom: Math.round(canvas.top + 28 * scale + 6),
+    ui: Number(scale.toFixed(4)),
+  };
+  const key = JSON.stringify(payload);
+  if (key === lastHitKey) return;
+  lastHitKey = key;
+  window.busy.setHitAreas(payload);
+}
+
+function setupTokenPill() {
+  const pill = el.tokenPill;
+  if (!pill || !window.busy?.setUsagePeriod) return;
+
+  let switching = false;
+
+  pill.addEventListener('click', async () => {
+    if (switching || document.body.classList.contains('settings-open')) return;
+    const enabled = cyclePeriods();
+    const current = activePeriod();
+    const next = enabled[(enabled.indexOf(current) + 1) % enabled.length] || enabled[0];
+    switching = true;
+    pill.classList.add('switching');
+    try {
+      const result = await window.busy.setUsagePeriod(next);
+      if (result?.usage) {
+        usageData = result.usage;
+        applyUsageTokens();
+      }
+    } catch {
+      // A failed switch leaves the pill on the window it was showing.
+    } finally {
+      switching = false;
+      pill.classList.remove('switching');
+    }
+  });
+
+  new ResizeObserver(() => requestAnimationFrame(reportHitAreas)).observe(pill);
+  requestAnimationFrame(reportHitAreas);
+}
+
+function create(tag, className, text) {  const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
@@ -382,6 +613,11 @@ function setupSettingsPanel() {
   const opacityOut = $('settingsOpacityOut');
   const gateway = $('settingsGateway');
   const gatewayHint = $('settingsGatewayHint');
+  const periodChips = [...document.querySelectorAll('#settingsPeriods .settings-chip')];
+  const metricChips = [...document.querySelectorAll('#settingsMetrics .settings-chip')];
+  const roll = $('settingsRoll');
+  const quota = $('settingsQuota');
+  const timing = $('settingsTiming');
   const pathText = $('settingsPath');
   const raw = $('settingsRaw');
   const status = $('settingsStatus');
@@ -389,22 +625,57 @@ function setupSettingsPanel() {
   let open = false;
   let busy = false;
   let closeTimer = 0;
+  // The opacity on disk, so a drag the user cancels can be put back.
+  let savedOpacity = 1;
 
   const setStatus = (text, error = false) => {
     status.textContent = text || '';
     status.classList.toggle('error', error);
   };
 
+  const pressChips = (chips, active) => {
+    for (const chip of chips) {
+      const key = chip.dataset.period || chip.dataset.metric;
+      chip.setAttribute('aria-pressed', active.has(key) ? 'true' : 'false');
+    }
+  };
+
+  for (const chip of periodChips) {
+    chip.addEventListener('click', () => {
+      const on = chip.getAttribute('aria-pressed') === 'true';
+      const onCount = periodChips.filter((item) => item.getAttribute('aria-pressed') === 'true').length;
+      // One window has to stay on, or the pill has nowhere to roll.
+      if (on && onCount <= 1) return;
+      chip.setAttribute('aria-pressed', on ? 'false' : 'true');
+    });
+  }
+
+  for (const chip of metricChips) {
+    chip.addEventListener('click', () => {
+      for (const other of metricChips) {
+        other.setAttribute('aria-pressed', other === chip ? 'true' : 'false');
+      }
+    });
+  }
+
   const fill = (data) => {
     const s = data.settings || {};
     topmost.checked = Boolean(s.topmost);
     mask.checked = Boolean(s.maskAccounts);
     checkUpdates.checked = s.checkUpdates !== false;
+    pressChips(periodChips, new Set(
+      Array.isArray(s.enabledPeriods) && s.enabledPeriods.length ? s.enabledPeriods : USAGE_PERIODS,
+    ));
+    pressChips(metricChips, new Set([String(s.pillMetric || 'total')]));
+    roll.checked = s.rollTokens !== false;
+    quota.checked = s.showQuota !== false;
+    timing.checked = s.showTiming !== false;
     opacity.value = String(Math.round((Number(s.opacity) || 1) * 100));
     opacityOut.textContent = `${opacity.value}%`;
+    savedOpacity = Math.min(1, Math.max(0.4, Number(s.opacity) || 1));
     gateway.value = s.gateway || '';
-    gateway.placeholder = `留空自动检测（当前 ${data.resolvedGateway || '127.0.0.1:3425'}）`;
-    gatewayHint.textContent = `当前连接：${data.resolvedGateway || '127.0.0.1:3425'}`;
+    gateway.placeholder = '留空自动检测';
+    gatewayHint.textContent = `当前 ${data.resolvedGateway || '127.0.0.1:3425'}`;
     pathText.textContent = data.path || '';
     raw.textContent = data.raw || '';
     if (data.version) $('settingsVersion').textContent = `v${data.version}`;
@@ -422,6 +693,8 @@ function setupSettingsPanel() {
   const close = () => {
     if (!open) return;
     open = false;
+    // A drag that was never saved goes back to what is on disk.
+    window.busy.previewOpacity?.(savedOpacity);
     document.body.classList.add('settings-closing');
     closeTimer = window.setTimeout(() => {
       pane.hidden = true;
@@ -429,6 +702,7 @@ function setupSettingsPanel() {
       $('aboutView').hidden = true;
       document.body.classList.remove('settings-open', 'settings-closing');
       document.documentElement.style.removeProperty('--base-content-h');
+      document.documentElement.style.removeProperty('--ui-pane');
     }, 260);
   };
 
@@ -436,6 +710,13 @@ function setupSettingsPanel() {
     window.clearTimeout(closeTimer);
     open = true;
     document.documentElement.style.setProperty('--base-content-h', `${Math.max(120, data.baseCardHeight || 368)}px`);
+    // The drawer is drawn at its own scale: the card's when the screen has
+    // room for it, a little less when it has to fit.
+    const paneScale = Number(data?.paneScale);
+    document.documentElement.style.setProperty(
+      '--ui-pane',
+      String(Number.isFinite(paneScale) && paneScale > 0 ? paneScale : uiScale()),
+    );
     document.body.classList.remove('settings-closing');
     pane.hidden = false;
     // Restart the drawer entrance even when it was reopened quickly.
@@ -447,12 +728,14 @@ function setupSettingsPanel() {
     pane.classList.toggle('about', about);
     $('aboutView').hidden = !about;
     pane.scrollTop = 0;
+    requestAnimationFrame(updatePaneScale);
     if (about) aboutRefresh?.();
     else load();
   };
 
   opacity.addEventListener('input', () => {
     opacityOut.textContent = `${opacity.value}%`;
+    window.busy.previewOpacity?.(Number(opacity.value) / 100);
   });
 
   form.addEventListener('submit', async (event) => {
@@ -468,6 +751,15 @@ function setupSettingsPanel() {
         opacity: Number(opacity.value) / 100,
         checkUpdates: checkUpdates.checked,
         gateway: gateway.value.trim(),
+        usagePeriod: activePeriod(),
+        enabledPeriods: periodChips
+          .filter((chip) => chip.getAttribute('aria-pressed') === 'true')
+          .map((chip) => chip.dataset.period),
+        pillMetric: (metricChips.find((chip) => chip.getAttribute('aria-pressed') === 'true')
+          || metricChips[0]).dataset.metric,
+        rollTokens: roll.checked,
+        showQuota: quota.checked,
+        showTiming: timing.checked,
       });
       if (!result?.ok) {
         setStatus(result?.error || '保存失败', true);
@@ -499,6 +791,9 @@ function setupSettingsPanel() {
     if (data?.open) show(data);
     else close();
   });
+
+  // The drawer's room changes when the window is resized with it open.
+  new ResizeObserver(() => requestAnimationFrame(updatePaneScale)).observe(pane);
 }
 
 let aboutRefresh = null;
@@ -641,8 +936,15 @@ function stopFlights() {
   flights.clear();
 }
 
-function syncFlights(routes, multi) {
-  if (reducedMotion.matches) {
+// A resize moves every anchor, so the flights already in the air have to be
+// told where the wires are now.
+function refreshFlightLegs() {
+  for (const flight of flights.values()) {
+    if (flight.active) buildFlightLegs(flight);
+  }
+}
+
+function syncFlights(routes, multi) {  if (reducedMotion.matches) {
     stopFlights();
     return;
   }
@@ -733,18 +1035,23 @@ function buildFlightLegs(flight) {
   const ar = agent.getBoundingClientRect();
   const cr = account.getBoundingClientRect();
   const hr = hub.getBoundingClientRect();
-  const ax = ar.right - sky.left;
-  const ay = ar.top - sky.top + ar.height / 2;
-  const cx = cr.left - sky.left;
-  const cy = cr.top - sky.top + cr.height / 2;
-  const hl = hr.left - sky.left;
-  const hrx = hr.right - sky.left;
-  const hy = hr.top - sky.top + hr.height / 2;
+  // getBoundingClientRect is in the scaled, screen-space pixels, while the
+  // sky's own coordinate system is the unscaled 600×400 canvas, so the
+  // offsets have to be divided back into it or the flight drifts sideways
+  // as soon as the card is scaled.
+  const s = uiScale();
+  const ax = (ar.right - sky.left) / s;
+  const ay = (ar.top - sky.top + ar.height / 2) / s;
+  const cx = (cr.left - sky.left) / s;
+  const cy = (cr.top - sky.top + cr.height / 2) / s;
+  const hl = (hr.left - sky.left) / s;
+  const hrx = (hr.right - sky.left) / s;
+  const hy = (hr.top - sky.top + hr.height / 2) / s;
 
-  const d1 = `M ${ax} ${ay} C ${ax + (hl - ax) * 0.45} ${ay}, ${hl - (hl - ax) * 0.35} ${hy}, ${hl} ${hy}`;
+  const d1 = `M ${ax - OVERSHOOT} ${ay} C ${(ax - OVERSHOOT) + (hl - (ax - OVERSHOOT)) * 0.45} ${ay}, ${hl - (hl - (ax - OVERSHOOT)) * 0.35} ${hy}, ${hl} ${hy}`;
   // through magpie, not teleporting from its left edge to its right
   const dHub = `M ${hl} ${hy} C ${hl + (hrx - hl) * 0.32} ${hy - 11}, ${hrx - (hrx - hl) * 0.32} ${hy - 11}, ${hrx} ${hy}`;
-  const d2 = `M ${hrx} ${hy} C ${hrx + (cx - hrx) * 0.35} ${hy}, ${cx - (cx - hrx) * 0.45} ${cy}, ${cx} ${cy}`;
+  const d2 = `M ${hrx} ${hy} C ${hrx + ((cx + OVERSHOOT) - hrx) * 0.35} ${hy}, ${(cx + OVERSHOOT) - ((cx + OVERSHOOT) - hrx) * 0.45} ${cy}, ${cx + OVERSHOOT} ${cy}`;
 
   const leg1 = document.createElementNS(SVG_NS, 'path');
   const legHub = document.createElementNS(SVG_NS, 'path');
@@ -763,7 +1070,18 @@ function buildFlightLegs(flight) {
   return true;
 }
 
-function flyLeg(flight, path, reverse) {
+// fade: 'in' or 'out' at the leg's own ends, so the magpie dissolves where
+// it meets the agent or the account instead of popping in and out. The
+// path runs a little past each end, so it also overshoots the target.
+const FADE_SHARE = 0.38;
+const OVERSHOOT = 16;
+
+function smoothstep(t) {
+  const x = Math.max(0, Math.min(1, t));
+  return x * x * (3 - 2 * x);
+}
+
+function flyLeg(flight, path, reverse, fade = null) {
   return new Promise((resolve) => {
     const len = path.getTotalLength();
     if (!len) {
@@ -799,7 +1117,10 @@ function flyLeg(flight, path, reverse) {
         'transform',
         `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${(flip * scale).toFixed(3)} ${scale.toFixed(3)}) rotate(${bank.toFixed(1)})`,
       );
-      flight.bird.style.opacity = '1';
+      let alpha = 1;
+      if (fade === 'in') alpha = smoothstep(raw / FADE_SHARE);
+      else if (fade === 'out') alpha = smoothstep((1 - raw) / FADE_SHARE);
+      flight.bird.style.opacity = alpha.toFixed(3);
       if (raw < 1) requestAnimationFrame(step);
       else resolve();
     };
@@ -817,20 +1138,20 @@ async function runFlight(flight) {
     }
 
     flight.bird.classList.remove('back');
-    await flyLeg(flight, flight.leg1, false);
+    await flyLeg(flight, flight.leg1, false, 'in');
     if (!flight.active) break;
     await flyLeg(flight, flight.legHub, false);
     if (!flight.active) break;
-    await flyLeg(flight, flight.leg2, false);
+    await flyLeg(flight, flight.leg2, false, 'out');
     if (!flight.active) break;
     await pause(flight.answerHold);
 
     flight.bird.classList.add('back');
-    await flyLeg(flight, flight.leg2, true);
+    await flyLeg(flight, flight.leg2, true, 'in');
     if (!flight.active) break;
     await flyLeg(flight, flight.legHub, true);
     if (!flight.active) break;
-    await flyLeg(flight, flight.leg1, true);
+    await flyLeg(flight, flight.leg1, true, 'out');
     if (!flight.active) break;
     await pause(flight.rest);
   }
@@ -943,10 +1264,7 @@ function setLiveChrome(view) {
 }
 
 function applyGateway() {
-  const address = settings.gateway || '127.0.0.1:3425';
-  el.gateway.textContent = address;
-  el.hubPort.textContent = address;
-  el.fanHubPort.textContent = address;
+  el.gateway.textContent = settings.gateway || '127.0.0.1:3425';
 }
 
 function setMulti(on) {
@@ -980,8 +1298,7 @@ function renderView(view, color = '#a18bff') {
   el.accountPlan.textContent = view.accountPlan || '';
   el.accountPlan.hidden = !view.accountPlan;
   el.accountState.textContent = view.accountState;
-  el.accountToken.textContent = view.tokenDetail || '';
-  el.accountToken.hidden = !view.tokenDetail;
+  renderAccountDetail(view);
   applyUsageTokens();
   el.providerIcon.replaceChildren(providerMark(view.providerIcon));
 
@@ -1370,6 +1687,8 @@ async function boot() {
   });
 
   new ResizeObserver(() => requestAnimationFrame(drawFanWires)).observe(el.fan);
+  new ResizeObserver(() => requestAnimationFrame(applyUiScale)).observe(el.stageArea);
+  applyUiScale();
 
   window.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && layout) window.busy.endLayout();
@@ -1383,6 +1702,7 @@ async function boot() {
   setupSettingsPanel();
   setupAbout();
   setupFirstRun();
+  setupTokenPill();
   window.busy.ready?.();
   if (data.update) renderUpdateState?.(data.update);
   if (data.firstRun) firstRunShow?.();

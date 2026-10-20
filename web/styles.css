@@ -214,6 +214,7 @@ body {
   right: 0;
   z-index: 7;
   height: 28px;
+  pointer-events: auto;
   cursor: grab;
   touch-action: none;
   user-select: none;
@@ -359,13 +360,32 @@ body.can-grab .drag-grip {
   flex-direction: column;
 }
 
-.content {
+/* The card's contents are drawn on a fixed 600×400 canvas and scaled to fit
+   whatever the window became, so text, gaps, nodes and wires all grow
+   together instead of leaving empty space. */
+.stage-area {
   position: relative;
   z-index: 1;
-  display: grid;
   flex: 0 0 var(--base-content-h, 100%);
-  height: var(--base-content-h, 100%);
   min-height: 0;
+}
+
+.stage-canvas {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 600px;
+  height: 400px;
+  transform: translate(-50%, -50%) scale(var(--ui, 1));
+  transform-origin: center center;
+  pointer-events: none;
+}
+
+.content {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
   grid-template-rows: 30px 10px 156px 8px 44px 10px 1px 10px 1fr;
   padding: 18px 20px 16px;
 }
@@ -394,10 +414,15 @@ body.can-grab .drag-grip {
   font-size: 11.5px;
 }
 
+/* The pill is a direct child of the card, not of the top bar: it has to sit
+   above the drag strip (z-index 7) to take a click, which a child of the
+   content layer (z-index 1) can never do. Its centre is the top bar row's
+   centre: 18px of content padding plus half of the 30px row. */
 .token-pill {
   position: absolute;
-  top: 50%;
+  top: 33px;
   left: 50%;
+  z-index: 8;
   display: flex;
   align-items: center;
   flex: none;
@@ -406,16 +431,55 @@ body.can-grab .drag-grip {
   margin: 0;
   padding: 0 11px 4px;
   transform: translate(-50%, -50%);
+  appearance: none;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.035);
   color: var(--muted);
+  cursor: pointer;
+  pointer-events: auto;
+  font-family: inherit;
   font-size: 9.5px;
   line-height: 16px;
   white-space: nowrap;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.token-pill:hover {
+  border-color: rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.065);
+}
+
+.token-pill:active {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.token-pill:focus-visible {
+  outline: 1px solid rgba(161, 139, 255, 0.72);
+  outline-offset: 2px;
+}
+
+.token-pill.switching .token-window {
+  color: rgba(255, 255, 255, 0.34);
 }
 
 .token-pill[hidden] {
+  display: none;
+}
+
+body.settings-open .token-pill,
+body.layout .token-pill {
+  pointer-events: none;
+}
+
+.token-window {
+  margin-left: -1px;
+  color: var(--faint);
+  font-size: 9px;
+  letter-spacing: 0.2px;
+}
+
+.token-window:empty {
   display: none;
 }
 
@@ -450,6 +514,12 @@ body.can-grab .drag-grip {
   align-items: flex-start;
   height: 21px;
   overflow: hidden;
+}
+
+.token-plain {
+  display: inline-flex;
+  height: 21px;
+  line-height: 21px;
 }
 
 .token-col {
@@ -621,7 +691,7 @@ body.can-grab .drag-grip {
   grid-template-columns:
     minmax(120px, 1fr)
     clamp(28px, 5vw, 45px)
-    minmax(100px, 124px)
+    84px
     clamp(28px, 5vw, 45px)
     minmax(150px, 1.35fr);
   align-items: center;
@@ -682,7 +752,7 @@ body.can-grab .drag-grip {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  height: 92px;
+  min-height: 100px;
 }
 
 .node {
@@ -847,14 +917,14 @@ body.can-grab .drag-grip {
   );
 }
 
-/* magpie hub */
+/* magpie hub: its logo alone, the address already sits in the top bar */
 
 .hub {
   position: relative;
   display: grid;
   place-items: center;
-  width: 124px;
-  height: 100px;
+  width: 84px;
+  height: 84px;
 }
 
 .hub-glow {
@@ -872,14 +942,12 @@ body.can-grab .drag-grip {
 
 .hub-card {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  width: 124px;
-  height: 92px;
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
   border: 1px solid rgba(255, 255, 255, 0.42);
-  border-radius: 16px;
+  border-radius: 22px;
   background: rgba(255, 255, 255, 0.035);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.1),
@@ -887,8 +955,8 @@ body.can-grab .drag-grip {
 }
 
 .bird {
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   overflow: visible;
 }
 
@@ -900,24 +968,10 @@ body.can-grab .drag-grip {
   filter: drop-shadow(0 0 8px rgba(161, 139, 255, 0.28));
 }
 
-.hub-card b {
-  margin-top: 2px;
-  font-size: 12.5px;
-  font-weight: 600;
-  line-height: 15px;
-}
-
-.hub-card small {
-  margin-top: 1px;
-  color: var(--faint);
-  font-size: 9px;
-  line-height: 11px;
-}
-
 .hub-live {
   position: absolute;
-  top: 5px;
-  right: 8px;
+  top: -3px;
+  right: -3px;
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -1078,6 +1132,54 @@ body.can-grab .drag-grip {
 
 .account-token[hidden] {
   display: none;
+}
+
+.account-quota {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 13px;
+  margin: 3px 0 0 13px;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 8.5px;
+  line-height: 12px;
+  white-space: nowrap;
+}
+
+.account-quota[hidden] {
+  display: none;
+}
+
+.account-quota-bar {
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.account-quota-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #61d7e7, #b1a7ff);
+  transition: width 0.35s ease;
+}
+
+.account-quota.low {
+  color: #f1c66b;
+}
+
+.account-quota.low .account-quota-bar > i {
+  background: linear-gradient(90deg, #f1c66b, #f2a98b);
+}
+
+.account-quota span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .fan .account-token {
@@ -1392,18 +1494,20 @@ body.can-grab .drag-grip {
   position: absolute;
   left: 50%;
   top: 50%;
+  width: 76px;
+  height: 76px;
   transform: translate(-50%, -50%);
 }
 
 .fan-hub .hub-card {
-  width: 96px;
-  height: 96px;
-  border-radius: 26px;
+  width: 76px;
+  height: 76px;
+  border-radius: 22px;
 }
 
 .fan-hub .bird {
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
 }
 
 .fan-wire-path {
@@ -1831,8 +1935,20 @@ body.noanim *::after {
 /* ── settings drawer, expanded below the card ─────────────────────────── */
 
 body.settings-open .drag-bar,
-body.settings-open .resize-handle {
+body.settings-open .resize-n,
+body.settings-open .resize-s,
+body.settings-open .resize-nw,
+body.settings-open .resize-ne,
+body.settings-open .resize-sw,
+body.settings-open .resize-se {
   display: none;
+}
+
+/* The drawer sits above the card, so the two side handles are lifted over
+   it: the window edges stay grabbable along their whole height. */
+body.settings-open .resize-e,
+body.settings-open .resize-w {
+  z-index: 21;
 }
 
 body.settings-open .content {
@@ -1842,16 +1958,55 @@ body.settings-open .content {
 .settings-pane {
   position: relative;
   z-index: 20;
-  display: flex;
   flex: 1 1 auto;
-  flex-direction: column;
   min-height: 0;
-  padding: 13px 20px 12px;
-  overflow: auto;
+  overflow: hidden;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   background:
     radial-gradient(100% 80% at 100% 0%, rgba(67, 54, 110, 0.18), transparent 60%),
     rgba(10, 10, 16, 0.6);
+}
+
+/* The drawer is drawn at the card's scale too, so its type and controls
+   match what the card above shows instead of staying tiny in a big window. */
+.settings-inner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  width: calc(100% / var(--ui-pane, 1));
+  height: calc(100% / var(--ui-pane, 1));
+  padding: 13px 20px 12px;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  transform: scale(var(--ui-pane, 1));
+  transform-origin: top left;
+}
+
+.settings-inner::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.settings-inner::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.settings-inner::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.settings-inner::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.settings-inner::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .settings-pane[hidden] {
@@ -1915,12 +2070,12 @@ body.settings-open .content {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 9px;
+  gap: 7px;
   min-height: 0;
 }
 
 .settings-group {
-  padding: 9px 11px;
+  padding: 8px 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 11px;
   background: rgba(255, 255, 255, 0.025);
@@ -1944,8 +2099,98 @@ body.settings-open .content {
   cursor: pointer;
 }
 
-.settings-switch + .settings-switch {
+/* Every row below a group's heading shares one hairline; the heading
+   itself never carries one. */
+.settings-group > :not(h3) + :not(h3) {
   border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 34px;
+}
+
+.settings-row b {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.settings-row small {
+  display: block;
+  margin-top: 1px;
+  color: var(--faint);
+  font-size: 9px;
+}
+
+.settings-row .settings-input {
+  flex: none;
+  width: 240px;
+}
+
+.settings-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 38px;
+}
+
+.settings-caption {
+  min-width: 0;
+}
+
+.settings-caption b {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.settings-caption small {
+  display: block;
+  margin-top: 1px;
+  color: var(--faint);
+  font-size: 9px;
+}
+
+.settings-chips {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.settings-chip {
+  padding: 3px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 9.5px;
+  line-height: 16px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.settings-chip:hover {
+  border-color: rgba(255, 255, 255, 0.24);
+  color: var(--ink);
+}
+
+.settings-chip[aria-pressed="true"] {
+  border-color: rgba(161, 139, 255, 0.55);
+  background: rgba(161, 139, 255, 0.18);
+  color: var(--ink);
+}
+
+.settings-chip:focus-visible {
+  outline: 1px solid rgba(161, 139, 255, 0.7);
+  outline-offset: 1px;
 }
 
 .settings-switch b {
