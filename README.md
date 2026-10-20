@@ -76,7 +76,7 @@ macOS 构建默认**未签名、未公证**；首次打开如果被 Gatekeeper �
 xattr -dr com.apple.quarantine "/Applications/Busy Magpie.app"
 ```
 
-跨平台打包由 [`.github/workflows/build.yml`](./.github/workflows/build.yml) 分别在 `windows-latest` 和 `macos-latest` 上完成。
+当前 CI 在 `windows-latest` 上构建 Windows 安装包；macOS 的构建配置仍然保留，需要时在 [`.github/workflows/build.yml`](./.github/workflows/build.yml) 里重新启用 `macos-latest` 任务。
 
 ## 交互
 
