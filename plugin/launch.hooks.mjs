@@ -246,12 +246,29 @@ async function installApp() {
 // window from an exited process: hidden still writes, exited goes stale.
 const ALIVE_MS = 30000;
 
-function heartbeatPath() {
+function supportDir() {
   if (process.platform === 'win32') {
     const roaming = process.env.APPDATA || path.join(homedir(), 'AppData', 'Roaming');
-    return path.join(roaming, 'Busy Magpie', 'alive');
+    return path.join(roaming, 'Busy Magpie');
   }
-  return path.join(homedir(), 'Library', 'Application Support', 'Busy Magpie', 'alive');
+  return path.join(homedir(), 'Library', 'Application Support', 'Busy Magpie');
+}
+
+function heartbeatPath() {
+  return path.join(supportDir(), 'alive');
+}
+
+// How the user asked for updates: 'idle' (when quiet), 'notice' (only tell
+// them) or 'never'. Read from the app's own settings, which is where the
+// switch lives.
+function updateMode() {
+  try {
+    const raw = JSON.parse(readFileSync(path.join(supportDir(), 'settings.json'), 'utf8'));
+    const mode = String(raw?.updateMode || '').toLowerCase();
+    return ['idle', 'notice', 'never'].includes(mode) ? mode : 'idle';
+  } catch {
+    return 'idle';
+  }
 }
 
 // 'unknown' is an app older than the heartbeat: only the launched flag then.
@@ -292,6 +309,11 @@ function ensureApp() {
 
   const existing = findApp();
   if (existing) {
+    const mode = updateMode();
+    if (mode === 'never') {
+      spawnApp(existing);
+      return;
+    }
     checking = true;
     getRelease()
       .then(async (release) => {
@@ -305,13 +327,23 @@ function ensureApp() {
 
         if (appRunning()) {
           console.warn(`[busy-magpie] ${current} -> ${target} available; app is running`);
-          // Not while someone is watching: the swap waits for a quiet five
-          // minutes, then quits the card, installs and starts it again.
-          pendingUpdate = target;
-          if (notifiedUpdate !== target) {
+          if (mode === 'idle') {
+            // Not while someone is watching: the swap waits for a quiet five
+            // minutes, then quits the card, installs and starts it again.
+            pendingUpdate = target;
+            if (notifiedUpdate !== target) {
+              notifiedUpdate = target;
+              notify('Busy Magpie', `发现 ${target}，空闲几分钟后自动更新`);
+            }
+          } else if (notifiedUpdate !== target) {
             notifiedUpdate = target;
-            notify('Busy Magpie', `发现 ${target}，空闲几分钟后自动更新`);
+            notify('Busy Magpie', `发现 ${target}，可在「关于」里更新`);
           }
+          spawnApp(existing);
+          return;
+        }
+
+        if (mode !== 'idle') {
           spawnApp(existing);
           return;
         }
@@ -378,6 +410,10 @@ const IDLE_MS = 5 * 60 * 1000;
 
 async function applyPendingUpdate() {
   if (!pendingUpdate || installing || checking) return;
+  if (updateMode() !== 'idle') {
+    pendingUpdate = '';
+    return;
+  }
   if (Date.now() - lastRequest < IDLE_MS) return;
   if (!appRunning()) return; // the next launch's check installs it
 

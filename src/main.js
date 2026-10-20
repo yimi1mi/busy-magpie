@@ -119,6 +119,7 @@ function defaults() {
     height: HEIGHT,
     gateway: null,
     checkUpdates: true,
+    updateMode: 'idle',
     skippedUpdate: '',
     usagePeriod: '30d',
     enabledPeriods: [...USAGE_PERIODS],
@@ -157,6 +158,14 @@ function normalizeMetric(value) {
   return PILL_METRICS.includes(metric) ? metric : 'total';
 }
 
+// How the desktop app takes a newer release: on idle, only after the user
+// asks, or not at all.
+const UPDATE_MODES = ['idle', 'notice', 'never'];
+
+function normalizeUpdateMode(value) {
+  const mode = String(value || '').toLowerCase();
+  return UPDATE_MODES.includes(mode) ? mode : 'idle';
+}
 // A stored size is snapped back to the card's shape, within the allowed
 // range, so a window saved before the shape was enforced still fits.
 function normalizeSize(width) {
@@ -196,6 +205,9 @@ function loadSettings() {
       hotkey: String(parsed.hotkey || DEFAULT_HOTKEY).trim(),
       hotkeyOn: parsed.hotkeyOn !== false,
       autostart: parsed.autostart === true,
+      // An old install only had the on/off check: it means `never'' now.
+      updateMode: normalizeUpdateMode(parsed.updateMode ?? (parsed.checkUpdates === false ? 'never' : 'idle')),
+      checkUpdates: normalizeUpdateMode(parsed.updateMode ?? (parsed.checkUpdates === false ? 'never' : 'idle')) !== 'never',
     };
   } catch {
     return defaults();
@@ -397,6 +409,7 @@ function publicSettings() {
     opacity: settings.opacity,
     gateway: displayAddress(resolveGateway()),
     keepAlive: settings.keepAlive !== false,
+    updateMode: settings.updateMode,
     usagePeriod: settings.usagePeriod,
     enabledPeriods: settings.enabledPeriods,
     pillMetric: settings.pillMetric,
@@ -592,7 +605,7 @@ function notifyUpdate() {
 
 async function checkForUpdates(manual = false) {
   if (updateState.checking) return updateView();
-  if (!manual && settings.checkUpdates === false) return updateView();
+  if (!manual && normalizeUpdateMode(settings.updateMode) === 'never') return updateView();
   updateState.checking = true;
   updateState.error = '';
   sendUpdateState();
@@ -1593,9 +1606,8 @@ ipcMain.handle('settings:save', (_event, input) => {
       gateway: nextGateway,
       width,
       height,
-      checkUpdates: data.checkUpdates === undefined
-        ? settings.checkUpdates !== false
-        : Boolean(data.checkUpdates),
+      checkUpdates: normalizeUpdateMode(data.updateMode ?? settings.updateMode) !== 'never',
+      updateMode: normalizeUpdateMode(data.updateMode ?? settings.updateMode),
       usagePeriod: nextPeriod,
       enabledPeriods: nextPeriods,
       pillMetric: normalizeMetric(data.pillMetric ?? settings.pillMetric),

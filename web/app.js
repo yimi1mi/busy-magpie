@@ -584,7 +584,7 @@ function setupSettingsPanel() {
   const form = $('settingsForm');
   const topmost = $('settingsTopmost');
   const mask = $('settingsMask');
-  const checkUpdates = $('settingsCheckUpdates');
+  const updateChips = [...document.querySelectorAll('#settingsUpdate .settings-chip')];
   const opacity = $('settingsOpacity');
   const opacityOut = $('settingsOpacityOut');
   const gateway = $('settingsGateway');
@@ -612,7 +612,7 @@ function setupSettingsPanel() {
 
   const pressChips = (chips, active) => {
     for (const chip of chips) {
-      const key = chip.dataset.period || chip.dataset.metric;
+      const key = chip.dataset.period || chip.dataset.metric || chip.dataset.update;
       chip.setAttribute('aria-pressed', active.has(key) ? 'true' : 'false');
     }
   };
@@ -635,11 +635,19 @@ function setupSettingsPanel() {
     });
   }
 
+  for (const chip of updateChips) {
+    chip.addEventListener('click', () => {
+      for (const other of updateChips) {
+        other.setAttribute('aria-pressed', other === chip ? 'true' : 'false');
+      }
+    });
+  }
+
   const fill = (data) => {
     const s = data.settings || {};
     topmost.checked = Boolean(s.topmost);
     mask.checked = Boolean(s.maskAccounts);
-    checkUpdates.checked = s.checkUpdates !== false;
+    pressChips(updateChips, new Set([String(s.updateMode || 'idle')]));
     pressChips(periodChips, new Set(
       Array.isArray(s.enabledPeriods) && s.enabledPeriods.length ? s.enabledPeriods : USAGE_PERIODS,
     ));
@@ -718,7 +726,8 @@ function setupSettingsPanel() {
         topmost: topmost.checked,
         maskAccounts: mask.checked,
         opacity: Number(opacity.value) / 100,
-        checkUpdates: checkUpdates.checked,
+        updateMode: (updateChips.find((chip) => chip.getAttribute('aria-pressed') === 'true')
+          || updateChips[0]).dataset.update,
         gateway: gateway.value.trim(),
         usagePeriod: activePeriod(),
         enabledPeriods: periodChips

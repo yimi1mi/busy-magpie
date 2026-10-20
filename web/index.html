@@ -248,10 +248,14 @@
                     </label>
                   </div>
                   <div class="settings-duo">
-                    <label class="settings-switch">
-                      <span><b>启动检查更新</b><small>只检查应用</small></span>
-                      <input type="checkbox" id="settingsCheckUpdates">
-                    </label>
+                    <div class="settings-chiprow">
+                      <span class="settings-chiprow-label"><b>更新</b></span>
+                      <div class="settings-chips" id="settingsUpdate" role="group" aria-label="更新方式">
+                        <button type="button" class="settings-chip" data-update="idle" aria-pressed="true">空闲</button>
+                        <button type="button" class="settings-chip" data-update="notice" aria-pressed="false">提示</button>
+                        <button type="button" class="settings-chip" data-update="never" aria-pressed="false">不检查</button>
+                      </div>
+                    </div>
                     <label class="settings-switch">
                       <span><b>保活</b><small>请求时自动拉起</small></span>
                       <input type="checkbox" id="settingsKeepAlive">
