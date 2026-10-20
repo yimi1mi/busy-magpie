@@ -51,7 +51,25 @@ if (command === 'eval') {
   });
   console.log(JSON.stringify(result.result?.value ?? result.result, null, 2));
 } else if (command === 'shot') {
-  const result = await send('Page.captureScreenshot', { format: 'png', fromSurface: true });
+  const scale = Number(process.env.CDP_SCALE || 1);
+  const size = await send('Runtime.evaluate', {
+    expression: '({ width: innerWidth, height: innerHeight })',
+    returnByValue: true,
+  });
+  const result = await send('Page.captureScreenshot', {
+    format: 'png',
+    fromSurface: true,
+    omitBackground: true,
+    ...(scale > 1 ? {
+      clip: {
+        x: 0,
+        y: 0,
+        width: size.result.value.width,
+        height: size.result.value.height,
+        scale,
+      },
+    } : {}),
+  });
   const dir = argument.split(/[\\/]/).slice(0, -1).join('/') || '.';
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(argument, Buffer.from(result.data, 'base64'));

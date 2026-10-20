@@ -16,9 +16,9 @@ from urllib.parse import parse_qs, urlparse
 START = time.time()
 SEQ = 0
 ACCOUNTS = [
-    ("codex", "openai", "OpenAI", "openai", "account", "jonny.hong91@gmail.com", "gpt-6-astra", "xhigh"),
+    ("codex", "openai", "OpenAI", "openai", "account", "alex@example.com", "gpt-6-astra", "xhigh"),
     ("dsh", "team", "team", "generic", "provider", "", "deepseek-v4-flash", "low"),
-    ("claude", "anthropic", "Anthropic", "anthropic", "account", "work@example.com", "claude-sonnet-4-5", "high"),
+    ("claude", "anthropic", "Anthropic", "anthropic", "account", "sam@example.com", "claude-sonnet-4-5", "high"),
     ("cursor", "openrouter", "OpenRouter", "openrouter", "key", "sk-or-v1-abcdefghijklmnop", "qwen3-coder", ""),
 ]
 
@@ -72,6 +72,22 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         global SEQ
         parsed = urlparse(self.path)
+        if parsed.path == "/v1/magpie/usage":
+            body = json.dumps({
+                "period": "30d",
+                "calls": 2301,
+                "errors": 4,
+                "input": 14_120_000,
+                "output": 1_650_000,
+                "cache_read": 520_000_000,
+                "cache_write": 0,
+            }).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if parsed.path not in ("/v1/magpie/trace", "/"):
             self.send_error(404)
             return
@@ -80,6 +96,7 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(2.5)
         SEQ += 1
         count = min(int(os.environ.get("MOCK_COUNT", len(ACCOUNTS))), len(ACCOUNTS))
+        start = min(int(os.environ.get("MOCK_START", "0")), len(ACCOUNTS) - count)
         payload = {
             "object": "trace",
             "now": time.strftime("%Y-%m-%dT%H:%M:%S+08:00"),
@@ -87,7 +104,7 @@ class Handler(BaseHTTPRequestHandler):
             "pid": 4242,
             "serves": "app",
             "totals": {"requests": 301, "rerouted": 2, "errors": 1},
-            "routes": [make_route(i, SEQ) for i in range(count)],
+            "routes": [make_route(start + i, SEQ) for i in range(count)],
         }
         body = json.dumps(payload, ensure_ascii=False).encode()
         self.send_response(200)
