@@ -4,11 +4,25 @@
   "version": "1.1.0",
   "description": "A transparent, click-through desktop widget for magpie's live routing, for Windows and macOS.",
   "main": "src/main.js",
+  "exports": {
+    "./server": "./plugin/server.mjs",
+    ".": "./src/main.js"
+  },
   "author": "Busy Magpie",
   "license": "MIT",
   "private": true,
+  "keywords": [
+    "magpie",
+    "magpie-plugin",
+    "electron",
+    "desktop"
+  ],
   "engines": {
     "node": ">=20"
+  },
+  "magpie": {
+    "hooks": "./plugin/launch.hooks.mjs",
+    "icon": "https://raw.githubusercontent.com/yimi1mi/busy-magpie/main/assets/icon.png"
   },
   "scripts": {
     "start": "electron .",
@@ -30,6 +44,7 @@
     "files": [
       "src/**/*",
       "web/**/*",
+      "plugin/**/*",
       "assets/**/*",
       "package.json"
     ],

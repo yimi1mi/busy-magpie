@@ -24,6 +24,28 @@ magpie 的「路由」页很好看，但它只在 magpie 自己的窗口里。Bu
 - **总 token + 逐位滚动**：读取近 30 天 usage，数字变化时向上滚动。
 - **设置直接在当前面板展开**，保存后缩回，不额外弹窗。
 
+## 作为 magpie 插件
+
+这个仓库同时是一个 **magpie 启动器插件**。安装它不会替换桌面卡片，而是在 magpie 第一次加载插件时，把已经安装的 Busy Magpie 桌面卡片启动起来：
+
+```bash
+magpie plugin add github:yimi1mi/busy-magpie
+```
+
+工作方式：
+
+- 插件入口是 `plugin/launch.hooks.mjs`，在 `package.json` 的 `magpie.hooks` 里声明。
+- magpie 第一次用到插件宿主时（通常是第一个 Agent 请求），查找已安装的 `Busy Magpie.exe` 并启动。
+- `plugin/server.mjs` 是一个空 provider stub，避免 magpie 把 Electron 主进程当成供应商插件加载。
+- 找不到时会写一条 `[busy-magpie] app not found` 日志，并给出 release 地址，不会影响当前请求。
+- 如果安装在非默认目录，设置 `BUSY_MAGPIE_APP` 指向 `Busy Magpie.exe` 后重启 magpie：
+
+```powershell
+setx BUSY_MAGPIE_APP "D:\Apps\Busy Magpie\Busy Magpie.exe"
+```
+
+插件只负责启动桌面层；透明穿透、实时 trace 和所有界面仍然由 Electron 应用提供。magpie 的插件页面运行在沙盒 iframe 里，既拿不到实时 trace，也不能创建跨应用的透明窗口，所以这里采用启动器，而不是页面插件。
+
 ## 截图
 
 ### 一个请求
@@ -256,6 +278,7 @@ web/index.html          卡片结构（含设置抽屉）
 web/app.js              渲染、SVG 虚线、飞鸟、数字滚动、设置交互
 web/presenter.js        只根据 trace 生成文案
 web/styles.css          透明卡片、布局、动效
+plugin/launch.hooks.mjs magpie 启动器插件（magpie.hooks 入口）
 assets/                 magpie 鸟标、OpenAI / DeepSeek 图标、托盘/应用图标
 tools/                  图标生成、模拟 trace、CDP 检查、Windows 打包
 ```
