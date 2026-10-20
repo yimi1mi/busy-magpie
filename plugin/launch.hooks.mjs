@@ -4,9 +4,9 @@
 // plugin is first used, and this file then starts the desktop widget if it is
 // already installed. The gateway request is always passed through untouched.
 
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, promises as fsp } from 'node:fs';
+import { existsSync, promises as fsp, readFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -16,8 +16,10 @@ const EXE = 'Busy Magpie.exe';
 
 let launched = false;
 let installing = false;
+let checking = false;
 let installTried = false;
 let warned = false;
+let releaseCache = null;
 
 function psQuote(value) {
   return String(value).replace(/'/g, "''");
@@ -124,16 +126,67 @@ function spawnApp(exe, firstInstall = false) {
   }
 }
 
-async function installApp() {
-  if (process.platform !== 'win32') return '';
-  console.log('[busy-magpie] app not installed; downloading the latest release');
-  notify('Busy Magpie', '正在下载安装包，完成后会自动打开…');
-
-  const meta = await fetch(API, {
+async function getRelease() {
+  if (releaseCache) return releaseCache;
+  const response = await fetch(API, {
     headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'busy-magpie-plugin' },
   });
-  if (!meta.ok) throw new Error(`GitHub answered ${meta.status}`);
-  const release = await meta.json();
+  if (!response.ok) throw new Error(`GitHub answered ${response.status}`);
+  releaseCache = await response.json();
+  return releaseCache;
+}
+
+function versionOf(exe) {
+  if (process.platform !== 'win32') return '';
+  // The app writes its real package version here. The PE ProductVersion can
+  // lag behind when electron-builder's rcedit pass fails, so prefer the marker.
+  try {
+    const marker = path.join(process.env.APPDATA || '', 'Busy Magpie', 'version');
+    const marked = readFileSync(marker, 'utf8').trim().replace(/^v/i, '');
+    if (marked) return marked;
+  } catch {
+    // No marker yet: this is an older install or a first run.
+  }
+  try {
+    const escaped = exe.replace(/'/g, "''");
+    const out = execFileSync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      `(Get-Item -LiteralPath '${escaped}').VersionInfo.ProductVersion`,
+    ], { encoding: 'utf8', timeout: 1500, windowsHide: true });
+    return String(out || '').trim().replace(/^v/i, '');
+  } catch {
+    return '';
+  }
+}
+
+function compareVersions(a, b) {
+  const left = String(a || '').replace(/^v/i, '').split(/[.+-]/).map((part) => Number(part) || 0);
+  const right = String(b || '').replace(/^v/i, '').split(/[.+-]/).map((part) => Number(part) || 0);
+  for (let i = 0; i < Math.max(left.length, right.length); i++) {
+    const delta = (left[i] || 0) - (right[i] || 0);
+    if (delta !== 0) return delta < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
+function appRunning() {
+  if (process.platform !== 'win32') return false;
+  try {
+    const out = execFileSync('tasklist.exe', [
+      '/FI', 'IMAGENAME eq Busy Magpie.exe', '/NH',
+    ], { encoding: 'utf8', timeout: 1200, windowsHide: true });
+    return out.toLowerCase().includes('busy magpie.exe');
+  } catch {
+    return false;
+  }
+}
+
+async function installApp() {
+  if (process.platform !== 'win32') return '';
+  console.log('[busy-magpie] downloading the latest release installer');
+  notify('Busy Magpie', '正在下载安装包，完成后会自动打开…');
+
+  const release = await getRelease();
   const asset = (release.assets || []).find((item) => (
     !/sha256/i.test(item.name) && /win-x64\.exe$/i.test(item.name)
   ));
@@ -171,12 +224,51 @@ async function installApp() {
 }
 
 function ensureApp() {
-  if (process.env.BUSY_MAGPIE_NO_LAUNCH === '1' || launched || installing) return;
+  if (process.env.BUSY_MAGPIE_NO_LAUNCH === '1' || launched || installing || checking) return;
+
   const existing = findApp();
   if (existing) {
-    spawnApp(existing);
+    checking = true;
+    getRelease()
+      .then(async (release) => {
+        const target = String(release?.tag_name || '');
+        const current = versionOf(existing);
+        if (!current || !target || compareVersions(current, target) >= 0) {
+          console.log(`[busy-magpie] installed ${current || '?'}, target ${target || '?'}`);
+          spawnApp(existing);
+          return;
+        }
+
+        if (appRunning()) {
+          console.warn(`[busy-magpie] ${current} -> ${target} available; app is running`);
+          notify('Busy Magpie', `发现 ${target}，退出 Busy Magpie 后重启插件即可更新`);
+          spawnApp(existing);
+          return;
+        }
+
+        console.log(`[busy-magpie] updating ${current} -> ${target}`);
+        notify('Busy Magpie', `发现新版本 ${target}，正在更新…`);
+        installing = true;
+        try {
+          const installed = await installApp();
+          if (installed) spawnApp(installed);
+          else spawnApp(existing);
+        } catch (error) {
+          console.warn(`[busy-magpie] update failed: ${error.message}`);
+          notify('Busy Magpie', '自动更新失败，已启动当前版本');
+          spawnApp(existing);
+        } finally {
+          installing = false;
+        }
+      })
+      .catch(() => {
+        // GitHub being unreachable must not stop an installed app from opening.
+        spawnApp(existing);
+      })
+      .finally(() => { checking = false; });
     return;
   }
+
   if (process.env.BUSY_MAGPIE_NO_INSTALL === '1' || installTried) {
     if (!warned) {
       warned = true;

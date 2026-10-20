@@ -1077,6 +1077,12 @@ function init() {
   settingsPath = path.join(app.getPath('userData'), 'settings.json');
   logPath = path.join(app.getPath('userData'), 'busy-magpie.log');
   fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+  try {
+    // The plugin compares this with the latest GitHub release before updating.
+    fs.writeFileSync(path.join(app.getPath('userData'), 'version'), app.getVersion());
+  } catch {
+    // A version marker is an optimization, never a reason not to start.
+  }
   settings = loadSettings();
 
   if (IS_MAC) app.dock.hide();
