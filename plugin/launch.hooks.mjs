@@ -29,9 +29,16 @@ function candidates() {
     if (local) {
       out.push(path.join(local, 'Programs', 'Busy Magpie', EXE));
       out.push(path.join(local, 'Programs', 'busy-magpie', EXE));
+      out.push(path.join(local, 'Programs', 'BusyMagpie', EXE));
       out.push(path.join(local, 'Busy Magpie', EXE));
     }
-    if (roaming) out.push(path.join(roaming, '..', 'Local', 'Programs', 'Busy Magpie', EXE));
+    if (roaming) {
+      // A portable copy next to the settings directory is unusual, but
+      // accepting it costs nothing after the standard per-user locations.
+      out.push(path.join(roaming, '..', 'Local', 'Programs', 'Busy Magpie', EXE));
+      out.push(path.join(roaming, 'Busy Magpie', EXE));
+      out.push(path.join(roaming, 'Programs', 'Busy Magpie', EXE));
+    }
     if (programFiles) out.push(path.join(programFiles, 'Busy Magpie', EXE));
     if (programFilesX86) out.push(path.join(programFilesX86, 'Busy Magpie', EXE));
   } else if (process.platform === 'darwin') {

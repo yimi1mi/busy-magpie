@@ -100,6 +100,36 @@ xattr -dr com.apple.quarantine "/Applications/Busy Magpie.app"
 
 当前 CI 在 `windows-latest` 上构建 Windows 安装包；macOS 的构建配置仍然保留，需要时在 [`.github/workflows/build.yml`](./.github/workflows/build.yml) 里重新启用 `macos-latest` 任务。
 
+## 安装路径
+
+Windows 安装包是 **per-user** 安装（`nsis.perMachine: false`），默认目录是：
+
+```text
+%LOCALAPPDATA%\Programs\Busy Magpie\Busy Magpie.exe
+```
+
+这是 Windows 桌面软件的常见做法：程序放 `LOCALAPPDATA\Programs`，不需要管理员权限，也不会把可执行文件放进漫游配置。安装时仍可以改到其他目录。
+
+用户配置和日志放在 **Roaming AppData**，因为它属于用户数据，不是程序本体：
+
+```text
+%APPDATA%\Busy Magpie\settings.json
+%APPDATA%\Busy Magpie\busy-magpie.log
+```
+
+**不建议**把 `.exe` 装进 `%APPDATA%`（Roaming）：域账号或开启漫游配置时，几十 MB 的 Electron 程序会被同步到每台机器，启动和登录都会变慢。也不建议默认装进 `%ProgramFiles%`，那需要 UAC 提权，升级也更麻烦。
+
+启动器插件的查找顺序：
+
+1. `BUSY_MAGPIE_APP`
+2. `%LOCALAPPDATA%\Programs\Busy Magpie`
+3. `%LOCALAPPDATA%\Programs\busy-magpie` / `BusyMagpie`
+4. `%LOCALAPPDATA%\Busy Magpie`
+5. `%PROGRAMFILES%\Busy Magpie` / `%PROGRAMFILES(X86)%`
+6. macOS `/Applications/Busy Magpie.app`
+
+如果安装到了自定义目录，设置 `BUSY_MAGPIE_APP` 即可；默认路径下不需要配置。
+
 ## 交互
 
 ### 移动
