@@ -278,6 +278,24 @@ Codex            ┈┘              OpenAI
 - Windows：`%APPDATA%\Busy Magpie\settings.json`
 - macOS：`~/Library/Application Support/Busy Magpie/settings.json`
 
+## 窗口不见了
+
+两种情况，入口不同。
+
+**只是隐藏了**（托盘里的「隐藏桌面插件」，或者不小心点掉了）：
+
+- 按 `Ctrl+Alt+M`，全局快捷键，任何窗口在前面都能把卡片叫出来、再按一次收起；
+- 或者点一下托盘图标（Windows），双击也切换显示。
+
+快捷键在托盘菜单里可以关，组合键写在 `settings.json` 的 `hotkey`（默认 `Control+Alt+M`）。
+
+**进程退出了**（托盘的「退出」、崩溃、装更新）：快捷键跟着进程一起没了，只能从外面重新启动：
+
+- 桌面或开始菜单里的「Busy Magpie」——安装包会创建这两个快捷方式；
+- 在 magpie 里把 busy-magpie 插件**关掉再打开**（或改一次「选项」保存），插件重载会重新拉起桌面卡片；
+- 下一次经过网关的请求也会把它拉起来（插件在 `onRequest` 里检查）；
+- 托盘菜单打开「开机自动启动」（需要安装版），登录进系统后它自己回来。
+
 ## 更新
 
 应用和启动器插件分开更新：

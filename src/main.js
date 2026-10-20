@@ -2,6 +2,7 @@
 
 const {
   app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, screen, shell, Notification,
+  globalShortcut,
 } = require('electron');
 const fs = require('fs');
 const https = require('https');
@@ -112,6 +113,9 @@ function defaults() {
     rollTokens: true,
     showQuota: true,
     showTiming: true,
+    hotkey: 'Control+Alt+M',
+    hotkeyOn: true,
+    autostart: false,
   };
 }
 
@@ -174,6 +178,9 @@ function loadSettings() {
       rollTokens: parsed.rollTokens !== false,
       showQuota: parsed.showQuota !== false,
       showTiming: parsed.showTiming !== false,
+      hotkey: String(parsed.hotkey || DEFAULT_HOTKEY).trim(),
+      hotkeyOn: parsed.hotkeyOn !== false,
+      autostart: parsed.autostart === true,
     };
   } catch {
     return defaults();
@@ -803,6 +810,34 @@ function closeSettingsPanel() {
     refreshTrayMenu();
   }, 180);
 }
+
+// Closing the card only hides it, and on Windows the tray icon often sits in
+// the overflow flyout, so there has to be one way back that is always there:
+// a global shortcut that shows or hides the card from anywhere.
+const DEFAULT_HOTKEY = 'Control+Alt+M';
+let hotkeyOk = false;
+
+function displayHotkey() {
+  return String(settings.hotkey || DEFAULT_HOTKEY)
+    .replace(/CommandOrControl/g, IS_MAC ? 'Cmd' : 'Ctrl')
+    .replace(/Control/g, 'Ctrl')
+    .replace(/\+/g, '+');
+}
+
+function registerHotkey() {
+  globalShortcut.unregisterAll();
+  hotkeyOk = false;
+  const accelerator = String(settings.hotkey || DEFAULT_HOTKEY).trim();
+  if (settings.hotkeyOn === false || !accelerator) return;
+  try {
+    hotkeyOk = globalShortcut.register(accelerator, () => toggleVisible());
+  } catch (error) {
+    hotkeyOk = false;
+    log(`hotkey ${accelerator} not registered: ${error.message}`);
+  }
+  if (!hotkeyOk) log(`hotkey ${accelerator} is taken or invalid`);
+}
+
 function toggleVisible() {
   if (!win || win.isDestroyed()) return;
   if (win.isVisible()) {
@@ -1302,8 +1337,29 @@ function buildTrayMenu() {
 
   return Menu.buildFromTemplate([
     {
-      label: visible ? '隐藏桌面插件' : '显示桌面插件',
+      label: visible ? '隐藏桌面插件' : `显示桌面插件（${displayHotkey()}）`,
       click: toggleVisible,
+    },
+    {
+      label: `全局快捷键 ${displayHotkey()}`,
+      type: 'checkbox',
+      checked: settings.hotkeyOn !== false && hotkeyOk,
+      click: (item) => {
+        settings.hotkeyOn = item.checked;
+        saveSettings();
+        registerHotkey();
+        refreshTrayMenu();
+      },
+    },
+    {
+      label: app.isPackaged ? '开机自动启动' : '开机自动启动（需要安装版）',
+      type: 'checkbox',
+      enabled: app.isPackaged,
+      checked: settings.autostart === true,
+      click: (item) => {
+        setAutostart(item.checked);
+        refreshTrayMenu();
+      },
     },
     {
       label: '总在最前',
@@ -1365,11 +1421,52 @@ function buildTrayMenu() {
   ]);
 }
 
+// A quit is final: the card's own shortcuts are gone with the process, so
+// the only way back is something outside it — a shortcut, the plugin
+// relaunching it (it does that on load and on every request), or starting
+// with the login session.
+function setAutostart(on) {
+  settings.autostart = Boolean(on);
+  saveSettings();
+  if (!app.isPackaged) {
+    // electron.exe would be the thing started at login, not the widget.
+    log('autostart needs the installed build; the dev run ignores it');
+    return;
+  }
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: settings.autostart,
+      path: process.execPath,
+      args: [],
+    });
+  } catch (error) {
+    log(`autostart: ${error.message}`);
+  }
+}
+
+function applyAutostart() {
+  if (!app.isPackaged) return;
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: settings.autostart === true,
+      path: process.execPath,
+      args: [],
+    });
+  } catch (error) {
+    log(`autostart: ${error.message}`);
+  }
+}
+
 function createTray() {
   tray = new Tray(trayImage());
-  tray.setToolTip('Busy Magpie · magpie 路由桌面插件');
+  tray.setToolTip(`Busy Magpie · ${displayHotkey()} 显示 / 隐藏`);
   refreshTrayMenu();
   if (IS_WIN) {
+    // A single click brings the card back; double-click still toggles it.
+    tray.on('click', () => {
+      if (!win || win.isDestroyed() || win.isVisible()) return;
+      showWindow();
+    });
     tray.on('double-click', toggleVisible);
   }
 }
@@ -1387,7 +1484,9 @@ function quit() {
   clearTimeout(layoutTimer);
   clearInterval(hoverTimer);
   clearInterval(usageTimer);
-  clearInterval(updateTimer);  if (dragState) {
+  clearInterval(updateTimer);
+  globalShortcut.unregisterAll();
+  if (dragState) {
     clearInterval(dragState.timer);
     clearTimeout(dragState.max);
     dragState = null;
@@ -1413,6 +1512,7 @@ ipcMain.handle('busy:bootstrap', () => ({
   update: updateView(),
   firstRun: firstRunOpen,
   settings: publicSettings(),
+  hotkey: { accelerator: displayHotkey(), on: settings.hotkeyOn !== false, ok: hotkeyOk },
   connection,
   trace: lastTrace,
   usage: usageData,
@@ -1461,6 +1561,12 @@ ipcMain.handle('settings:save', (_event, input) => {
     const requestedPeriod = normalizePeriod(data.usagePeriod ?? settings.usagePeriod);
     const nextPeriod = nextPeriods.includes(requestedPeriod) ? requestedPeriod : nextPeriods[0];
     const periodChanged = nextPeriod !== settings.usagePeriod;
+    const nextHotkey = String(data.hotkey ?? settings.hotkey ?? DEFAULT_HOTKEY).trim();
+    const nextHotkeyOn = data.hotkeyOn === undefined
+      ? settings.hotkeyOn !== false
+      : Boolean(data.hotkeyOn);
+    const hotkeyChanged = nextHotkey !== settings.hotkey
+      || nextHotkeyOn !== (settings.hotkeyOn !== false);
 
     settings = {
       ...settings,
@@ -1485,7 +1591,10 @@ ipcMain.handle('settings:save', (_event, input) => {
       showTiming: data.showTiming === undefined
         ? settings.showTiming !== false
         : Boolean(data.showTiming),
+      hotkey: nextHotkey,
+      hotkeyOn: nextHotkeyOn,
     };
+    if (hotkeyChanged) registerHotkey();
     saveSettings();
     applyTopmost();
     if (win && !win.isDestroyed()) {
@@ -1618,6 +1727,8 @@ function init() {
 
   createWindow();
   createTray();
+  registerHotkey();
+  applyAutostart();
   watchHover();
   rebuildClient();
   usageTimer = setInterval(refreshUsage, 20000);
