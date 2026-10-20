@@ -1,0 +1,82 @@
+{
+  "name": "busy-magpie",
+  "productName": "Busy Magpie",
+  "version": "1.1.0",
+  "description": "A transparent, click-through desktop widget for magpie's live routing, for Windows and macOS.",
+  "main": "src/main.js",
+  "author": "Busy Magpie",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:win": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-win.ps1",
+    "dist:mac": "electron-builder --mac dmg zip --x64 --arm64"
+  },
+  "devDependencies": {
+    "electron": "^39.8.7",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "dev.busymagpie.widget",
+    "productName": "Busy Magpie",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "asar": true,
+    "files": [
+      "src/**/*",
+      "web/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "buildResources": "assets",
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/busy-magpie.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Busy Magpie"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.utilities",
+      "minimumSystemVersion": "12.0",
+      "icon": "assets/icon.icns",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    },
+    "dmg": {
+      "title": "Busy Magpie",
+      "backgroundColor": "#111117",
+      "window": {
+        "width": 540,
+        "height": 380
+      }
+    }
+  }
+}

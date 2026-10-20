@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta
+    http-equiv="Content-Security-Policy"
+    content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self';" />
+  <meta name="color-scheme" content="dark" />
+  <title>Busy Magpie</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="app">
+    <div class="card" id="card">
+      <div class="aurora aurora-a"></div>
+      <div class="aurora aurora-b"></div>
+      <svg class="bird-sky" id="birdSky" aria-hidden="true"></svg>
+      <div class="drag-bar" id="dragBar" title="长按拖动面板">
+        <span class="drag-grip" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+      </div>
+      <div class="resize-handle resize-n" data-resize="n"></div>
+      <div class="resize-handle resize-s" data-resize="s"></div>
+      <div class="resize-handle resize-w" data-resize="w"></div>
+      <div class="resize-handle resize-e" data-resize="e"></div>
+      <div class="resize-handle resize-nw" data-resize="nw"></div>
+      <div class="resize-handle resize-ne" data-resize="ne"></div>
+      <div class="resize-handle resize-sw" data-resize="sw"></div>
+      <div class="resize-handle resize-se" data-resize="se"></div>
+
+      <div class="content">
+        <header class="topbar">
+          <div class="live" id="live">
+            <span class="live-dot">
+              <i class="halo"></i>
+              <i class="core"></i>
+            </span>
+            <span class="live-word">路由</span>
+            <span class="dot-sep">·</span>
+            <strong id="liveState">实时</strong>
+          </div>
+          <div class="token-pill" id="tokenPill" hidden>
+            <span class="token-label" id="tokenLabel">总</span>
+            <b class="mono" id="tokenTotal">0</b>
+            <i class="token-meter"><i id="tokenMeter"></i></i>
+          </div>
+          <div class="gateway">
+            <span class="brand">MAGPIE</span>
+            <i class="brand-sep"></i>
+            <span class="mono" id="gateway">127.0.0.1:3425</span>
+          </div>
+        </header>
+
+        <main class="stage">
+          <section class="node agent" id="agentNode">
+            <div class="agent-icon" id="agentGlyph">&gt;_</div>
+            <div class="agent-copy">
+              <div class="agent-line">
+                <i class="status-dot good" id="agentDot"></i>
+                <b id="agentName">Codex</b>
+              </div>
+              <div class="mono model" id="agentModel">gpt-6-astra</div>
+            </div>
+          </section>
+
+          <div class="wire" id="wireIn" aria-hidden="true">
+            <i class="spark"></i>
+          </div>
+
+          <section class="hub" id="hub">
+            <div class="hub-glow"></div>
+            <div class="hub-card">
+              <svg class="bird" viewBox="0 0 44 44" aria-hidden="true">
+                <path id="birdPath" fill-rule="evenodd"></path>
+              </svg>
+              <b>magpie</b>
+              <small class="mono" id="hubPort">127.0.0.1:3425</small>
+            </div>
+            <i class="hub-live"></i>
+          </section>
+
+          <div class="wire" id="wireOut" aria-hidden="true">
+            <i class="spark"></i>
+          </div>
+
+          <section class="node account" id="accountNode">
+            <div class="account-top">
+              <i class="status-dot good" id="accountDot"></i>
+              <span class="provider-icon" id="providerIcon"></span>
+              <b class="account-name" id="accountName">Codex's own sign-in</b>
+            </div>
+            <div class="account-mid">
+              <span class="mono model-chip" id="accountModel">gpt-6-astra</span>
+              <span class="plan" id="accountPlan"></span>
+            </div>
+            <div class="account-state">
+              <i class="status-dot accent" id="accountStateDot"></i>
+              <span id="accountState">回答中…</span>
+            </div>
+            <div class="account-token mono" id="accountToken" hidden></div>
+          </section>
+        </main>
+
+        <section class="lanes" id="lanes">
+          <div class="lanes-head">
+            <span class="lanes-title">
+              <i class="lanes-dot"></i>
+              <b id="lanesTitle">多个 Agent 正在执行</b>
+            </span>
+            <span class="lanes-sub" id="lanesSub">各自选择账号</span>
+          </div>
+          <div class="fan" id="fan">
+            <svg class="fan-wires" id="fanWires" aria-hidden="true"></svg>
+            <div class="fan-side fan-left" id="fanAgents"></div>
+            <div class="hub fan-hub" id="fanHub">
+              <div class="hub-glow"></div>
+              <div class="hub-card">
+                <svg class="bird" viewBox="0 0 44 44" aria-hidden="true">
+                  <path id="fanBirdPath" fill-rule="evenodd"></path>
+                </svg>
+                <b>magpie</b>
+                <small class="mono" id="fanHubPort">127.0.0.1:3425</small>
+              </div>
+              <i class="hub-live"></i>
+            </div>
+            <div class="fan-side fan-right" id="fanAccounts"></div>
+          </div>
+        </section>
+
+        <section class="summary">
+          <p class="caption" id="caption"></p>
+          <div class="stats">
+            <div class="stat">
+              <b id="statRequests">0</b>
+              <span>请求</span>
+            </div>
+            <i class="stat-rule"></i>
+            <div class="stat">
+              <b id="statRerouted">0</b>
+              <span>改道</span>
+            </div>
+            <i class="stat-rule"></i>
+            <div class="stat wide">
+              <b id="statErrors">0</b>
+              <span>Agent 收到的错误</span>
+            </div>
+          </div>
+        </section>
+
+        <div class="rule"></div>
+
+        <section class="latest">
+          <div class="latest-head">
+            <span>最近一个请求是怎么路由的</span>
+            <time class="mono" id="storyTime"></time>
+          </div>
+          <ol class="story">
+            <li id="storyRow1">
+              <span class="bullet-wrap"><i class="bullet"></i></span>
+              <p id="story1"></p>
+            </li>
+            <li id="storyRow2">
+              <span class="bullet-wrap"><i class="bullet"></i></span>
+              <p id="story2"></p>
+            </li>
+            <li id="storyRow3">
+              <span class="bullet-wrap"><i class="halo"></i><i class="bullet"></i></span>
+              <p id="story3"></p>
+            </li>
+          </ol>
+          <footer class="footer">
+            <span>网关实时 trace · 本地读取</span>
+            <span class="footer-sep"></span>
+            <span>鼠标点击穿透</span>
+          </footer>
+        </section>
+
+        <footer class="multi-footer" id="multiFooter">
+          <span>网关实时 trace · 所有进行中的请求</span>
+          <span class="footer-sep"></span>
+          <span>鼠标点击穿透</span>
+        </footer>
+      </div>
+    </div>
+
+    <div class="layout-overlay" id="layoutOverlay">
+      <div class="layout-copy">
+        <b>拖动这张卡片到合适的位置</b>
+        <span>按 Esc 完成 · 完成后鼠标点击会继续穿透</span>
+      </div>
+    </div>
+  </div>
+
+  <svg width="0" height="0" class="svg-defs" aria-hidden="true">
+    <symbol id="openaiMark" viewBox="0 0 24 24">
+      <path id="openaiPath"></path>
+    </symbol>
+    <symbol id="deepseekMark" viewBox="0 0 24 24">
+      <path id="deepseekPath"></path>
+    </symbol>
+  </svg>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
