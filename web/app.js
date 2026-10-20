@@ -594,6 +594,7 @@ function setupSettingsPanel() {
   const roll = $('settingsRoll');
   const quota = $('settingsQuota');
   const timing = $('settingsTiming');
+  const keepAlive = $('settingsKeepAlive');
   const pathText = $('settingsPath');
   const raw = $('settingsRaw');
   const status = $('settingsStatus');
@@ -646,13 +647,16 @@ function setupSettingsPanel() {
     roll.checked = s.rollTokens !== false;
     quota.checked = s.showQuota !== false;
     timing.checked = s.showTiming !== false;
+    keepAlive.checked = s.keepAlive !== false;
     opacity.value = String(Math.round((Number(s.opacity) || 1) * 100));
     opacityOut.textContent = `${opacity.value}%`;
     savedOpacity = Math.min(1, Math.max(0.4, Number(s.opacity) || 1));
     gateway.value = s.gateway || '';
     gateway.placeholder = '留空自动检测';
     gatewayHint.textContent = `当前 ${data.resolvedGateway || '127.0.0.1:3425'}`;
-    pathText.textContent = data.path || '';
+    if (pathText) pathText.textContent = data.path || '';
+    const openFile = $('settingsOpenFile');
+    if (openFile && data.path) openFile.title = data.path;
     if (raw) raw.textContent = data.raw || '';
     if (data.version) $('settingsVersion').textContent = `v${data.version}`;
   };
@@ -725,6 +729,7 @@ function setupSettingsPanel() {
         rollTokens: roll.checked,
         showQuota: quota.checked,
         showTiming: timing.checked,
+        keepAlive: keepAlive.checked,
       });
       if (!result?.ok) {
         setStatus(result?.error || '保存失败', true);

@@ -85,6 +85,7 @@ let resizeState = null;
 let hoverTimer = null;
 let quitting = false;
 let positionTimer = null;
+let aliveTimer = null;
 let frame = { lanes: 1, cardHeight: 400, windowHeight: 432 };
 
 function log(message) {
@@ -95,6 +96,18 @@ function log(message) {
   }
 }
 
+// The plugin reads this to tell a hidden card from a quit one, and to know
+// whether the user wants it started again.
+function touchAlive() {
+  try {
+    fs.writeFileSync(
+      path.join(app.getPath('userData'), 'alive'),
+      JSON.stringify({ at: Date.now(), keepAlive: settings.keepAlive !== false }),
+    );
+  } catch {
+    // A heartbeat is best effort; it never stops the widget.
+  }
+}
 function defaults() {
   return {
     topmost: true,
@@ -113,6 +126,7 @@ function defaults() {
     rollTokens: true,
     showQuota: true,
     showTiming: true,
+    keepAlive: true,
     hotkey: 'Control+Alt+M',
     hotkeyOn: true,
     autostart: false,
@@ -178,6 +192,7 @@ function loadSettings() {
       rollTokens: parsed.rollTokens !== false,
       showQuota: parsed.showQuota !== false,
       showTiming: parsed.showTiming !== false,
+      keepAlive: parsed.keepAlive !== false,
       hotkey: String(parsed.hotkey || DEFAULT_HOTKEY).trim(),
       hotkeyOn: parsed.hotkeyOn !== false,
       autostart: parsed.autostart === true,
@@ -381,6 +396,7 @@ function publicSettings() {
     topmost: settings.topmost,
     opacity: settings.opacity,
     gateway: displayAddress(resolveGateway()),
+    keepAlive: settings.keepAlive !== false,
     usagePeriod: settings.usagePeriod,
     enabledPeriods: settings.enabledPeriods,
     pillMetric: settings.pillMetric,
@@ -1486,6 +1502,7 @@ function quit() {
   clearInterval(usageTimer);
   clearInterval(updateTimer);
   globalShortcut.unregisterAll();
+  clearInterval(aliveTimer);
   if (dragState) {
     clearInterval(dragState.timer);
     clearTimeout(dragState.max);
@@ -1591,6 +1608,9 @@ ipcMain.handle('settings:save', (_event, input) => {
       showTiming: data.showTiming === undefined
         ? settings.showTiming !== false
         : Boolean(data.showTiming),
+      keepAlive: data.keepAlive === undefined
+        ? settings.keepAlive !== false
+        : Boolean(data.keepAlive),
       hotkey: nextHotkey,
       hotkeyOn: nextHotkeyOn,
     };
@@ -1729,6 +1749,8 @@ function init() {
   createTray();
   registerHotkey();
   applyAutostart();
+  touchAlive();
+  aliveTimer = setInterval(touchAlive, 10000);
   watchHover();
   rebuildClient();
   usageTimer = setInterval(refreshUsage, 20000);

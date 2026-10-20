@@ -185,7 +185,6 @@
             <header class="settings-head">
               <div>
                 <b>设置 <em class="settings-version mono" id="settingsVersion">v1.2.0</em></b>
-                <span class="mono" id="settingsPath">settings.json</span>
               </div>
               <div class="settings-head-actions">
                 <button type="button" class="settings-link" id="settingsOpenFile">打开文件夹</button>
@@ -232,7 +231,10 @@
                       <button type="button" class="settings-chip" data-metric="cache" aria-pressed="false">缓存读</button>
                     </div>
                   </div>
-                </section>
+                  <label class="settings-switch">
+                    <span><b>数字滚动</b><small>关闭后直接替换</small></span>
+                    <input type="checkbox" id="settingsRoll">
+                  </label>                </section>
 
                 <section class="settings-group">
                   <div class="settings-duo">
@@ -247,15 +249,14 @@
                   </div>
                   <div class="settings-duo">
                     <label class="settings-switch">
-                      <span><b>数字滚动</b><small>关闭后直接替换</small></span>
-                      <input type="checkbox" id="settingsRoll">
-                    </label>
-                    <label class="settings-switch">
                       <span><b>启动检查更新</b><small>只检查应用</small></span>
                       <input type="checkbox" id="settingsCheckUpdates">
                     </label>
-                  </div>
-                </section>
+                    <label class="settings-switch">
+                      <span><b>保活</b><small>请求时自动拉起</small></span>
+                      <input type="checkbox" id="settingsKeepAlive">
+                    </label>
+                  </div>                </section>
 
                 <section class="settings-group">
                   <div class="settings-row">

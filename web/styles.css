@@ -2063,8 +2063,9 @@ body.settings-open .content {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
   min-height: 0;
+
   padding-right: 2px;
   overflow: auto;
   scrollbar-width: thin;
@@ -2098,7 +2099,7 @@ body.settings-open .content {
 }
 
 .settings-group {
-  padding: 7px 9px;
+  padding: 6px 9px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.025);
@@ -2120,14 +2121,6 @@ body.settings-open .content {
   text-transform: uppercase;
 }
 
-.settings-switch {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  min-height: 28px;
-  cursor: pointer;
-}
 
 /* Every row below a group's heading shares one hairline; the heading
    itself never carries one. */
@@ -2221,6 +2214,15 @@ body.settings-open .content {
 .settings-chip:focus-visible {
   outline: 1px solid rgba(161, 139, 255, 0.7);
   outline-offset: 1px;
+}
+
+.settings-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 27px;
+  cursor: pointer;
 }
 
 .settings-switch b {

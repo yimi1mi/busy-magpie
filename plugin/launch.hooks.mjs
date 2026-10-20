@@ -6,7 +6,7 @@
 
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, promises as fsp, readFileSync } from 'node:fs';
+import { existsSync, promises as fsp, readFileSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,6 +28,7 @@ function pluginVersion() {
 const PLUGIN_VERSION = pluginVersion();
 
 let launched = false;
+let lastEnsure = 0;
 let installing = false;
 let checking = false;
 let installTried = false;
@@ -237,8 +238,53 @@ async function installApp() {
   return findApp();
 }
 
+// The card touches this file while it runs, so a request can tell a hidden
+// window from an exited process: hidden still writes, exited goes stale.
+const ALIVE_MS = 30000;
+
+function heartbeatPath() {
+  if (process.platform === 'win32') {
+    const roaming = process.env.APPDATA || path.join(homedir(), 'AppData', 'Roaming');
+    return path.join(roaming, 'Busy Magpie', 'alive');
+  }
+  return path.join(homedir(), 'Library', 'Application Support', 'Busy Magpie', 'alive');
+}
+
+// 'unknown' is an app older than the heartbeat: only the launched flag then.
+// 'off' means the user switched keep-alive off, so a quit stays a quit.
+function appState() {
+  const file = heartbeatPath();
+  try {
+    const stat = statSync(file);
+    let keepAlive = true;
+    try {
+      const beat = JSON.parse(readFileSync(file, 'utf8'));
+      if (beat && beat.keepAlive === false) keepAlive = false;
+    } catch {
+      // An older heartbeat is a bare timestamp: keep-alive was always on.
+    }
+    if (!keepAlive) return 'off';
+    return Date.now() - stat.mtimeMs < ALIVE_MS ? 'alive' : 'dead';
+  } catch (error) {
+    return error?.code === 'ENOENT' ? 'unknown' : 'dead';
+  }
+}
 function ensureApp() {
-  if (process.env.BUSY_MAGPIE_NO_LAUNCH === '1' || launched || installing || checking) return;
+  if (process.env.BUSY_MAGPIE_NO_LAUNCH === '1' || installing || checking) return;
+
+  const state = appState();
+  if (state === 'alive') {
+    launched = true;
+    return;
+  }
+  if (state === 'off') return;
+  if (state === 'unknown' && launched) return;
+  // The card was quit or crashed: start it again, at most once a minute, so
+  // a burst of requests doesn't spawn a process each.
+  const now = Date.now();
+  if (now - lastEnsure < 60000) return;
+  lastEnsure = now;
+  launched = false;
 
   const existing = findApp();
   if (existing) {
