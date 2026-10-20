@@ -29,7 +29,6 @@ const el = {
   accountStateDot: $('accountStateDot'),
   accountToken: $('accountToken'),
   tokenPill: $('tokenPill'),
-  tokenLabel: $('tokenLabel'),
   tokenTotal: $('tokenTotal'),
   tokenMeter: $('tokenMeter'),
   providerIcon: $('providerIcon'),
@@ -150,6 +149,78 @@ function applyUsageTokens() {
   });
 }
 
+let tokenText = '';
+const TOKEN_DIGIT_H = 21;
+
+function staticTokenTrack(char) {
+  const track = document.createElement('span');
+  track.className = 'token-track';
+  const digit = document.createElement('span');
+  digit.className = 'token-digit';
+  digit.textContent = char;
+  track.append(digit);
+  return track;
+}
+
+function setTokenTotal(text) {
+  if (!el.tokenTotal || !text) return;
+  if (text === tokenText) return;
+  const old = tokenText;
+  tokenText = text;
+  const roll = document.createElement('span');
+  roll.className = 'token-roll';
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const col = document.createElement('span');
+    col.className = `token-col${char === '.' ? ' token-col-dot' : ''}`;
+    if (!/\d/.test(char)) {
+      col.append(staticTokenTrack(char));
+      roll.append(col);
+      continue;
+    }
+
+    const track = document.createElement('span');
+    track.className = 'token-track';
+    for (let n = 0; n < 20; n++) {
+      const digit = document.createElement('span');
+      digit.className = 'token-digit';
+      digit.textContent = String(n % 10);
+      track.append(digit);
+    }
+    col.append(track);
+    roll.append(col);
+
+    if (!old || old.length !== text.length || !/\d/.test(old[i])) {
+      track.style.transition = 'none';
+      track.style.transform = `translateY(${-Number(char) * TOKEN_DIGIT_H}px)`;
+      continue;
+    }
+    const from = Number(old[i]);
+    const to = Number(char);
+    if (from === to) {
+      track.style.transition = 'none';
+      track.style.transform = `translateY(${-to * TOKEN_DIGIT_H}px)`;
+      continue;
+    }
+    // A carry still rolls upward: 9 -> 0 goes through the repeated 0 row.
+    const target = to < from ? to + 10 : to;
+    track.style.transition = 'none';
+    track.style.transform = `translateY(${-from * TOKEN_DIGIT_H}px)`;
+    void track.offsetHeight;
+    requestAnimationFrame(() => {
+      track.style.transition = '';
+      track.style.transform = `translateY(${-target * TOKEN_DIGIT_H}px)`;
+      window.setTimeout(() => {
+        track.style.transition = 'none';
+        track.style.transform = `translateY(${-to * TOKEN_DIGIT_H}px)`;
+      }, 600);
+    });
+  }
+
+  el.tokenTotal.replaceChildren(roll);
+}
+
 function applyTokenPill({ total = 0, pct = null, title = '', label = '本次' } = {}) {
   if (!el.tokenPill) return;
   if (!total) {
@@ -157,9 +228,9 @@ function applyTokenPill({ total = 0, pct = null, title = '', label = '本次' } 
     return;
   }
   el.tokenPill.hidden = false;
-  el.tokenLabel.textContent = label;
-  el.tokenTotal.textContent = formatTokens(total);
-  el.tokenPill.title = title || `${label} ${formatTokens(total)}`;
+  const text = formatTokens(total);
+  setTokenTotal(text);
+  el.tokenPill.title = title || `${label} ${text}`;
   if (el.tokenMeter) {
     el.tokenMeter.parentElement.hidden = pct === null || pct === undefined;
     el.tokenMeter.style.width = pct === null || pct === undefined
@@ -828,9 +899,9 @@ function renderMulti(routes, totals) {
   const ordered = routes.slice().sort((a, b) => stamp(b) - stamp(a));
   const agents = new Set(ordered.map((route) => route.agent || '')).size;
   const count = ordered.length;
-  // The card and the lower half are fixed. The fan gets 138px, so more
+  // The card and the lower half are fixed. The fan gets 134px, so more
   // agents means shorter rows, not a taller window.
-  const available = 138;
+  const available = 134;
   const gap = count <= 2 ? 8 : count === 3 ? 3 : count <= 5 ? 2 : 1;
   const maxNode = count === 2 ? 65 : count === 3 ? 44 : count === 4 ? 33 : 30;
   const minNode = count >= 8 ? 12 : count >= 5 ? 14 : 18;

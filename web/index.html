@@ -39,8 +39,11 @@
             <strong id="liveState">实时</strong>
           </div>
           <div class="token-pill" id="tokenPill" hidden>
-            <span class="token-label" id="tokenLabel">总</span>
-            <b class="mono" id="tokenTotal">0</b>
+            <svg class="token-icon" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M3 11.5V8.5M8 11.5V5M13 11.5V2.5" />
+              <path d="M2.5 13.5h11" class="token-icon-base" />
+            </svg>
+            <b class="mono token-total" id="tokenTotal"></b>
             <i class="token-meter"><i id="tokenMeter"></i></i>
           </div>
           <div class="gateway">
