@@ -17,8 +17,10 @@ const IS_MAC = process.platform === 'darwin';
 const IS_WIN = process.platform === 'win32';
 const START_IN_LAYOUT = process.argv.includes('--layout');
 const START_IN_SETTINGS = process.argv.includes('--settings');
+const FIRST_INSTALL = process.env.BUSY_MAGPIE_FIRST_INSTALL === '1';
 
 let win = null;
+let firstRunOpen = FIRST_INSTALL;
 let settingsOpen = false;
 let settingsClosing = false;
 let rendererReady = false;
@@ -212,14 +214,19 @@ function createWindow() {
     win.showInactive();
     applyClickThrough();
     applyTopmost();
+    if (firstRunOpen) win.focus();
   });
 
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   win.webContents.on('before-input-event', (event, input) => {
-    if ((settingsOpen || layoutMode || dragState || resizeState)
+    if ((firstRunOpen || settingsOpen || layoutMode || dragState || resizeState)
       && input.type === 'keyDown' && input.key === 'Escape') {
-      if (settingsOpen) closeSettingsPanel();
+      if (firstRunOpen) {
+        firstRunOpen = false;
+        applyClickThrough();
+        send('magpie:first-run', false);
+      } else if (settingsOpen) closeSettingsPanel();
       else if (resizeState) endResize();
       else if (dragState) endDrag();
       else endLayout();
@@ -288,7 +295,7 @@ function applyTopmost() {
 
 function applyClickThrough() {
   if (!win || win.isDestroyed()) return;
-  if (settingsOpen || settingsClosing || layoutMode || hoverInteractive) {
+  if (firstRunOpen || settingsOpen || settingsClosing || layoutMode || hoverInteractive) {
     win.setIgnoreMouseEvents(false);
     win.setFocusable(true);
   } else {
@@ -443,7 +450,7 @@ function setHoverInteractive(value, kind = null) {
 function watchHover() {
   clearInterval(hoverTimer);
   hoverTimer = setInterval(() => {
-    if (!win || win.isDestroyed() || !win.isVisible() || settingsOpen || settingsClosing || layoutMode || dragState || resizeState) return;
+    if (!win || win.isDestroyed() || !win.isVisible() || firstRunOpen || settingsOpen || settingsClosing || layoutMode || dragState || resizeState) return;
     const point = screen.getCursorScreenPoint();
     const bounds = win.getBounds();
     const card = {
@@ -470,7 +477,7 @@ function watchHover() {
 }
 
 function startDrag() {
-  if (!win || win.isDestroyed() || settingsOpen || settingsClosing || dragState) return;
+  if (!win || win.isDestroyed() || firstRunOpen || settingsOpen || settingsClosing || dragState) return;
   const point = screen.getCursorScreenPoint();
   const [x, y] = win.getPosition();
   hoverInteractive = false;
@@ -519,7 +526,7 @@ function endDrag() {
 }
 
 function startResize(direction = 'se') {
-  if (!win || win.isDestroyed() || settingsOpen || settingsClosing || resizeState) return;
+  if (!win || win.isDestroyed() || firstRunOpen || settingsOpen || settingsClosing || resizeState) return;
   const dir = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].includes(direction)
     ? direction
     : 'se';
@@ -609,7 +616,7 @@ function endResize() {
 }
 
 function beginLayout() {
-  if (!win || win.isDestroyed() || settingsOpen || settingsClosing || layoutMode) return;
+  if (!win || win.isDestroyed() || firstRunOpen || settingsOpen || settingsClosing || layoutMode) return;
   layoutMode = true;
   if (!win.isVisible()) win.showInactive();
   win.setIgnoreMouseEvents(false);
@@ -931,6 +938,7 @@ function quit() {
 
 ipcMain.handle('busy:bootstrap', () => ({
   version: app.getVersion(),
+  firstRun: firstRunOpen,
   settings: publicSettings(),
   connection,
   trace: lastTrace,
@@ -1042,6 +1050,21 @@ ipcMain.on('busy:ready', () => {
     pendingSettings = false;
     openSettingsPanel();
   }
+});
+
+ipcMain.on('busy:first-run-dismiss', () => {
+  if (!firstRunOpen) return;
+  firstRunOpen = false;
+  applyClickThrough();
+  send('magpie:first-run', false);
+  if (win && !win.isDestroyed()) {
+    win.setFocusable(false);
+    win.blur();
+  }
+});
+
+ipcMain.on('busy:open-install-dir', () => {
+  shell.openPath(path.dirname(app.getPath('exe')));
 });
 
 ipcMain.on('busy:end-layout', () => endLayout());

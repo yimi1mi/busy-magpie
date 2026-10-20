@@ -99,12 +99,13 @@ function findApp() {
   return '';
 }
 
-function spawnApp(exe) {
+function spawnApp(exe, firstInstall = false) {
   try {
     // Electron switches to a headless Node mode when this leaks in from a
     // terminal that launched magpie. The GUI must inherit everything else.
     const env = { ...process.env };
     delete env.ELECTRON_RUN_AS_NODE;
+    if (firstInstall) env.BUSY_MAGPIE_FIRST_INSTALL = '1';
     const child = spawn(exe, [], {
       cwd: path.dirname(exe),
       env,
@@ -193,7 +194,7 @@ function ensureApp() {
     .then((installed) => {
       if (installed) {
         notify('Busy Magpie', '安装完成，正在启动桌面卡片');
-        spawnApp(installed);
+        spawnApp(installed, true);
       } else if (!warned) {
         warned = true;
         console.warn(`[busy-magpie] installed, but ${EXE} was not found`);

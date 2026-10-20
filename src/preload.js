@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld('busy', {
   settingsSave: (data) => ipcRenderer.invoke('settings:save', data),
   settingsOpenFile: () => ipcRenderer.send('settings:open-file'),
   settingsClose: () => ipcRenderer.send('settings:close'),
+  firstRunDismiss: () => ipcRenderer.send('busy:first-run-dismiss'),
+  openInstallDir: () => ipcRenderer.send('busy:open-install-dir'),
   onTrace: (callback) => {
     ipcRenderer.on('magpie:trace', (_event, data) => callback(data));
   },
@@ -56,5 +58,8 @@ contextBridge.exposeInMainWorld('busy', {
   },
   onSettingsPanel: (callback) => {
     ipcRenderer.on('magpie:settings-panel', (_event, data) => callback(data));
+  },
+  onFirstRun: (callback) => {
+    ipcRenderer.on('magpie:first-run', (_event, data) => callback(data));
   },
 });

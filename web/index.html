@@ -238,6 +238,21 @@
           </footer>
         </form>
       </section>
+
+      <div class="first-run-mask" id="firstRunMask" hidden>
+        <section class="first-run-card">
+          <span class="first-run-eyebrow">首次安装</span>
+          <h2>Busy Magpie 已安装</h2>
+          <p>这个应用由 magpie 插件自动安装。</p>
+          <p>由于 magpie 插件没有卸载回调，<b>删除插件不会删除 Busy Magpie 的可执行文件和安装目录</b>。如果不再使用，请手动卸载。</p>
+          <code>%LOCALAPPDATA%\Programs\Busy Magpie\Uninstall Busy Magpie.exe</code>
+          <p class="first-run-note">也可以在 Windows「设置 → 应用」里卸载 Busy Magpie。</p>
+          <div class="first-run-actions">
+            <button type="button" class="first-run-ghost" id="firstRunOpenDir">打开安装目录</button>
+            <button type="button" class="first-run-primary" id="firstRunDismiss">我知道了</button>
+          </div>
+        </section>
+      </div>
     </div>
 
     <div class="layout-overlay" id="layoutOverlay">

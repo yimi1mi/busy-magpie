@@ -492,6 +492,37 @@ function setupSettingsPanel() {
   });
 }
 
+function setupFirstRun() {
+  const mask = $('firstRunMask');
+  if (!mask) return;
+
+  const show = () => {
+    mask.hidden = false;
+    requestAnimationFrame(() => $('firstRunDismiss')?.focus());
+  };
+
+  const hide = () => {
+    mask.hidden = true;
+  };
+
+  $('firstRunDismiss')?.addEventListener('click', () => {
+    window.busy.firstRunDismiss();
+    hide();
+  });
+  $('firstRunOpenDir')?.addEventListener('click', () => {
+    window.busy.openInstallDir();
+  });
+
+  window.busy.onFirstRun?.((open) => {
+    if (open) show();
+    else hide();
+  });
+
+  firstRunShow = show;
+}
+
+let firstRunShow = null;
+
 function stopFlights() {
   for (const flight of flights.values()) {
     flight.active = false;
@@ -1241,7 +1272,9 @@ async function boot() {
   setupDragBar();
   setupResizeHandles();
   setupSettingsPanel();
+  setupFirstRun();
   window.busy.ready?.();
+  if (data.firstRun) firstRunShow?.();
 }
 
 boot().catch((error) => {
