@@ -47,7 +47,7 @@ setx BUSY_MAGPIE_APP "D:\Apps\Busy Magpie\Busy Magpie.exe"
 
 插件只负责启动桌面层；透明穿透、实时 trace 和所有界面仍然由 Electron 应用提供。magpie 的插件页面运行在沙盒 iframe 里，既拿不到实时 trace，也不能创建跨应用的透明窗口，所以这里采用启动器，而不是页面插件。
 
-版本号取自 `package.json` 的 `version`（当前 `v1.1.3`）：magpie 的插件列表会显示它，桌面卡片右上角也会显示同一个版本；设置面板标题同样显示版本。
+版本号取自 `package.json` 的 `version`（当前 `v1.1.4`）：magpie 的插件列表会显示它，桌面卡片右上角也会显示同一个版本；设置面板标题同样显示版本。
 
 ## 截图
 
@@ -244,6 +244,15 @@ Codex            ┈┘              OpenAI
 - Windows：`%APPDATA%\Busy Magpie\settings.json`
 - macOS：`~/Library/Application Support/Busy Magpie/settings.json`
 
+## 更新
+
+应用和启动器插件分开更新：
+
+- **桌面应用**：点卡片右上角的版本号，打开「关于 Busy Magpie」，可以检查更新、直接更新，或跳过某个版本。启动后每 24 小时自动检查一次，也可以在设置里关闭启动检查。
+- **启动器插件**：由 magpie 管理。到 magpie → Plugins → Busy Magpie 点 Update；不要在应用里直接覆盖插件文件。
+- **更新应用**：下载 release 安装包，校验 SHA-256，退出应用后静默安装并重新启动。应用正在运行时也可以从「关于」里主动更新。
+- **版本不一致没关系**：应用版本读取自 `%APPDATA%\Busy Magpie\version`，插件版本由 magpie 插件目录决定，两者可以不同。
+
 ## 网关地址
 
 按以下顺序解析：
@@ -349,5 +358,6 @@ tools/                  图标生成、模拟 trace、CDP 检查、Windows 打�
 ## License
 
 [MIT](./LICENSE)
+
 
 

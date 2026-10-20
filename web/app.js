@@ -377,6 +377,7 @@ function setupSettingsPanel() {
   const form = $('settingsForm');
   const topmost = $('settingsTopmost');
   const mask = $('settingsMask');
+  const checkUpdates = $('settingsCheckUpdates');
   const opacity = $('settingsOpacity');
   const opacityOut = $('settingsOpacityOut');
   const gateway = $('settingsGateway');
@@ -398,6 +399,7 @@ function setupSettingsPanel() {
     const s = data.settings || {};
     topmost.checked = Boolean(s.topmost);
     mask.checked = Boolean(s.maskAccounts);
+    checkUpdates.checked = s.checkUpdates !== false;
     opacity.value = String(Math.round((Number(s.opacity) || 1) * 100));
     opacityOut.textContent = `${opacity.value}%`;
     gateway.value = s.gateway || '';
@@ -423,6 +425,8 @@ function setupSettingsPanel() {
     document.body.classList.add('settings-closing');
     closeTimer = window.setTimeout(() => {
       pane.hidden = true;
+      pane.classList.remove('about');
+      $('aboutView').hidden = true;
       document.body.classList.remove('settings-open', 'settings-closing');
       document.documentElement.style.removeProperty('--base-content-h');
     }, 260);
@@ -439,8 +443,12 @@ function setupSettingsPanel() {
     void pane.offsetWidth;
     pane.style.animation = '';
     document.body.classList.add('settings-open');
+    const about = data?.mode === 'about';
+    pane.classList.toggle('about', about);
+    $('aboutView').hidden = !about;
     pane.scrollTop = 0;
-    load();
+    if (about) aboutRefresh?.();
+    else load();
   };
 
   opacity.addEventListener('input', () => {
@@ -458,6 +466,7 @@ function setupSettingsPanel() {
         topmost: topmost.checked,
         maskAccounts: mask.checked,
         opacity: Number(opacity.value) / 100,
+        checkUpdates: checkUpdates.checked,
         gateway: gateway.value.trim(),
       });
       if (!result?.ok) {
@@ -489,6 +498,101 @@ function setupSettingsPanel() {
   window.busy.onSettingsPanel((data) => {
     if (data?.open) show(data);
     else close();
+  });
+}
+
+let aboutRefresh = null;
+let renderUpdateState = null;
+
+function setupAbout() {
+  const view = $('aboutView');
+  if (!view) return;
+
+  const button = el.appVersion;
+  const dot = $('updateDot');
+  const current = $('aboutCurrent');
+  const latest = $('aboutLatest');
+  const arrow = $('aboutArrow');
+  const status = $('aboutStatus');
+  const progress = $('updateProgress');
+  const progressBar = $('updateProgressBar');
+  const update = $('aboutUpdate');
+  const check = $('aboutCheck');
+  const skip = $('aboutSkip');
+  const release = $('aboutRelease');
+  const error = $('aboutError');
+
+  const render = (data) => {
+    if (!data) return;
+    const available = Boolean(data.available && !data.skipped);
+    const pct = Math.round((Number(data.progress) || 0) * 100);
+    dot.hidden = !available;
+    current.textContent = `v${data.current || data.version || '—'}`;
+    latest.textContent = data.latest ? `v${data.latest}` : '';
+    latest.hidden = !data.latest;
+    arrow.hidden = !data.latest;
+    $('aboutPlugin').textContent = data.pluginVersion ? `v${data.pluginVersion}` : '未提供';
+
+    update.hidden = !available || data.downloading || data.installing;
+    update.textContent = `更新到 v${data.latest || ''}`;
+    skip.hidden = !available || data.downloading || data.installing;
+    check.disabled = Boolean(data.checking || data.downloading || data.installing);
+    release.hidden = !data.releaseUrl;
+
+    progress.hidden = !(data.downloading || data.installing);
+    progressBar.style.width = `${data.installing ? 100 : pct}%`;
+
+    if (data.error) {
+      status.textContent = data.error;
+      error.textContent = '可打开 GitHub Releases 手动安装。';
+    } else if (data.downloading) {
+      status.textContent = `正在下载 v${data.latest} · ${pct}%`;
+      error.textContent = '';
+    } else if (data.installing) {
+      status.textContent = '正在安装，应用会重启…';
+      error.textContent = '';
+    } else if (data.checking) {
+      status.textContent = '正在检查更新…';
+      error.textContent = '';
+    } else if (available) {
+      status.textContent = `发现新版本 v${data.latest}`;
+      error.textContent = '';
+    } else if (data.skipped) {
+      status.textContent = `已跳过 v${data.latest}，可在发布页手动安装。`;
+      error.textContent = '';
+    } else if (data.latest) {
+      status.textContent = '已是最新版本。';
+      error.textContent = '';
+    } else {
+      status.textContent = '还没有检查更新。';
+      error.textContent = '';
+    }
+  };
+
+  renderUpdateState = render;
+
+  aboutRefresh = async () => {
+    try {
+      render(await window.busy.updatesGet());
+    } catch (err) {
+      status.textContent = err?.message || '读取版本信息失败';
+    }
+  };
+
+  button?.addEventListener('click', () => window.busy.aboutOpen());
+  $('aboutClose').addEventListener('click', () => window.busy.settingsClose());
+  check.addEventListener('click', () => window.busy.updatesCheck());
+  update.addEventListener('click', () => window.busy.updatesInstall());
+  skip.addEventListener('click', () => window.busy.updatesSkip());
+  release.addEventListener('click', () => window.busy.updateOpenRelease());
+
+  window.busy.onUpdateState((data) => render(data));
+
+  window.busy.onAbout(() => {
+    const pane = $('settingsPane');
+    pane.classList.add('about');
+    view.hidden = false;
+    aboutRefresh?.();
   });
 }
 
@@ -1231,7 +1335,7 @@ async function boot() {
   applyGateway();
 
   const data = await window.busy.bootstrap();
-  if (data.version && el.appVersion) el.appVersion.textContent = `v${data.version}`;
+  if (data.version) $('appVersionText').textContent = `v${data.version}`;
   if (data.settings) settings = { ...settings, ...data.settings };
   if (data.connection) connection = data.connection;
   if (data.trace) lastTrace = data.trace;
@@ -1272,8 +1376,10 @@ async function boot() {
   setupDragBar();
   setupResizeHandles();
   setupSettingsPanel();
+  setupAbout();
   setupFirstRun();
   window.busy.ready?.();
+  if (data.update) renderUpdateState?.(data.update);
   if (data.firstRun) firstRunShow?.();
 }
 

@@ -1,9 +1,11 @@
 'use strict';
 
 const {
-  app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, screen, shell,
+  app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, screen, shell, Notification,
 } = require('electron');
 const fs = require('fs');
+const https = require('https');
+const crypto = require('crypto');
 const os = require('os');
 const path = require('path');
 
@@ -18,6 +20,9 @@ const IS_WIN = process.platform === 'win32';
 const START_IN_LAYOUT = process.argv.includes('--layout');
 const START_IN_SETTINGS = process.argv.includes('--settings');
 const FIRST_INSTALL = process.env.BUSY_MAGPIE_FIRST_INSTALL === '1';
+const PLUGIN_VERSION = process.env.BUSY_MAGPIE_PLUGIN_VERSION || '';
+const UPDATE_API = 'https://api.github.com/repos/yimi1mi/busy-magpie/releases/latest';
+const UPDATE_CHECK_MS = 24 * 60 * 60 * 1000;
 
 let win = null;
 let firstRunOpen = FIRST_INSTALL;
@@ -25,6 +30,8 @@ let settingsOpen = false;
 let settingsClosing = false;
 let rendererReady = false;
 let pendingSettings = false;
+let pendingPanelMode = 'settings';
+let currentPanelMode = 'settings';
 let settingsBaseBounds = null;
 let settingsPaneHeight = 430;
 let boundsAnimation = null;
@@ -33,6 +40,22 @@ let settings = null;
 let settingsPath = null;
 let logPath = null;
 let client = null;
+let updateTimer = null;
+let updateRelease = null;
+let updateState = {
+  checking: false,
+  available: false,
+  skipped: false,
+  downloading: false,
+  installing: false,
+  progress: 0,
+  current: app.getVersion(),
+  latest: '',
+  releaseUrl: '',
+  notes: '',
+  error: '',
+  checkedAt: 0,
+};
 let lastTrace = null;
 let usageData = null;
 let usageTimer = null;
@@ -66,6 +89,8 @@ function defaults() {
     width: WIDTH,
     height: HEIGHT,
     gateway: null,
+    checkUpdates: true,
+    skippedUpdate: '',
   };
 }
 
@@ -280,6 +305,338 @@ function publicSettings() {
   };
 }
 
+function compareVersions(a, b) {
+  const left = String(a || '').replace(/^v/i, '').split(/[.+-]/).map((part) => Number(part) || 0);
+  const right = String(b || '').replace(/^v/i, '').split(/[.+-]/).map((part) => Number(part) || 0);
+  for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
+    const delta = (left[i] || 0) - (right[i] || 0);
+    if (delta !== 0) return delta < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
+function updateView() {
+  return {
+    ...updateState,
+    current: app.getVersion(),
+    pluginVersion: PLUGIN_VERSION,
+    auto: settings.checkUpdates !== false,
+  };
+}
+
+function sendUpdateState() {
+  send('magpie:update-state', updateView());
+}
+
+function refreshUpdateAvailability() {
+  updateState.current = app.getVersion();
+  updateState.available = Boolean(
+    updateState.latest && compareVersions(updateState.current, updateState.latest) < 0,
+  );
+  updateState.skipped = Boolean(
+    updateState.latest && settings.skippedUpdate === updateState.latest,
+  );
+}
+
+function httpsJson(url, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'busy-magpie',
+      },
+    }, (response) => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        response.resume();
+        if (redirects > 4) {
+          reject(new Error('too many redirects'));
+          return;
+        }
+        httpsJson(response.headers.location, redirects + 1).then(resolve, reject);
+        return;
+      }
+      if (response.statusCode !== 200) {
+        response.resume();
+        reject(new Error(`GitHub answered ${response.statusCode}`));
+        return;
+      }
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => { body += chunk; });
+      response.on('end', () => {
+        try {
+          resolve(JSON.parse(body));
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    request.setTimeout(15000, () => request.destroy(new Error('GitHub request timed out')));
+    request.on('error', reject);
+  });
+}
+
+function httpsText(url, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, {
+      headers: { 'User-Agent': 'busy-magpie' },
+    }, (response) => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        response.resume();
+        if (redirects > 4) {
+          reject(new Error('too many redirects'));
+          return;
+        }
+        httpsText(response.headers.location, redirects + 1).then(resolve, reject);
+        return;
+      }
+      if (response.statusCode !== 200) {
+        response.resume();
+        reject(new Error(`download answered ${response.statusCode}`));
+        return;
+      }
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => { body += chunk; });
+      response.on('end', () => resolve(body));
+    });
+    request.setTimeout(15000, () => request.destroy(new Error('request timed out')));
+    request.on('error', reject);
+  });
+}
+
+function releaseFromRedirect() {
+  return new Promise((resolve, reject) => {
+    const request = https.get('https://github.com/yimi1mi/busy-magpie/releases/latest', {
+      headers: { 'User-Agent': 'busy-magpie' },
+    }, (response) => {
+      const location = response.headers.location || '';
+      response.resume();
+      const match = /\/releases\/tag\/([^/?#]+)/.exec(location);
+      const tag = match ? decodeURIComponent(match[1]) : '';
+      if (!tag) {
+        reject(new Error(`GitHub answered ${response.statusCode}`));
+        return;
+      }
+      const base = `https://github.com/yimi1mi/busy-magpie/releases/download/${tag}/`;
+      const name = `Busy.Magpie-${tag.replace(/^v/i, '')}-win-x64.exe`;
+      resolve({
+        tag_name: tag,
+        html_url: `https://github.com/yimi1mi/busy-magpie/releases/tag/${tag}`,
+        assets: [
+          { name, browser_download_url: base + name },
+          { name: `${name}.sha256`, browser_download_url: `${base}${name}.sha256` },
+        ],
+      });
+    });
+    request.setTimeout(15000, () => request.destroy(new Error('GitHub request timed out')));
+    request.on('error', reject);
+  });
+}
+
+function downloadFile(url, destination, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, {
+      headers: { 'User-Agent': 'busy-magpie' },
+    }, (response) => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        response.resume();
+        if (redirects > 4) {
+          reject(new Error('too many redirects'));
+          return;
+        }
+        downloadFile(response.headers.location, destination, redirects + 1).then(resolve, reject);
+        return;
+      }
+      if (response.statusCode !== 200) {
+        response.resume();
+        reject(new Error(`download answered ${response.statusCode}`));
+        return;
+      }
+      const total = Number(response.headers['content-length']) || 0;
+      const hash = crypto.createHash('sha256');
+      let received = 0;
+      const file = fs.createWriteStream(destination);
+      response.on('data', (chunk) => {
+        received += chunk.length;
+        hash.update(chunk);
+        file.write(chunk);
+        if (total) {
+          updateState.progress = Math.min(1, received / total);
+          sendUpdateState();
+        }
+      });
+      response.on('end', () => {
+        file.end(() => resolve({ sha256: hash.digest('hex'), size: received }));
+      });
+      response.on('error', reject);
+      file.on('error', reject);
+    });
+    request.setTimeout(30000, () => request.destroy(new Error('download timed out')));
+    request.on('error', reject);
+  });
+}
+
+function notifyUpdate() {
+  if (!Notification.isSupported()) return;
+  try {
+    new Notification({
+      title: 'Busy Magpie',
+      body: `v${updateState.latest} 可用，点卡片右上角版本号更新`,
+    }).show();
+  } catch {
+    // Notifications can be unavailable on locked-down systems.
+  }
+}
+
+async function checkForUpdates(manual = false) {
+  if (updateState.checking) return updateView();
+  if (!manual && settings.checkUpdates === false) return updateView();
+  updateState.checking = true;
+  updateState.error = '';
+  sendUpdateState();
+  try {
+    let release;
+    try {
+      release = await httpsJson(UPDATE_API);
+    } catch {
+      // The unauthenticated API is rate limited per IP; the release
+      // redirect has the tag and needs no token.
+      release = await releaseFromRedirect();
+    }
+    updateRelease = release;
+    updateState.latest = String(release.tag_name || '').replace(/^v/i, '');
+    updateState.releaseUrl = release.html_url || '';
+    updateState.notes = release.body || '';
+    updateState.checkedAt = Date.now();
+    updateState.error = '';
+    refreshUpdateAvailability();
+    if (updateState.available && !updateState.skipped && !manual
+      && updateState.latest !== lastNotifiedUpdate) {
+      lastNotifiedUpdate = updateState.latest;
+      notifyUpdate();
+    }
+  } catch (error) {
+    updateState.error = error.message || '检查更新失败';
+  } finally {
+    updateState.checking = false;
+    sendUpdateState();
+  }
+  return updateView();
+}
+
+let lastNotifiedUpdate = '';
+
+async function installUpdate() {
+  if (updateState.downloading || updateState.installing) return updateView();
+  if (process.platform !== 'win32') {
+    if (updateState.releaseUrl) shell.openExternal(updateState.releaseUrl);
+    return updateView();
+  }
+  if (!updateRelease || !updateState.available) {
+    await checkForUpdates(true);
+  }
+  if (!updateRelease || !updateState.available) return updateView();
+
+  const asset = (updateRelease.assets || []).find((item) => (
+    !/sha256/i.test(item.name) && /win-x64\.exe$/i.test(item.name)
+  ));
+  if (!asset) {
+    updateState.error = '最新版本没有 Windows 安装包';
+    sendUpdateState();
+    return updateView();
+  }
+
+  updateState.downloading = true;
+  updateState.installing = false;
+  updateState.progress = 0;
+  updateState.error = '';
+  sendUpdateState();
+
+  const destination = path.join(app.getPath('temp'), `busy-magpie-${updateState.latest}.exe`);
+  try {
+    const downloaded = await downloadFile(asset.browser_download_url, destination);
+    let expected = String(asset.digest || '').replace(/^sha256:/i, '').toLowerCase();
+    if (!expected) {
+      const checksumAsset = (updateRelease.assets || []).find((item) => (
+        item.name === `${asset.name}.sha256`
+      ));
+      if (checksumAsset?.browser_download_url) {
+        try {
+          const text = await httpsText(checksumAsset.browser_download_url);
+          expected = (text.match(/[a-f0-9]{64}/i) || [''])[0].toLowerCase();
+        } catch {
+          // The .sha256 asset is optional in the fallback path.
+        }
+      }
+    }
+    if (expected && downloaded.sha256 !== expected) {
+      throw new Error('安装包校验失败');
+    }
+
+    updateState.downloading = false;
+    updateState.installing = true;
+    updateState.progress = 1;
+    sendUpdateState();
+
+    const helper = path.join(app.getPath('temp'), 'busy-magpie-update.ps1');
+    const quote = (value) => String(value).replace(/'/g, "''");
+    fs.writeFileSync(helper, [
+      `$installer = '${quote(destination)}'`,
+      `$app = '${quote(app.getPath('exe'))}'`,
+      `Wait-Process -Id ${process.pid} -ErrorAction SilentlyContinue`,
+      "Start-Process -FilePath $installer -ArgumentList '/S' -Wait",
+      'Start-Process -FilePath $app',
+    ].join('\r\n'), 'utf8');
+
+    const child = spawnDetached('powershell.exe', [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
+      '-File', helper,
+    ]);
+    if (!child) throw new Error('无法启动安装程序');
+    setTimeout(() => app.quit(), 250);
+  } catch (error) {
+    updateState.downloading = false;
+    updateState.installing = false;
+    updateState.error = error.message || '更新失败';
+    sendUpdateState();
+    try { fs.rmSync(destination, { force: true }); } catch { /* ignore */ }
+  }
+  return updateView();
+}
+
+function spawnDetached(file, args) {
+  try {
+    const { spawn } = require('child_process');
+    const child = spawn(file, args, {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.unref();
+    return child;
+  } catch {
+    return null;
+  }
+}
+
+function skipUpdate() {
+  if (!updateState.latest) return updateView();
+  settings.skippedUpdate = updateState.latest;
+  saveSettings();
+  refreshUpdateAvailability();
+  sendUpdateState();
+  return updateView();
+}
+
+function setCheckUpdates(value) {
+  settings.checkUpdates = Boolean(value);
+  saveSettings();
+  sendUpdateState();
+  if (settings.checkUpdates) checkForUpdates(false);
+  return updateView();
+}
+
 function savePosition() {
   if (!win || win.isDestroyed()) return;
   const [x, y] = win.getPosition();
@@ -345,13 +702,23 @@ function animateBounds(from, to, duration, done) {
   step();
 }
 
-function openSettingsPanel() {
+function openSettingsPanel(mode = 'settings') {
   if (!win || win.isDestroyed()) return;
   if (!rendererReady) {
     pendingSettings = true;
+    pendingPanelMode = mode;
     return;
   }
   if (settingsOpen || settingsClosing) {
+    if (settingsOpen && mode !== currentPanelMode && settingsBaseBounds) {
+      currentPanelMode = mode;
+      send('magpie:settings-panel', {
+        open: true,
+        mode,
+        baseCardHeight: settingsBaseBounds.height - 32,
+        paneHeight: settingsPaneHeight,
+      });
+    }
     win.showInactive();
     win.focus();
     return;
@@ -376,12 +743,14 @@ function openSettingsPanel() {
 
   settingsOpen = true;
   settingsClosing = false;
+  currentPanelMode = mode;
   hoverInteractive = false;
   win.setIgnoreMouseEvents(false);
   win.setFocusable(true);
   win.focus();
   send('magpie:settings-panel', {
     open: true,
+    mode,
     baseCardHeight: settingsBaseBounds.height - 32,
     paneHeight,
   });
@@ -398,6 +767,7 @@ function closeSettingsPanel() {
   if (!settingsOpen || settingsClosing) return;
   settingsClosing = true;
   settingsOpen = false;
+  currentPanelMode = 'settings';
   const from = win && !win.isDestroyed() ? win.getBounds() : settingsBaseBounds;
   const to = settingsBaseBounds;
   send('magpie:settings-panel', { open: false });
@@ -915,6 +1285,7 @@ function quit() {
   clearTimeout(layoutTimer);
   clearInterval(hoverTimer);
   clearInterval(usageTimer);
+  clearInterval(updateTimer);
   stopBoundsAnimation();
   if (dragState) {
     clearInterval(dragState.timer);
@@ -938,6 +1309,8 @@ function quit() {
 
 ipcMain.handle('busy:bootstrap', () => ({
   version: app.getVersion(),
+  pluginVersion: PLUGIN_VERSION,
+  update: updateView(),
   firstRun: firstRunOpen,
   settings: publicSettings(),
   connection,
@@ -988,6 +1361,9 @@ ipcMain.handle('settings:save', (_event, input) => {
       gateway: nextGateway,
       width,
       height,
+      checkUpdates: data.checkUpdates === undefined
+        ? settings.checkUpdates !== false
+        : Boolean(data.checkUpdates),
     };
     saveSettings();
     applyTopmost();
@@ -1048,8 +1424,29 @@ ipcMain.on('busy:ready', () => {
   rendererReady = true;
   if (pendingSettings) {
     pendingSettings = false;
-    openSettingsPanel();
+    openSettingsPanel(pendingPanelMode);
   }
+});
+
+ipcMain.on('busy:about-open', () => {
+  if (!win || win.isDestroyed()) return;
+  if (settingsOpen) {
+    currentPanelMode = 'about';
+    win.showInactive();
+    win.focus();
+    send('magpie:about');
+    return;
+  }
+  openSettingsPanel('about');
+});
+
+ipcMain.handle('updates:get', () => updateView());
+ipcMain.handle('updates:check', () => checkForUpdates(true));
+ipcMain.handle('updates:install', () => installUpdate());
+ipcMain.handle('updates:skip', () => skipUpdate());
+ipcMain.handle('updates:set-auto', (_event, value) => setCheckUpdates(value));
+ipcMain.on('updates:open-release', () => {
+  if (updateState.releaseUrl) shell.openExternal(updateState.releaseUrl);
 });
 
 ipcMain.on('busy:first-run-dismiss', () => {
@@ -1093,6 +1490,8 @@ function init() {
   watchHover();
   rebuildClient();
   usageTimer = setInterval(refreshUsage, 20000);
+  setTimeout(() => checkForUpdates(false), 2500);
+  updateTimer = setInterval(() => checkForUpdates(false), UPDATE_CHECK_MS);
 
   if (START_IN_LAYOUT) {
     setTimeout(beginLayout, 1500);

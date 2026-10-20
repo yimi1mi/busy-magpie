@@ -9,10 +9,23 @@ import { createHash } from 'node:crypto';
 import { existsSync, promises as fsp, readFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const RELEASE = 'https://github.com/yimi1mi/busy-magpie/releases/latest';
 const API = 'https://api.github.com/repos/yimi1mi/busy-magpie/releases/latest';
 const EXE = 'Busy Magpie.exe';
+
+function pluginVersion() {
+  try {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const pkg = JSON.parse(readFileSync(path.join(here, '..', 'package.json'), 'utf8'));
+    return String(pkg.version || '');
+  } catch {
+    return '';
+  }
+}
+
+const PLUGIN_VERSION = pluginVersion();
 
 let launched = false;
 let installing = false;
@@ -107,6 +120,7 @@ function spawnApp(exe, firstInstall = false) {
     // terminal that launched magpie. The GUI must inherit everything else.
     const env = { ...process.env };
     delete env.ELECTRON_RUN_AS_NODE;
+    if (PLUGIN_VERSION) env.BUSY_MAGPIE_PLUGIN_VERSION = PLUGIN_VERSION;
     if (firstInstall) env.BUSY_MAGPIE_FIRST_INSTALL = '1';
     const child = spawn(exe, [], {
       cwd: path.dirname(exe),

@@ -50,7 +50,7 @@
             <span class="brand">MAGPIE</span>
             <i class="brand-sep"></i>
             <span class="mono" id="gateway">127.0.0.1:3425</span>
-            <span class="app-version mono" id="appVersion">v1.1.0</span>
+            <button class="app-version mono" id="appVersion" type="button" title="关于与更新"><span id="appVersionText">v1.1.0</span><i class="update-dot" id="updateDot" hidden></i></button>
           </div>
         </header>
 
@@ -210,6 +210,10 @@
               <input type="range" id="settingsOpacity" min="40" max="100" step="1" value="100">
               <output id="settingsOpacityOut">100%</output>
             </div>
+            <label class="settings-switch">
+              <span><b>启动时检查更新</b><small>只检查应用，不自动下载</small></span>
+              <input type="checkbox" id="settingsCheckUpdates">
+            </label>
           </section>
 
           <section class="settings-group">
@@ -237,6 +241,49 @@
             </div>
           </footer>
         </form>
+
+        <div class="about-view" id="aboutView" hidden>
+          <header class="about-head">
+            <div>
+              <b>关于 Busy Magpie</b>
+              <span>应用更新与版本信息</span>
+            </div>
+            <button class="settings-x" id="aboutClose" type="button" aria-label="关闭">×</button>
+          </header>
+
+          <div class="about-scroll">
+            <section class="about-block about-app">
+              <div class="about-line">
+                <span>桌面应用</span>
+                <span class="about-versions">
+                  <b class="mono" id="aboutCurrent">v—</b>
+                  <i id="aboutArrow">→</i>
+                  <b class="mono accent" id="aboutLatest" hidden></b>
+                </span>
+              </div>
+              <p class="about-status" id="aboutStatus">还没有检查更新。</p>
+              <div class="update-progress" id="updateProgress" hidden>
+                <i id="updateProgressBar"></i>
+              </div>
+              <div class="about-actions">
+                <button type="button" class="about-primary" id="aboutUpdate" hidden>更新应用</button>
+                <button type="button" class="about-ghost" id="aboutCheck">检查更新</button>
+                <button type="button" class="about-link" id="aboutSkip" hidden>跳过此版本</button>
+                <button type="button" class="about-link" id="aboutRelease" hidden>打开发布页</button>
+              </div>
+            </section>
+
+            <section class="about-block about-plugin">
+              <div class="about-line">
+                <span>启动器插件</span>
+                <b class="mono" id="aboutPlugin">v—</b>
+              </div>
+              <p>插件由 magpie 管理。需要更新启动器时，请到 magpie → Plugins → Busy Magpie 点 Update，不要在应用里直接覆盖。</p>
+            </section>
+
+            <p class="about-error" id="aboutError" role="status"></p>
+          </div>
+        </div>
       </section>
 
       <div class="first-run-mask" id="firstRunMask" hidden>

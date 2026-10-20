@@ -32,6 +32,13 @@ contextBridge.exposeInMainWorld('busy', {
   settingsClose: () => ipcRenderer.send('settings:close'),
   firstRunDismiss: () => ipcRenderer.send('busy:first-run-dismiss'),
   openInstallDir: () => ipcRenderer.send('busy:open-install-dir'),
+  aboutOpen: () => ipcRenderer.send('busy:about-open'),
+  updatesGet: () => ipcRenderer.invoke('updates:get'),
+  updatesCheck: () => ipcRenderer.invoke('updates:check'),
+  updatesInstall: () => ipcRenderer.invoke('updates:install'),
+  updatesSkip: () => ipcRenderer.invoke('updates:skip'),
+  updateAuto: (value) => ipcRenderer.invoke('updates:set-auto', value),
+  updateOpenRelease: () => ipcRenderer.send('updates:open-release'),
   onTrace: (callback) => {
     ipcRenderer.on('magpie:trace', (_event, data) => callback(data));
   },
@@ -61,5 +68,11 @@ contextBridge.exposeInMainWorld('busy', {
   },
   onFirstRun: (callback) => {
     ipcRenderer.on('magpie:first-run', (_event, data) => callback(data));
+  },
+  onUpdateState: (callback) => {
+    ipcRenderer.on('magpie:update-state', (_event, data) => callback(data));
+  },
+  onAbout: (callback) => {
+    ipcRenderer.on('magpie:about', () => callback());
   },
 });
