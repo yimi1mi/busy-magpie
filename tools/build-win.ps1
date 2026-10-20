@@ -41,6 +41,8 @@ Copy-Item (Join-Path $root 'package.json') $app -Force
 Copy-Item (Join-Path $root 'LICENSE') $app -Force
 
 $rcedit = Join-Path $root 'node_modules\electron-winstaller\vendor\rcedit.exe'
+# The exe's version comes from package.json, so a release only bumps one place.
+$version = (Get-Content (Join-Path $root 'package.json') -Raw | ConvertFrom-Json).version
 if (Test-Path $rcedit) {
     # rcedit edits the PE in place. Real-time antivirus can briefly hold the
     # freshly copied electron.exe; retry rather than failing the build.
@@ -48,8 +50,8 @@ if (Test-Path $rcedit) {
     for ($attempt = 0; $attempt -lt 8; $attempt++) {
         & $rcedit $namedExe `
             --set-icon (Join-Path $root 'assets\busy-magpie.ico') `
-            --set-file-version '1.1.0' `
-            --set-product-version '1.1.0' `
+            --set-file-version $version `
+            --set-product-version $version `
             --set-version-string 'ProductName' 'Busy Magpie' `
             --set-version-string 'FileDescription' 'Busy Magpie' `
             --set-version-string 'CompanyName' 'Busy Magpie'
