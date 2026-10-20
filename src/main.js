@@ -711,13 +711,33 @@ function openSettingsPanel(mode = 'settings') {
   }
   if (settingsOpen || settingsClosing) {
     if (settingsOpen && mode !== currentPanelMode && settingsBaseBounds) {
+      const display = screen.getDisplayNearestPoint({
+        x: settingsBaseBounds.x,
+        y: settingsBaseBounds.y,
+      });
+      const area = display.workArea;
+      const preferred = mode === 'about' ? 300 : 430;
+      const maxPane = Math.max(260, area.height - settingsBaseBounds.height - 16);
+      const paneHeight = Math.min(preferred, maxPane);
+      const height = settingsBaseBounds.height + paneHeight;
+      let y = settingsBaseBounds.y;
+      if (y + height > area.y + area.height - 8) {
+        y = Math.max(area.y + 8, area.y + area.height - height - 8);
+      }
       currentPanelMode = mode;
+      settingsPaneHeight = paneHeight;
       send('magpie:settings-panel', {
         open: true,
         mode,
         baseCardHeight: settingsBaseBounds.height - 32,
-        paneHeight: settingsPaneHeight,
+        paneHeight,
       });
+      animateBounds(win.getBounds(), {
+        x: settingsBaseBounds.x,
+        y,
+        width: settingsBaseBounds.width,
+        height,
+      }, 260);
     }
     win.showInactive();
     win.focus();
@@ -731,7 +751,7 @@ function openSettingsPanel(mode = 'settings') {
     y: settingsBaseBounds.y,
   });
   const area = display.workArea;
-  const preferred = 430;
+  const preferred = mode === 'about' ? 300 : 430;
   const maxPane = Math.max(260, area.height - settingsBaseBounds.height - 16);
   const paneHeight = Math.min(preferred, maxPane);
   settingsPaneHeight = paneHeight;

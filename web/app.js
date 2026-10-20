@@ -526,18 +526,19 @@ function setupAbout() {
     if (!data) return;
     const available = Boolean(data.available && !data.skipped);
     const pct = Math.round((Number(data.progress) || 0) * 100);
+    const showLatest = Boolean(data.latest && (available || data.skipped || data.error));
     dot.hidden = !available;
     current.textContent = `v${data.current || data.version || '—'}`;
-    latest.textContent = data.latest ? `v${data.latest}` : '';
-    latest.hidden = !data.latest;
-    arrow.hidden = !data.latest;
+    latest.textContent = showLatest ? `v${data.latest}` : '';
+    latest.hidden = !showLatest;
+    arrow.hidden = !showLatest;
     $('aboutPlugin').textContent = data.pluginVersion ? `v${data.pluginVersion}` : '未提供';
 
     update.hidden = !available || data.downloading || data.installing;
     update.textContent = `更新到 v${data.latest || ''}`;
     skip.hidden = !available || data.downloading || data.installing;
     check.disabled = Boolean(data.checking || data.downloading || data.installing);
-    release.hidden = !data.releaseUrl;
+    release.hidden = !data.releaseUrl || (!available && !data.error && !data.skipped);
 
     progress.hidden = !(data.downloading || data.installing);
     progressBar.style.width = `${data.installing ? 100 : pct}%`;
@@ -582,7 +583,11 @@ function setupAbout() {
   button?.addEventListener('click', () => window.busy.aboutOpen());
   $('aboutClose').addEventListener('click', () => window.busy.settingsClose());
   check.addEventListener('click', () => window.busy.updatesCheck());
-  update.addEventListener('click', () => window.busy.updatesInstall());
+  update.addEventListener('click', () => {
+    if (window.confirm('更新会重启 Busy Magpie，是否继续？')) {
+      window.busy.updatesInstall();
+    }
+  });
   skip.addEventListener('click', () => window.busy.updatesSkip());
   release.addEventListener('click', () => window.busy.updateOpenRelease());
 
