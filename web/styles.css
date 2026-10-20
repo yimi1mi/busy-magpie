@@ -354,12 +354,19 @@ body.can-grab .drag-grip {
   background: rgba(255, 255, 255, 0.06);
 }
 
+.card {
+  display: flex;
+  flex-direction: column;
+}
+
 .content {
   position: relative;
   z-index: 1;
   display: grid;
+  flex: 0 0 var(--base-content-h, 100%);
+  height: var(--base-content-h, 100%);
+  min-height: 0;
   grid-template-rows: 22px 10px 160px 8px 44px 10px 1px 10px 1fr;
-  height: 100%;
   padding: 18px 20px 16px;
 }
 
@@ -1765,4 +1772,303 @@ body.noanim *::after {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
   }
+}
+
+/* ── settings drawer, expanded below the card ─────────────────────────── */
+
+body.settings-open .drag-bar,
+body.settings-open .resize-handle {
+  display: none;
+}
+
+body.settings-open .content {
+  pointer-events: none;
+}
+
+.settings-pane {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  padding: 13px 20px 12px;
+  overflow: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background:
+    radial-gradient(100% 80% at 100% 0%, rgba(67, 54, 110, 0.18), transparent 60%),
+    rgba(10, 10, 16, 0.6);
+}
+
+.settings-pane[hidden] {
+  display: none;
+}
+
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  gap: 12px;
+  padding-bottom: 9px;
+}
+
+.settings-head b {
+  display: block;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.settings-head span {
+  display: block;
+  max-width: 460px;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 8.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-x {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.settings-x:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.settings-form {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 9px;
+  min-height: 0;
+}
+
+.settings-group {
+  padding: 9px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.settings-group h3 {
+  margin: 0 0 6px;
+  color: var(--faint);
+  font-size: 8.5px;
+  font-weight: 650;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.settings-switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 30px;
+  cursor: pointer;
+}
+
+.settings-switch + .settings-switch {
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.settings-switch b {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.settings-switch small {
+  display: block;
+  margin-top: 1px;
+  color: var(--faint);
+  font-size: 9px;
+}
+
+.settings-switch input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.settings-opacity {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.settings-opacity span {
+  flex: none;
+  width: 58px;
+}
+
+.settings-opacity b {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.settings-opacity input {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.settings-opacity output {
+  width: 34px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  text-align: right;
+}
+
+.settings-input {
+  width: 100%;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  outline: none;
+  background: rgba(0, 0, 0, 0.24);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+
+.settings-input:focus {
+  border-color: rgba(161, 139, 255, 0.65);
+  box-shadow: 0 0 0 3px rgba(161, 139, 255, 0.12);
+}
+
+.settings-input::placeholder {
+  color: #5d5a6b;
+}
+
+.settings-hint {
+  display: block;
+  margin-top: 5px;
+  color: var(--faint);
+  font-size: 9px;
+  line-height: 13px;
+}
+
+.settings-file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--faint);
+  font-size: 9.5px;
+}
+
+.settings-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 9.5px;
+  cursor: pointer;
+}
+
+.settings-link:hover {
+  text-decoration: underline;
+}
+
+.settings-raw-box {
+  margin-top: 6px;
+}
+
+.settings-raw-box summary {
+  color: var(--faint);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.settings-raw-box pre {
+  max-height: 96px;
+  margin: 6px 0 0;
+  overflow: auto;
+  padding: 7px 8px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.25);
+  color: #b9b4cc;
+  font-family: var(--mono);
+  font-size: 8.5px;
+  line-height: 12px;
+  white-space: pre-wrap;
+}
+
+.settings-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex: none;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+.settings-status {
+  color: var(--green);
+  font-size: 9.5px;
+}
+
+.settings-status.error {
+  color: var(--red);
+}
+
+.settings-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.settings-ghost,
+.settings-save {
+  height: 27px;
+  padding: 0 11px;
+  border-radius: 7px;
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.settings-ghost {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+}
+
+.settings-ghost:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.settings-save {
+  border: 1px solid rgba(161, 139, 255, 0.6);
+  background: linear-gradient(180deg, #9c86ff, #7f68e8);
+  color: #fff;
+  font-weight: 600;
+}
+
+.settings-save:hover {
+  filter: brightness(1.07);
+}
+
+.settings-save:disabled {
+  opacity: 0.55;
+  cursor: wait;
 }

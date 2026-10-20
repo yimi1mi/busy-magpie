@@ -299,6 +299,116 @@ function setupResizeHandles() {
   });
 }
 
+function setupSettingsPanel() {
+  const pane = $('settingsPane');
+  if (!pane || !window.busy?.settingsGet) return;
+  const form = $('settingsForm');
+  const topmost = $('settingsTopmost');
+  const mask = $('settingsMask');
+  const opacity = $('settingsOpacity');
+  const opacityOut = $('settingsOpacityOut');
+  const gateway = $('settingsGateway');
+  const gatewayHint = $('settingsGatewayHint');
+  const pathText = $('settingsPath');
+  const raw = $('settingsRaw');
+  const status = $('settingsStatus');
+  const save = $('settingsSave');
+  let open = false;
+  let busy = false;
+
+  const setStatus = (text, error = false) => {
+    status.textContent = text || '';
+    status.classList.toggle('error', error);
+  };
+
+  const fill = (data) => {
+    const s = data.settings || {};
+    topmost.checked = Boolean(s.topmost);
+    mask.checked = Boolean(s.maskAccounts);
+    opacity.value = String(Math.round((Number(s.opacity) || 1) * 100));
+    opacityOut.textContent = `${opacity.value}%`;
+    gateway.value = s.gateway || '';
+    gateway.placeholder = `留空自动检测（当前 ${data.resolvedGateway || '127.0.0.1:3425'}）`;
+    gatewayHint.textContent = `当前连接：${data.resolvedGateway || '127.0.0.1:3425'}`;
+    pathText.textContent = data.path || '';
+    raw.textContent = data.raw || '';
+  };
+
+  const load = async () => {
+    try {
+      fill(await window.busy.settingsGet());
+      setStatus('');
+    } catch (error) {
+      setStatus(error?.message || '读取设置失败', true);
+    }
+  };
+
+  const close = () => {
+    if (!open) return;
+    open = false;
+    pane.hidden = true;
+    document.body.classList.remove('settings-open');
+    document.documentElement.style.removeProperty('--base-content-h');
+  };
+
+  const show = (data) => {
+    open = true;
+    document.documentElement.style.setProperty('--base-content-h', `${Math.max(120, data.baseCardHeight || 368)}px`);
+    document.body.classList.add('settings-open');
+    pane.hidden = false;
+    pane.scrollTop = 0;
+    load();
+  };
+
+  opacity.addEventListener('input', () => {
+    opacityOut.textContent = `${opacity.value}%`;
+  });
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (busy) return;
+    busy = true;
+    save.disabled = true;
+    setStatus('保存中…');
+    try {
+      const result = await window.busy.settingsSave({
+        topmost: topmost.checked,
+        maskAccounts: mask.checked,
+        opacity: Number(opacity.value) / 100,
+        gateway: gateway.value.trim(),
+      });
+      if (!result?.ok) {
+        setStatus(result?.error || '保存失败', true);
+        return;
+      }
+      fill(result);
+      setStatus('已保存');
+      window.setTimeout(() => window.busy.settingsClose(), 420);
+    } catch (error) {
+      setStatus(error?.message || '保存失败', true);
+    } finally {
+      busy = false;
+      save.disabled = false;
+    }
+  });
+
+  $('settingsClose').addEventListener('click', () => window.busy.settingsClose());
+  $('settingsCancel').addEventListener('click', () => window.busy.settingsClose());
+  $('settingsOpenFile').addEventListener('click', () => window.busy.settingsOpenFile());
+
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && open) {
+      event.preventDefault();
+      window.busy.settingsClose();
+    }
+  });
+
+  window.busy.onSettingsPanel((data) => {
+    if (data?.open) show(data);
+    else close();
+  });
+}
+
 function stopFlights() {
   for (const flight of flights.values()) {
     flight.active = false;
@@ -1046,6 +1156,7 @@ async function boot() {
   window.addEventListener('beforeunload', stopFlights);
   setupDragBar();
   setupResizeHandles();
+  setupSettingsPanel();
 }
 
 boot().catch((error) => {

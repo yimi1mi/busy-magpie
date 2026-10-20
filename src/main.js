@@ -19,7 +19,8 @@ const START_IN_LAYOUT = process.argv.includes('--layout');
 const START_IN_SETTINGS = process.argv.includes('--settings');
 
 let win = null;
-let settingsWindow = null;
+let settingsOpen = false;
+let settingsBaseBounds = null;
 let tray = null;
 let settings = null;
 let settingsPath = null;
@@ -211,8 +212,10 @@ function createWindow() {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   win.webContents.on('before-input-event', (event, input) => {
-    if ((layoutMode || dragState || resizeState) && input.type === 'keyDown' && input.key === 'Escape') {
-      if (resizeState) endResize();
+    if ((settingsOpen || layoutMode || dragState || resizeState)
+      && input.type === 'keyDown' && input.key === 'Escape') {
+      if (settingsOpen) closeSettingsPanel();
+      else if (resizeState) endResize();
       else if (dragState) endDrag();
       else endLayout();
       event.preventDefault();
@@ -233,6 +236,7 @@ function createWindow() {
 
   win.on('show', () => refreshTrayMenu());
   win.on('hide', () => {
+    if (settingsOpen) closeSettingsPanel();
     hoverInteractive = false;
     hoverKind = null;
     refreshTrayMenu();
@@ -271,7 +275,7 @@ function applyTopmost() {
 
 function applyClickThrough() {
   if (!win || win.isDestroyed()) return;
-  if (layoutMode || hoverInteractive) {
+  if (settingsOpen || layoutMode || hoverInteractive) {
     win.setIgnoreMouseEvents(false);
     win.setFocusable(true);
   } else {
@@ -288,41 +292,66 @@ function showWindow() {
   refreshTrayMenu();
 }
 
-function openSettingsWindow() {
-  if (settingsWindow && !settingsWindow.isDestroyed()) {
-    if (settingsWindow.isMinimized()) settingsWindow.restore();
-    settingsWindow.show();
-    settingsWindow.focus();
+function openSettingsPanel() {
+  if (!win || win.isDestroyed()) return;
+  if (settingsOpen) {
+    win.showInactive();
+    win.focus();
     return;
   }
+  if (!win.isVisible()) win.showInactive();
 
-  settingsWindow = new BrowserWindow({
-    width: 520,
-    height: 640,
-    minWidth: 480,
-    minHeight: 560,
-    parent: win || undefined,
-    modal: false,
-    show: false,
-    resizable: true,
-    minimizable: true,
-    maximizable: false,
-    fullscreenable: false,
-    autoHideMenuBar: true,
-    backgroundColor: '#14141b',
-    title: 'Busy Magpie 设置',
-    webPreferences: {
-      preload: path.join(__dirname, 'settings-preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-      spellcheck: false,
-    },
+  settingsBaseBounds = win.getBounds();
+  const display = screen.getDisplayNearestPoint({
+    x: settingsBaseBounds.x,
+    y: settingsBaseBounds.y,
   });
-  settingsWindow.setMenuBarVisibility(false);
-  settingsWindow.loadFile(path.join(__dirname, '..', 'web', 'settings.html'));
-  settingsWindow.once('ready-to-show', () => settingsWindow.show());
-  settingsWindow.on('closed', () => { settingsWindow = null; });
+  const area = display.workArea;
+  const preferred = 430;
+  const maxPane = Math.max(260, area.height - settingsBaseBounds.height - 16);
+  const paneHeight = Math.min(preferred, maxPane);
+  const height = settingsBaseBounds.height + paneHeight;
+  let y = settingsBaseBounds.y;
+  if (y + height > area.y + area.height - 8) {
+    y = Math.max(area.y + 8, area.y + area.height - height - 8);
+  }
+
+  settingsOpen = true;
+  hoverInteractive = false;
+  win.setIgnoreMouseEvents(false);
+  win.setFocusable(true);
+  win.setBounds({
+    x: settingsBaseBounds.x,
+    y,
+    width: settingsBaseBounds.width,
+    height,
+  }, false);
+  win.focus();
+  send('magpie:settings-panel', {
+    open: true,
+    baseCardHeight: settingsBaseBounds.height - 32,
+    paneHeight,
+  });
+  refreshTrayMenu();
+}
+
+function closeSettingsPanel() {
+  if (!settingsOpen) return;
+  settingsOpen = false;
+  if (win && !win.isDestroyed() && settingsBaseBounds) {
+    win.setBounds(settingsBaseBounds, false);
+    settings.left = settingsBaseBounds.x;
+    settings.top = settingsBaseBounds.y;
+    win.setIgnoreMouseEvents(true, { forward: true });
+    win.setFocusable(false);
+    win.blur();
+    applyTopmost();
+  }
+  settingsBaseBounds = null;
+  hoverInteractive = false;
+  hoverKind = null;
+  send('magpie:settings-panel', { open: false });
+  refreshTrayMenu();
 }
 
 function toggleVisible() {
@@ -350,7 +379,7 @@ function setHoverInteractive(value, kind = null) {
 function watchHover() {
   clearInterval(hoverTimer);
   hoverTimer = setInterval(() => {
-    if (!win || win.isDestroyed() || !win.isVisible() || layoutMode || dragState || resizeState) return;
+    if (!win || win.isDestroyed() || !win.isVisible() || settingsOpen || layoutMode || dragState || resizeState) return;
     const point = screen.getCursorScreenPoint();
     const bounds = win.getBounds();
     const card = {
@@ -377,7 +406,7 @@ function watchHover() {
 }
 
 function startDrag() {
-  if (!win || win.isDestroyed() || dragState) return;
+  if (!win || win.isDestroyed() || settingsOpen || dragState) return;
   const point = screen.getCursorScreenPoint();
   const [x, y] = win.getPosition();
   hoverInteractive = false;
@@ -426,7 +455,7 @@ function endDrag() {
 }
 
 function startResize(direction = 'se') {
-  if (!win || win.isDestroyed() || resizeState) return;
+  if (!win || win.isDestroyed() || settingsOpen || resizeState) return;
   const dir = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].includes(direction)
     ? direction
     : 'se';
@@ -516,7 +545,7 @@ function endResize() {
 }
 
 function beginLayout() {
-  if (!win || win.isDestroyed() || layoutMode) return;
+  if (!win || win.isDestroyed() || settingsOpen || layoutMode) return;
   layoutMode = true;
   if (!win.isVisible()) win.showInactive();
   win.setIgnoreMouseEvents(false);
@@ -765,7 +794,7 @@ function buildTrayMenu() {
     { type: 'separator' },
     {
       label: '设置…',
-      click: openSettingsWindow,
+      click: openSettingsPanel,
     },
     {
       label: '调整位置…',
@@ -889,21 +918,25 @@ ipcMain.handle('settings:save', (_event, input) => {
     applyTopmost();
     if (win && !win.isDestroyed()) {
       win.setOpacity(settings.opacity);
-      const bounds = win.getBounds();
-      win.setBounds({
-        x: bounds.x,
-        y: bounds.y,
-        width: settings.width,
-        height: settings.height,
-      }, false);
-      settings.left = bounds.x;
-      settings.top = bounds.y;
-      frame = {
-        lanes: frame.lanes,
-        cardHeight: settings.height - 32,
-        windowHeight: settings.height,
-      };
-      send('magpie:frame', frame);
+      // While the settings drawer is open the window is deliberately
+      // taller; do not collapse it from inside the save call.
+      if (!settingsOpen) {
+        const bounds = win.getBounds();
+        win.setBounds({
+          x: bounds.x,
+          y: bounds.y,
+          width: settings.width,
+          height: settings.height,
+        }, false);
+        settings.left = bounds.x;
+        settings.top = bounds.y;
+        frame = {
+          lanes: frame.lanes,
+          cardHeight: settings.height - 32,
+          windowHeight: settings.height,
+        };
+        send('magpie:frame', frame);
+      }
     }
     send('magpie:settings', publicSettings());
     if (gatewayChanged) rebuildClient();
@@ -934,9 +967,7 @@ ipcMain.on('settings:open-file', () => {
   shell.showItemInFolder(settingsPath);
 });
 
-ipcMain.on('settings:close', () => {
-  if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.close();
-});
+ipcMain.on('settings:close', () => closeSettingsPanel());
 
 ipcMain.on('busy:end-layout', () => endLayout());
 ipcMain.on('busy:drag-start', () => startDrag());
@@ -963,7 +994,7 @@ function init() {
     setTimeout(beginLayout, 1500);
   }
   if (START_IN_SETTINGS) {
-    setTimeout(openSettingsWindow, 1200);
+    setTimeout(openSettingsPanel, 1200);
   }
 }
 

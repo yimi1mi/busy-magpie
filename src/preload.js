@@ -25,6 +25,10 @@ contextBridge.exposeInMainWorld('busy', {
   dragEnd: () => ipcRenderer.send('busy:drag-end'),
   resizeStart: (direction) => ipcRenderer.send('busy:resize-start', direction),
   resizeEnd: () => ipcRenderer.send('busy:resize-end'),
+  settingsGet: () => ipcRenderer.invoke('settings:get'),
+  settingsSave: (data) => ipcRenderer.invoke('settings:save', data),
+  settingsOpenFile: () => ipcRenderer.send('settings:open-file'),
+  settingsClose: () => ipcRenderer.send('settings:close'),
   onTrace: (callback) => {
     ipcRenderer.on('magpie:trace', (_event, data) => callback(data));
   },
@@ -48,5 +52,8 @@ contextBridge.exposeInMainWorld('busy', {
   },
   onResize: (callback) => {
     ipcRenderer.on('magpie:resize', (_event, data) => callback(data));
+  },
+  onSettingsPanel: (callback) => {
+    ipcRenderer.on('magpie:settings-panel', (_event, data) => callback(data));
   },
 });

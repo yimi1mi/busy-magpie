@@ -180,6 +180,60 @@
           <span>鼠标点击穿透</span>
         </footer>
       </div>
+
+      <section class="settings-pane" id="settingsPane" hidden>
+        <header class="settings-head">
+          <div>
+            <b>设置</b>
+            <span class="mono" id="settingsPath">settings.json</span>
+          </div>
+          <button class="settings-x" id="settingsClose" type="button" aria-label="关闭设置">×</button>
+        </header>
+
+        <form id="settingsForm" class="settings-form" autocomplete="off">
+          <section class="settings-group">
+            <h3>显示</h3>
+            <label class="settings-switch">
+              <span><b>总在最前</b><small>盖在其他窗口上方</small></span>
+              <input type="checkbox" id="settingsTopmost">
+            </label>
+            <label class="settings-switch">
+              <span><b>隐藏账号名称</b><small>邮箱和 Key 打码</small></span>
+              <input type="checkbox" id="settingsMask">
+            </label>
+            <div class="settings-opacity">
+              <span><b>不透明度</b></span>
+              <input type="range" id="settingsOpacity" min="40" max="100" step="1" value="100">
+              <output id="settingsOpacityOut">100%</output>
+            </div>
+          </section>
+
+          <section class="settings-group">
+            <h3>网关</h3>
+            <input type="text" id="settingsGateway" class="settings-input" placeholder="留空自动检测">
+            <small class="settings-hint" id="settingsGatewayHint">留空自动读取 magpie 的端口。</small>
+          </section>
+
+          <section class="settings-group settings-file">
+            <div class="settings-file-row">
+              <span>设置文件</span>
+              <button type="button" class="settings-link" id="settingsOpenFile">打开所在文件夹</button>
+            </div>
+            <details class="settings-raw-box">
+              <summary>查看 settings.json</summary>
+              <pre id="settingsRaw"></pre>
+            </details>
+          </section>
+
+          <footer class="settings-foot">
+            <span class="settings-status" id="settingsStatus" role="status"></span>
+            <div class="settings-actions">
+              <button type="button" class="settings-ghost" id="settingsCancel">取消</button>
+              <button type="submit" class="settings-save" id="settingsSave">保存</button>
+            </div>
+          </footer>
+        </form>
+      </section>
     </div>
 
     <div class="layout-overlay" id="layoutOverlay">
