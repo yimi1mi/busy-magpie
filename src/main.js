@@ -930,6 +930,7 @@ function quit() {
 }
 
 ipcMain.handle('busy:bootstrap', () => ({
+  version: app.getVersion(),
   settings: publicSettings(),
   connection,
   trace: lastTrace,
@@ -946,6 +947,7 @@ ipcMain.handle('settings:get', () => {
     raw = JSON.stringify(settings, null, 2);
   }
   return {
+    version: app.getVersion(),
     settings: {
       ...settings,
       gateway: settings.gateway || '',

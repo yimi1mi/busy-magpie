@@ -595,6 +595,13 @@ body.can-grab .drag-grip {
   opacity: 0.72;
 }
 
+.app-version {
+  margin-left: 7px;
+  color: var(--faint);
+  font-size: 8.5px;
+  opacity: 0.72;
+}
+
 .brand-sep {
   width: 1px;
   height: 10px;
@@ -1864,6 +1871,15 @@ body.settings-open .content {
   display: block;
   font-size: 13px;
   font-weight: 650;
+}
+
+.settings-version {
+  margin-left: 5px;
+  color: var(--faint);
+  font-size: 8.5px;
+  font-style: normal;
+  font-weight: 500;
+  opacity: 0.8;
 }
 
 .settings-head span {

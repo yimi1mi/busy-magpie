@@ -12,6 +12,7 @@ const el = {
   live: $('live'),
   liveState: $('liveState'),
   gateway: $('gateway'),
+  appVersion: $('appVersion'),
   hubPort: $('hubPort'),
   birdSky: $('birdSky'),
   agentNode: $('agentNode'),
@@ -404,6 +405,7 @@ function setupSettingsPanel() {
     gatewayHint.textContent = `当前连接：${data.resolvedGateway || '127.0.0.1:3425'}`;
     pathText.textContent = data.path || '';
     raw.textContent = data.raw || '';
+    if (data.version) $('settingsVersion').textContent = `v${data.version}`;
   };
 
   const load = async () => {
@@ -1198,6 +1200,7 @@ async function boot() {
   applyGateway();
 
   const data = await window.busy.bootstrap();
+  if (data.version && el.appVersion) el.appVersion.textContent = `v${data.version}`;
   if (data.settings) settings = { ...settings, ...data.settings };
   if (data.connection) connection = data.connection;
   if (data.trace) lastTrace = data.trace;
