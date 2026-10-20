@@ -1369,6 +1369,17 @@ function buildTrayMenu() {
       label: visible ? '隐藏桌面插件' : `显示桌面插件（${displayHotkey()}）`,
       click: toggleVisible,
     },
+    // The other one-click way in: a release the app already found installs
+    // from here, without opening the about pane.
+    ...(updateState.available && !updateState.skipped
+      ? [{
+        label: updateState.downloading || updateState.installing
+          ? `正在更新 v${updateState.latest}…`
+          : `更新到 v${updateState.latest}`,
+        enabled: !updateState.downloading && !updateState.installing,
+        click: () => { installUpdate(); },
+      }]
+      : []),
     {
       label: `全局快捷键 ${displayHotkey()}`,
       type: 'checkbox',
@@ -1423,6 +1434,10 @@ function buildTrayMenu() {
       // The menu passes (menuItem, window, event); leaving the item as the
       // mode would put a function into the IPC payload and drop the panel.
       click: () => openSettingsPanel('settings'),
+    },
+    {
+      label: '关于 Busy Magpie…',
+      click: () => openAbout(),
     },
     {
       label: '调整位置…',
@@ -1698,7 +1713,7 @@ ipcMain.on('busy:ready', () => {
   }
 });
 
-ipcMain.on('busy:about-open', () => {
+function openAbout() {
   if (!win || win.isDestroyed()) return;
   if (settingsOpen) {
     currentPanelMode = 'about';
@@ -1708,6 +1723,10 @@ ipcMain.on('busy:about-open', () => {
     return;
   }
   openSettingsPanel('about');
+}
+
+ipcMain.on('busy:about-open', () => {
+  openAbout();
 });
 
 ipcMain.handle('updates:get', () => updateView());

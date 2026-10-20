@@ -781,6 +781,8 @@ function setupAbout() {
 
   const button = el.appVersion;
   const dot = $('updateDot');
+  const chip = $('updateChip');
+  const chipVersion = $('updateChipVersion');
   const current = $('aboutCurrent');
   const latest = $('aboutLatest');
   const arrow = $('aboutArrow');
@@ -799,6 +801,21 @@ function setupAbout() {
     const pct = Math.round((Number(data.progress) || 0) * 100);
     const showLatest = Boolean(data.latest && (available || data.skipped || data.error));
     dot.hidden = !available;
+    // The card's own one-click path: it only says which version and how far
+    // along the download is, and quits into the installer on its own.
+    const running = Boolean(data.downloading || data.installing);
+    if (chip) {
+      chip.hidden = !available && !running;
+      if (!chip.hidden) {
+        chipVersion.textContent = data.installing
+          ? '安装中'
+          : data.downloading ? `${pct}%` : `v${data.latest || ''}`;
+        chip.disabled = running;
+      }
+      // The two share one spot: a pending release takes the version's place,
+      // so the header never reads both. The tray has 关于 in the meantime.
+      if (button) button.hidden = !chip.hidden;
+    }
     current.textContent = `v${data.current || data.version || '—'}`;
     latest.textContent = showLatest ? `v${data.latest}` : '';
     latest.hidden = !showLatest;
@@ -852,6 +869,9 @@ function setupAbout() {
   };
 
   button?.addEventListener('click', () => window.busy.aboutOpen());
+  chip?.addEventListener('click', () => {
+    if (!chip.disabled) window.busy.updatesInstall();
+  });
   $('aboutClose').addEventListener('click', () => window.busy.settingsClose());
   check.addEventListener('click', () => window.busy.updatesCheck());
   update.addEventListener('click', () => {
@@ -1240,7 +1260,9 @@ function setLiveChrome(view) {
 }
 
 function applyGateway() {
-  el.gateway.textContent = settings.gateway || '127.0.0.1:3425';
+  // The card's header names magpie, not its port: the address lives in the
+  // settings panel and in the about pane, where it is asked for.
+  if (el.gateway) el.gateway.textContent = settings.gateway || '127.0.0.1:3425';
 }
 
 function setMulti(on) {
