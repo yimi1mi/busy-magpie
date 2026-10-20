@@ -45,9 +45,6 @@ let rendererReady = false;
 let pendingSettings = false;
 let pendingPanelMode = 'settings';
 let currentPanelMode = 'settings';
-let settingsBaseBounds = null;
-let settingsPaneHeight = 430;
-let boundsAnimation = null;
 let tray = null;
 let settings = null;
 let settingsPath = null;
@@ -82,9 +79,6 @@ let hoverKind = null;
 // click-through, so the pointer has to be let in exactly there. Both move
 // when the window is resized, since the card is scaled to fit it.
 let hitAreas = { pill: null, dragTop: 12, dragBottom: 46 };
-// How much the card's canvas is scaled; the settings drawer is drawn at the
-// same scale, so it has to grow with it.
-let uiScale = 1;
 let dragState = null;
 let resizeState = null;
 let hoverTimer = null;
@@ -368,12 +362,8 @@ function createWindow() {
     if (lastTrace) win.webContents.send('magpie:trace', lastTrace);
     win.webContents.send('magpie:connection', connection);
     win.webContents.send('magpie:layout', layoutMode);
-    if (settingsOpen && settingsBaseBounds) {
-      win.webContents.send('magpie:settings-panel', {
-        open: true,
-        baseCardHeight: settingsBaseBounds.height - 32,
-        paneHeight: settingsPaneHeight,
-      });
+    if (settingsOpen) {
+      win.webContents.send('magpie:settings-panel', { open: true, mode: currentPanelMode });
     }
   });
 }
@@ -757,38 +747,6 @@ function showWindow() {
   refreshTrayMenu();
 }
 
-function stopBoundsAnimation() {
-  if (!boundsAnimation) return;
-  clearTimeout(boundsAnimation);
-  boundsAnimation = null;
-}
-
-function animateBounds(from, to, duration, done) {
-  stopBoundsAnimation();
-  const start = Date.now();
-  const ease = (value) => 1 - (1 - value) ** 3;
-  const step = () => {
-    if (!win || win.isDestroyed()) {
-      boundsAnimation = null;
-      return;
-    }
-    const t = Math.min(1, (Date.now() - start) / duration);
-    const k = ease(t);
-    win.setBounds({
-      x: Math.round(from.x + (to.x - from.x) * k),
-      y: Math.round(from.y + (to.y - from.y) * k),
-      width: Math.round(from.width + (to.width - from.width) * k),
-      height: Math.round(from.height + (to.height - from.height) * k),
-    }, false);
-    if (t < 1) {
-      boundsAnimation = setTimeout(step, 16);
-    } else {
-      boundsAnimation = null;
-      if (done) done();
-    }
-  };
-  step();
-}
 
 function openSettingsPanel(mode = 'settings') {
   if (!win || win.isDestroyed()) return;
@@ -798,61 +756,15 @@ function openSettingsPanel(mode = 'settings') {
     return;
   }
   if (settingsOpen || settingsClosing) {
-    if (settingsOpen && mode !== currentPanelMode && settingsBaseBounds) {
-      const display = screen.getDisplayNearestPoint({
-        x: settingsBaseBounds.x,
-        y: settingsBaseBounds.y,
-      });
-      const area = display.workArea;
-      const preferred = Math.round((mode === 'about' ? 300 : 640) * uiScale);
-      const maxPane = Math.max(260, area.height - settingsBaseBounds.height - 16);
-      const paneHeight = Math.min(preferred, maxPane);
-      // When the screen cannot give the drawer its scaled height, the drawer
-      // shrinks its own scale rather than growing a scrollbar over the form.
-      const paneScale = Math.min(uiScale, paneHeight / (mode === 'about' ? 300 : 640));
-      const height = settingsBaseBounds.height + paneHeight;
-      let y = settingsBaseBounds.y;
-      if (y + height > area.y + area.height - 8) {
-        y = Math.max(area.y + 8, area.y + area.height - height - 8);
-      }
+    if (settingsOpen && mode !== currentPanelMode) {
       currentPanelMode = mode;
-      settingsPaneHeight = paneHeight;
-      send('magpie:settings-panel', {
-        open: true,
-        mode,
-        baseCardHeight: settingsBaseBounds.height - 32,
-        paneHeight,
-        paneScale,
-      });
-      animateBounds(win.getBounds(), {
-        x: settingsBaseBounds.x,
-        y,
-        width: settingsBaseBounds.width,
-        height,
-      }, 260);
+      send('magpie:settings-panel', { open: true, mode });
     }
     win.showInactive();
     win.focus();
     return;
   }
   if (!win.isVisible()) win.showInactive();
-
-  settingsBaseBounds = win.getBounds();
-  const display = screen.getDisplayNearestPoint({
-    x: settingsBaseBounds.x,
-    y: settingsBaseBounds.y,
-  });
-  const area = display.workArea;
-  const preferred = Math.round((mode === 'about' ? 300 : 640) * uiScale);
-  const maxPane = Math.max(260, area.height - settingsBaseBounds.height - 16);
-  const paneHeight = Math.min(preferred, maxPane);
-  const paneScale = Math.min(uiScale, paneHeight / (mode === 'about' ? 300 : 640));
-  settingsPaneHeight = paneHeight;
-  const height = settingsBaseBounds.height + paneHeight;
-  let y = settingsBaseBounds.y;
-  if (y + height > area.y + area.height - 8) {
-    y = Math.max(area.y + 8, area.y + area.height - height - 8);
-  }
 
   settingsOpen = true;
   settingsClosing = false;
@@ -861,19 +773,8 @@ function openSettingsPanel(mode = 'settings') {
   win.setIgnoreMouseEvents(false);
   win.setFocusable(true);
   win.focus();
-  send('magpie:settings-panel', {
-    open: true,
-    mode,
-    baseCardHeight: settingsBaseBounds.height - 32,
-    paneHeight,
-    paneScale,
-  });
-  animateBounds(settingsBaseBounds, {
-    x: settingsBaseBounds.x,
-    y,
-    width: settingsBaseBounds.width,
-    height,
-  }, 280);
+  // The panel covers the card; the window itself never changes size.
+  send('magpie:settings-panel', { open: true, mode });
   refreshTrayMenu();
 }
 
@@ -882,50 +783,26 @@ function closeSettingsPanel() {
   settingsClosing = true;
   settingsOpen = false;
   currentPanelMode = 'settings';
-  // A drag that was resizing the card must not keep the window tall once
-  // the drawer asks to fold back.
   if (resizeState) {
     clearInterval(resizeState.timer);
     clearTimeout(resizeState.max);
     resizeState = null;
   }
-  const from = win && !win.isDestroyed() ? win.getBounds() : settingsBaseBounds;
-  // A drawer that closed after its card bounds were lost still has to put
-  // the window back to the card's size, or a tall empty window is left.
-  const fallback = {
-    x: from ? from.x : (settings.left ?? 0),
-    y: from ? from.y : (settings.top ?? 0),
-    width: Math.max(600, Number(settings.width) || WIDTH),
-    height: Math.max(432, Number(settings.height) || HEIGHT),
-  };
-  const to = settingsBaseBounds || fallback;
-  log(`settings panel closed (bounds ${settingsBaseBounds ? 'known' : 'rebuilt'}, ` +
-    `${to.width}x${to.height})`);
   send('magpie:settings-panel', { open: false });
-  if (!win || win.isDestroyed() || !to) {
-    settingsBaseBounds = null;
-    settingsClosing = false;
-    return;
-  }
+  // Let the panel's fade finish before the card takes the pointer again.
   setTimeout(() => {
-    animateBounds(from, to, 220, () => {
-      if (win && !win.isDestroyed()) {
-        win.setIgnoreMouseEvents(true, { forward: true });
-        win.setFocusable(false);
-        win.blur();
-        applyTopmost();
-      }
-      settings.left = to.x;
-      settings.top = to.y;
-      settingsBaseBounds = null;
-      settingsClosing = false;
-      hoverInteractive = false;
-      hoverKind = null;
-      refreshTrayMenu();
-    });
-  }, 30);
+    if (win && !win.isDestroyed()) {
+      win.setIgnoreMouseEvents(true, { forward: true });
+      win.setFocusable(false);
+      win.blur();
+      applyTopmost();
+    }
+    settingsClosing = false;
+    hoverInteractive = false;
+    hoverKind = null;
+    refreshTrayMenu();
+  }, 180);
 }
-
 function toggleVisible() {
   if (!win || win.isDestroyed()) return;
   if (win.isVisible()) {
@@ -998,8 +875,6 @@ function setHitAreas(raw) {
     && numbers[3] > 0;
   const top = Number(source.dragTop);
   const bottom = Number(source.dragBottom);
-  const ui = Number(source.ui);
-  if (Number.isFinite(ui) && ui > 0) uiScale = Math.min(2.6, Math.max(0.5, ui));
   hitAreas = {
     pill: valid
       ? { x: numbers[0], y: numbers[1], width: numbers[2], height: numbers[3] }
@@ -1065,9 +940,6 @@ function startResize(direction = 'se') {
   const dir = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].includes(direction)
     ? direction
     : 'se';
-  // With the drawer open only the sides resize the card; the drawer keeps
-  // its own height and stays where it is.
-  if (settingsOpen && dir !== 'e' && dir !== 'w') return;
   const point = screen.getCursorScreenPoint();
   const bounds = win.getBounds();
   const display = screen.getDisplayNearestPoint(point);
@@ -1078,7 +950,6 @@ function startResize(direction = 'se') {
   win.focus();
   const state = {
     direction: dir,
-    paneHeight: settingsOpen ? settingsPaneHeight : 0,
     pointerX: point.x,
     pointerY: point.y,
     x: bounds.x,
@@ -1106,10 +977,8 @@ function startResize(direction = 'se') {
     const dx = now.x - state.pointerX;
     const dy = now.y - state.pointerY;
 
-    const pane = state.paneHeight || 0;
-    const maxCardH = Math.max(state.minHeight, state.maxH - pane);
     let width = state.width;
-    let height = state.height - pane;
+    let height = state.height;
     let x = state.x;
     let y = state.y;
 
@@ -1118,12 +987,10 @@ function startResize(direction = 'se') {
     } else if (dir.includes('w')) {
       width = Math.max(state.minWidth, Math.min(state.maxW, state.width - dx));
     }
-    if (!pane) {
-      if (dir.includes('s')) {
-        height = Math.max(state.minHeight, Math.min(maxCardH, height + dy));
-      } else if (dir.includes('n')) {
-        height = Math.max(state.minHeight, Math.min(maxCardH, height - dy));
-      }
+    if (dir.includes('s')) {
+      height = Math.max(state.minHeight, Math.min(state.maxH, height + dy));
+    } else if (dir.includes('n')) {
+      height = Math.max(state.minHeight, Math.min(state.maxH, height - dy));
     }
 
     // The card keeps its shape, so the scaled canvas always fills it: a
@@ -1131,8 +998,8 @@ function startResize(direction = 'se') {
     // way round for a vertical edge.
     if (dir.includes('e') || dir.includes('w')) {
       height = heightForWidth(width);
-      if (height > maxCardH) {
-        height = maxCardH;
+      if (height > state.maxH) {
+        height = state.maxH;
         width = widthForHeight(height);
       } else if (height < state.minHeight) {
         height = state.minHeight;
@@ -1149,23 +1016,15 @@ function startResize(direction = 'se') {
       }
     }
     width = Math.max(state.minWidth, Math.min(state.maxW, width));
-    height = Math.max(state.minHeight, Math.min(maxCardH, height));
+    height = Math.max(state.minHeight, Math.min(state.maxH, height));
     if (dir.includes('w')) x = state.x + state.width - width;
-    if (dir.includes('n') && !pane) y = state.y + state.height - height - pane;
+    if (dir.includes('n')) y = state.y + state.height - height;
 
-    win.setBounds({ x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height + pane) }, false);
+    win.setBounds({ x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) }, false);
     settings.left = Math.round(x);
     settings.top = Math.round(y);
     settings.width = Math.round(width);
     settings.height = Math.round(height);
-    if (pane) {
-      settingsBaseBounds = {
-        x: Math.round(x),
-        y: Math.round(y),
-        width: Math.round(width),
-        height: Math.round(height),
-      };
-    }
   }, 16);
   state.max = setTimeout(endResize, 15000);
   resizeState = state;
@@ -1528,9 +1387,7 @@ function quit() {
   clearTimeout(layoutTimer);
   clearInterval(hoverTimer);
   clearInterval(usageTimer);
-  clearInterval(updateTimer);
-  stopBoundsAnimation();
-  if (dragState) {
+  clearInterval(updateTimer);  if (dragState) {
     clearInterval(dragState.timer);
     clearTimeout(dragState.max);
     dragState = null;

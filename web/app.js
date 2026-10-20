@@ -117,11 +117,6 @@ function applyFrame(next) {
   const root = document.documentElement;
   root.style.setProperty('--window-h', `${frame.windowHeight}px`);
   root.style.setProperty('--card-h', `${frame.cardHeight}px`);
-  // While the drawer is open the card keeps the height it had when it
-  // opened, and the drawer below takes the rest.
-  if (document.body.classList.contains('settings-open') && frame.cardHeight) {
-    root.style.setProperty('--base-content-h', `${Math.max(120, frame.cardHeight)}px`);
-  }
   requestAnimationFrame(() => {
     applyUiScale();
     drawFanWires();
@@ -138,22 +133,6 @@ function uiScale() {
   return Number(getComputedStyle(document.documentElement).getPropertyValue('--ui')) || 1;
 }
 
-// The drawer is drawn at the card's scale, or smaller when the screen cannot
-// give it its full height, so the whole form always fits.
-function updatePaneScale() {
-  const pane = $('settingsPane');
-  if (!pane || pane.hidden) {
-    document.documentElement.style.removeProperty('--ui-pane');
-    return;
-  }
-  if (document.body.classList.contains('can-resize')) return;
-  const base = pane.classList.contains('about') ? 300 : 640;
-  const height = pane.clientHeight;
-  if (height < 60) return;
-  const scale = Math.max(0.5, Math.min(uiScale(), height / base));
-  document.documentElement.style.setProperty('--ui-pane', scale.toFixed(4));
-}
-
 function applyUiScale() {
   const area = el.stageArea?.getBoundingClientRect();
   if (!area || area.width < 40 || area.height < 40) return;
@@ -162,10 +141,7 @@ function applyUiScale() {
     Math.min(2.6, Math.min(area.width / CANVAS_W, area.height / CANVAS_H)),
   );
   document.documentElement.style.setProperty('--ui', scale.toFixed(4));
-  requestAnimationFrame(() => {
-    reportHitAreas();
-    updatePaneScale();
-  });
+  requestAnimationFrame(reportHitAreas);
 }
 
 function usageTotal(data) {
@@ -677,7 +653,7 @@ function setupSettingsPanel() {
     gateway.placeholder = '留空自动检测';
     gatewayHint.textContent = `当前 ${data.resolvedGateway || '127.0.0.1:3425'}`;
     pathText.textContent = data.path || '';
-    raw.textContent = data.raw || '';
+    if (raw) raw.textContent = data.raw || '';
     if (data.version) $('settingsVersion').textContent = `v${data.version}`;
   };
 
@@ -701,25 +677,15 @@ function setupSettingsPanel() {
       pane.classList.remove('about');
       $('aboutView').hidden = true;
       document.body.classList.remove('settings-open', 'settings-closing');
-      document.documentElement.style.removeProperty('--base-content-h');
-      document.documentElement.style.removeProperty('--ui-pane');
-    }, 260);
+    }, 200);
   };
 
   const show = (data) => {
     window.clearTimeout(closeTimer);
     open = true;
-    document.documentElement.style.setProperty('--base-content-h', `${Math.max(120, data.baseCardHeight || 368)}px`);
-    // The drawer is drawn at its own scale: the card's when the screen has
-    // room for it, a little less when it has to fit.
-    const paneScale = Number(data?.paneScale);
-    document.documentElement.style.setProperty(
-      '--ui-pane',
-      String(Number.isFinite(paneScale) && paneScale > 0 ? paneScale : uiScale()),
-    );
     document.body.classList.remove('settings-closing');
     pane.hidden = false;
-    // Restart the drawer entrance even when it was reopened quickly.
+    // Restart the entrance even when it was reopened quickly.
     pane.style.animation = 'none';
     void pane.offsetWidth;
     pane.style.animation = '';
@@ -728,7 +694,6 @@ function setupSettingsPanel() {
     pane.classList.toggle('about', about);
     $('aboutView').hidden = !about;
     pane.scrollTop = 0;
-    requestAnimationFrame(updatePaneScale);
     if (about) aboutRefresh?.();
     else load();
   };
@@ -791,9 +756,6 @@ function setupSettingsPanel() {
     if (data?.open) show(data);
     else close();
   });
-
-  // The drawer's room changes when the window is resized with it open.
-  new ResizeObserver(() => requestAnimationFrame(updatePaneScale)).observe(pane);
 }
 
 let aboutRefresh = null;

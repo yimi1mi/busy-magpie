@@ -180,6 +180,143 @@
           <span>鼠标点击穿透</span>
         </footer>
       </div>
+        <section class="settings-pane" id="settingsPane" hidden>
+          <div class="settings-inner">
+            <header class="settings-head">
+              <div>
+                <b>设置 <em class="settings-version mono" id="settingsVersion">v1.1.0</em></b>
+                <span class="mono" id="settingsPath">settings.json</span>
+              </div>
+              <div class="settings-head-actions">
+                <button type="button" class="settings-link" id="settingsOpenFile">打开文件夹</button>
+                <button class="settings-x" id="settingsClose" type="button" aria-label="关闭设置">×</button>
+              </div>
+            </header>
+
+            <form id="settingsForm" class="settings-form" autocomplete="off">
+              <div class="settings-groups">
+                <section class="settings-group">
+                  <div class="settings-duo">
+                    <label class="settings-switch">
+                      <span><b>总在最前</b><small>盖在其他窗口上方</small></span>
+                      <input type="checkbox" id="settingsTopmost">
+                    </label>
+                    <label class="settings-switch">
+                      <span><b>隐藏账号名称</b><small>邮箱和 Key 打码</small></span>
+                      <input type="checkbox" id="settingsMask">
+                    </label>
+                  </div>
+                  <div class="settings-opacity">
+                    <span><b>不透明度</b></span>
+                    <input type="range" id="settingsOpacity" min="40" max="100" step="1" value="100">
+                    <output id="settingsOpacityOut">100%</output>
+                  </div>
+                </section>
+
+                <section class="settings-group">
+                  <div class="settings-field">
+                    <div class="settings-caption"><b>时间窗</b><small>单击胶囊只在这些之间循环</small></div>
+                    <div class="settings-chips" id="settingsPeriods" role="group" aria-label="时间窗">
+                      <button type="button" class="settings-chip" data-period="today" aria-pressed="true">今日</button>
+                      <button type="button" class="settings-chip" data-period="7d" aria-pressed="true">7 天</button>
+                      <button type="button" class="settings-chip" data-period="30d" aria-pressed="true">30 天</button>
+                      <button type="button" class="settings-chip" data-period="all" aria-pressed="true">全部</button>
+                    </div>
+                  </div>
+                  <div class="settings-field">
+                    <div class="settings-caption"><b>数值</b><small>滚动的数字代表什么</small></div>
+                    <div class="settings-chips" id="settingsMetrics" role="group" aria-label="胶囊数值">
+                      <button type="button" class="settings-chip" data-metric="total" aria-pressed="true">总 token</button>
+                      <button type="button" class="settings-chip" data-metric="input" aria-pressed="false">输入</button>
+                      <button type="button" class="settings-chip" data-metric="output" aria-pressed="false">输出</button>
+                      <button type="button" class="settings-chip" data-metric="cache" aria-pressed="false">缓存读</button>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="settings-group">
+                  <div class="settings-duo">
+                    <label class="settings-switch">
+                      <span><b>额度条</b><small>剩余额度与续期</small></span>
+                      <input type="checkbox" id="settingsQuota">
+                    </label>
+                    <label class="settings-switch">
+                      <span><b>耗时拆解</b><small>首字延迟写进明细</small></span>
+                      <input type="checkbox" id="settingsTiming">
+                    </label>
+                  </div>
+                  <div class="settings-duo">
+                    <label class="settings-switch">
+                      <span><b>数字滚动</b><small>关闭后直接替换</small></span>
+                      <input type="checkbox" id="settingsRoll">
+                    </label>
+                    <label class="settings-switch">
+                      <span><b>启动检查更新</b><small>只检查应用</small></span>
+                      <input type="checkbox" id="settingsCheckUpdates">
+                    </label>
+                  </div>
+                </section>
+
+                <section class="settings-group">
+                  <div class="settings-row">
+                    <span><b>网关</b><small id="settingsGatewayHint">留空自动读取 magpie 的端口</small></span>
+                    <input type="text" id="settingsGateway" class="settings-input" placeholder="留空自动检测">
+                  </div>
+                </section>
+              </div>
+
+              <footer class="settings-foot">
+                <span class="settings-status" id="settingsStatus" role="status"></span>
+                <div class="settings-actions">
+                  <button type="button" class="settings-ghost" id="settingsCancel">取消</button>
+                  <button type="submit" class="settings-save" id="settingsSave">保存</button>
+                </div>
+              </footer>
+            </form>
+            <div class="about-view" id="aboutView" hidden>
+              <header class="about-head">
+                <div>
+                  <b>关于 Busy Magpie</b>
+                  <span>应用更新与版本信息</span>
+                </div>
+                <button class="settings-x" id="aboutClose" type="button" aria-label="关闭">×</button>
+              </header>
+
+              <div class="about-scroll">
+                <section class="about-block about-app">
+                  <div class="about-line">
+                    <span>桌面应用</span>
+                    <span class="about-versions">
+                      <b class="mono" id="aboutCurrent">v—</b>
+                      <i id="aboutArrow">→</i>
+                      <b class="mono accent" id="aboutLatest" hidden></b>
+                    </span>
+                  </div>
+                  <p class="about-status" id="aboutStatus">还没有检查更新。</p>
+                  <div class="update-progress" id="updateProgress" hidden>
+                    <i id="updateProgressBar"></i>
+                  </div>
+                  <div class="about-actions">
+                    <button type="button" class="about-primary" id="aboutUpdate" hidden>更新应用</button>
+                    <button type="button" class="about-ghost" id="aboutCheck">检查更新</button>
+                    <button type="button" class="about-link" id="aboutSkip" hidden>跳过此版本</button>
+                    <button type="button" class="about-link" id="aboutRelease" hidden>打开发布页</button>
+                  </div>
+                </section>
+
+                <section class="about-block about-plugin">
+                  <div class="about-line">
+                    <span>启动器插件</span>
+                    <b class="mono" id="aboutPlugin">v—</b>
+                  </div>
+                  <p>插件由 magpie 管理。需要更新启动器时，请到 magpie → Plugins → Busy Magpie 点 Update，不要在应用里直接覆盖。</p>
+                </section>
+
+                <p class="about-error" id="aboutError" role="status"></p>
+              </div>
+            </div>
+          </div>
+        </section>
         </div>
       </div>
 
@@ -192,151 +329,6 @@
       <div class="resize-handle resize-sw" data-resize="sw"></div>
       <div class="resize-handle resize-se" data-resize="se"></div>
 
-      <section class="settings-pane" id="settingsPane" hidden>
-        <div class="settings-inner">
-        <header class="settings-head">
-          <div>
-            <b>设置 <em class="settings-version mono" id="settingsVersion">v1.1.0</em></b>
-            <span class="mono" id="settingsPath">settings.json</span>
-          </div>
-          <button class="settings-x" id="settingsClose" type="button" aria-label="关闭设置">×</button>
-        </header>
-
-        <form id="settingsForm" class="settings-form" autocomplete="off">
-          <section class="settings-group">
-            <h3>显示</h3>
-            <label class="settings-switch">
-              <span><b>总在最前</b><small>盖在其他窗口上方</small></span>
-              <input type="checkbox" id="settingsTopmost">
-            </label>
-            <label class="settings-switch">
-              <span><b>隐藏账号名称</b><small>邮箱和 Key 打码</small></span>
-              <input type="checkbox" id="settingsMask">
-            </label>
-            <div class="settings-opacity">
-              <span><b>不透明度</b></span>
-              <input type="range" id="settingsOpacity" min="40" max="100" step="1" value="100">
-              <output id="settingsOpacityOut">100%</output>
-            </div>
-          </section>
-
-          <section class="settings-group">
-            <h3>用量胶囊</h3>
-            <div class="settings-field">
-              <div class="settings-caption">
-                <b>时间窗</b><small>勾选的才会在单击胶囊时循环</small>
-              </div>
-              <div class="settings-chips" id="settingsPeriods" role="group" aria-label="时间窗">
-                <button type="button" class="settings-chip" data-period="today" aria-pressed="true">今日</button>
-                <button type="button" class="settings-chip" data-period="7d" aria-pressed="true">7 天</button>
-                <button type="button" class="settings-chip" data-period="30d" aria-pressed="true">30 天</button>
-                <button type="button" class="settings-chip" data-period="all" aria-pressed="true">全部</button>
-              </div>
-            </div>
-            <div class="settings-field">
-              <div class="settings-caption">
-                <b>数值</b><small>滚动的数字代表什么</small>
-              </div>
-              <div class="settings-chips" id="settingsMetrics" role="group" aria-label="胶囊数值">
-                <button type="button" class="settings-chip" data-metric="total" aria-pressed="true">总 token</button>
-                <button type="button" class="settings-chip" data-metric="input" aria-pressed="false">输入</button>
-                <button type="button" class="settings-chip" data-metric="output" aria-pressed="false">输出</button>
-                <button type="button" class="settings-chip" data-metric="cache" aria-pressed="false">缓存读</button>
-              </div>
-            </div>
-            <label class="settings-switch">
-              <span><b>数字滚动</b><small>关闭后直接替换，不做逐位动画</small></span>
-              <input type="checkbox" id="settingsRoll">
-            </label>
-          </section>
-
-          <section class="settings-group">
-            <h3>账号卡片</h3>
-            <label class="settings-switch">
-              <span><b>额度条</b><small>剩余额度与续期</small></span>
-              <input type="checkbox" id="settingsQuota">
-            </label>
-            <label class="settings-switch">
-              <span><b>耗时拆解</b><small>首字延迟写进明细行，悬停看全部</small></span>
-              <input type="checkbox" id="settingsTiming">
-            </label>
-          </section>
-
-          <section class="settings-group">
-            <h3>连接与更新</h3>
-            <label class="settings-row">
-              <span><b>网关</b><small id="settingsGatewayHint">留空自动读取 magpie 的端口</small></span>              <input type="text" id="settingsGateway" class="settings-input" placeholder="留空自动检测">
-            </label>
-            <label class="settings-switch">
-              <span><b>启动时检查更新</b><small>只检查应用，不自动下载</small></span>
-              <input type="checkbox" id="settingsCheckUpdates">
-            </label>
-          </section>
-
-          <section class="settings-group settings-file">
-            <div class="settings-file-row">
-              <span>设置文件</span>
-              <button type="button" class="settings-link" id="settingsOpenFile">打开所在文件夹</button>
-            </div>
-            <details class="settings-raw-box">
-              <summary>查看 settings.json</summary>
-              <pre id="settingsRaw"></pre>
-            </details>
-          </section>
-
-          <footer class="settings-foot">
-            <span class="settings-status" id="settingsStatus" role="status"></span>
-            <div class="settings-actions">
-              <button type="button" class="settings-ghost" id="settingsCancel">取消</button>
-              <button type="submit" class="settings-save" id="settingsSave">保存</button>
-            </div>
-          </footer>
-        </form>
-
-        <div class="about-view" id="aboutView" hidden>
-          <header class="about-head">
-            <div>
-              <b>关于 Busy Magpie</b>
-              <span>应用更新与版本信息</span>
-            </div>
-            <button class="settings-x" id="aboutClose" type="button" aria-label="关闭">×</button>
-          </header>
-
-          <div class="about-scroll">
-            <section class="about-block about-app">
-              <div class="about-line">
-                <span>桌面应用</span>
-                <span class="about-versions">
-                  <b class="mono" id="aboutCurrent">v—</b>
-                  <i id="aboutArrow">→</i>
-                  <b class="mono accent" id="aboutLatest" hidden></b>
-                </span>
-              </div>
-              <p class="about-status" id="aboutStatus">还没有检查更新。</p>
-              <div class="update-progress" id="updateProgress" hidden>
-                <i id="updateProgressBar"></i>
-              </div>
-              <div class="about-actions">
-                <button type="button" class="about-primary" id="aboutUpdate" hidden>更新应用</button>
-                <button type="button" class="about-ghost" id="aboutCheck">检查更新</button>
-                <button type="button" class="about-link" id="aboutSkip" hidden>跳过此版本</button>
-                <button type="button" class="about-link" id="aboutRelease" hidden>打开发布页</button>
-              </div>
-            </section>
-
-            <section class="about-block about-plugin">
-              <div class="about-line">
-                <span>启动器插件</span>
-                <b class="mono" id="aboutPlugin">v—</b>
-              </div>
-              <p>插件由 magpie 管理。需要更新启动器时，请到 magpie → Plugins → Busy Magpie 点 Update，不要在应用里直接覆盖。</p>
-            </section>
-
-            <p class="about-error" id="aboutError" role="status"></p>
-          </div>
-        </div>
-        </div>
-      </section>
 
       <div class="first-run-mask" id="firstRunMask" hidden>
         <section class="first-run-card">
