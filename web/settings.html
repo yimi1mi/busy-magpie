@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:">
+  <title>Busy Magpie 设置</title>
+  <link rel="stylesheet" href="./settings.css">
+</head>
+<body>
+  <main class="panel">
+    <header class="head">
+      <div class="mark" aria-hidden="true">
+        <svg viewBox="0 0 44 44"><path id="settingsBird" fill-rule="evenodd"></path></svg>
+      </div>
+      <div>
+        <h1>Busy Magpie</h1>
+        <p>桌面路由插件设置</p>
+      </div>
+    </header>
+
+    <form id="settingsForm" autocomplete="off">
+      <section class="group">
+        <h2>显示</h2>
+        <label class="row switch-row">
+          <span>
+            <b>总在最前</b>
+            <small>让卡片盖在其他窗口上方</small>
+          </span>
+          <input type="checkbox" id="topmost">
+        </label>
+        <label class="row switch-row">
+          <span>
+            <b>隐藏账号名称</b>
+            <small>邮箱和 Key 会打码，服务商名称保留</small>
+          </span>
+          <input type="checkbox" id="maskAccounts">
+        </label>
+        <div class="row range-row">
+          <span>
+            <b>不透明度</b>
+            <small>40% – 100%</small>
+          </span>
+          <div class="range-wrap">
+            <input type="range" id="opacity" min="40" max="100" step="1" value="100">
+            <output id="opacityOut">100%</output>
+          </div>
+        </div>
+      </section>
+
+      <section class="group">
+        <h2>网关</h2>
+        <label class="field">
+          <span>地址</span>
+          <input type="text" id="gateway" placeholder="留空自动检测，例如 127.0.0.1:3425">
+          <small id="gatewayHint">留空时读取 magpie 的设置和默认端口。</small>
+        </label>
+      </section>
+
+      <section class="group">
+        <h2>窗口</h2>
+        <div class="size-row">
+          <label class="field compact">
+            <span>宽度</span>
+            <input type="number" id="width" min="600" step="1">
+          </label>
+          <label class="field compact">
+            <span>高度</span>
+            <input type="number" id="height" min="432" step="1">
+          </label>
+        </div>
+        <p class="hint">也可以在卡片任意边框或四角拖动调整。位置由拖动决定。</p>
+      </section>
+
+      <section class="group file-group">
+        <h2>设置文件</h2>
+        <code class="path" id="settingsPath">—</code>
+        <div class="file-actions">
+          <button type="button" class="ghost" id="openFile">打开所在文件夹</button>
+        </div>
+        <details class="raw-box">
+          <summary>查看当前 settings.json</summary>
+          <pre id="rawSettings">—</pre>
+        </details>
+      </section>
+
+      <footer class="foot">
+        <span class="status" id="status" role="status"></span>
+        <div class="actions">
+          <button type="button" class="ghost" id="cancel">取消</button>
+          <button type="submit" class="primary" id="save">保存</button>
+        </div>
+      </footer>
+    </form>
+  </main>
+  <script type="module" src="./settings.js"></script>
+</body>
+</html>

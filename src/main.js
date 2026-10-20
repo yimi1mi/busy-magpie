@@ -16,8 +16,10 @@ const RENDERER = path.join(__dirname, '..', 'web', 'index.html');
 const IS_MAC = process.platform === 'darwin';
 const IS_WIN = process.platform === 'win32';
 const START_IN_LAYOUT = process.argv.includes('--layout');
+const START_IN_SETTINGS = process.argv.includes('--settings');
 
 let win = null;
+let settingsWindow = null;
 let tray = null;
 let settings = null;
 let settingsPath = null;
@@ -284,6 +286,43 @@ function showWindow() {
   applyClickThrough();
   applyTopmost();
   refreshTrayMenu();
+}
+
+function openSettingsWindow() {
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    if (settingsWindow.isMinimized()) settingsWindow.restore();
+    settingsWindow.show();
+    settingsWindow.focus();
+    return;
+  }
+
+  settingsWindow = new BrowserWindow({
+    width: 520,
+    height: 640,
+    minWidth: 480,
+    minHeight: 560,
+    parent: win || undefined,
+    modal: false,
+    show: false,
+    resizable: true,
+    minimizable: true,
+    maximizable: false,
+    fullscreenable: false,
+    autoHideMenuBar: true,
+    backgroundColor: '#14141b',
+    title: 'Busy Magpie 设置',
+    webPreferences: {
+      preload: path.join(__dirname, 'settings-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      spellcheck: false,
+    },
+  });
+  settingsWindow.setMenuBarVisibility(false);
+  settingsWindow.loadFile(path.join(__dirname, '..', 'web', 'settings.html'));
+  settingsWindow.once('ready-to-show', () => settingsWindow.show());
+  settingsWindow.on('closed', () => { settingsWindow = null; });
 }
 
 function toggleVisible() {
@@ -725,6 +764,10 @@ function buildTrayMenu() {
     },
     { type: 'separator' },
     {
+      label: '设置…',
+      click: openSettingsWindow,
+    },
+    {
       label: '调整位置…',
       click: beginLayout,
     },
@@ -801,6 +844,100 @@ ipcMain.handle('busy:bootstrap', () => ({
   frame,
 }));
 
+ipcMain.handle('settings:get', () => {
+  let raw = '';
+  try {
+    raw = fs.readFileSync(settingsPath, 'utf8');
+  } catch {
+    raw = JSON.stringify(settings, null, 2);
+  }
+  return {
+    settings: {
+      ...settings,
+      gateway: settings.gateway || '',
+    },
+    resolvedGateway: displayAddress(resolveGateway()),
+    path: settingsPath,
+    raw,
+  };
+});
+
+ipcMain.handle('settings:save', (_event, input) => {
+  try {
+    const data = input && typeof input === 'object' ? input : {};
+    const area = screen.getDisplayNearestPoint({
+      x: settings.left ?? 0,
+      y: settings.top ?? 0,
+    }).workArea;
+    const width = Math.max(600, Math.min(area.width - 20, Number(data.width) || settings.width || WIDTH));
+    const height = Math.max(432, Math.min(area.height - 20, Number(data.height) || settings.height || HEIGHT));
+    const rawGateway = String(data.gateway ?? '').trim();
+    const nextGateway = rawGateway ? normalizeGateway(rawGateway) : null;
+    const gatewayChanged = nextGateway !== settings.gateway;
+    const sizeChanged = width !== settings.width || height !== settings.height;
+
+    settings = {
+      ...settings,
+      topmost: Boolean(data.topmost),
+      maskAccounts: Boolean(data.maskAccounts),
+      opacity: Math.min(1, Math.max(0.4, Number(data.opacity) || 1)),
+      gateway: nextGateway,
+      width,
+      height,
+    };
+    saveSettings();
+    applyTopmost();
+    if (win && !win.isDestroyed()) {
+      win.setOpacity(settings.opacity);
+      const bounds = win.getBounds();
+      win.setBounds({
+        x: bounds.x,
+        y: bounds.y,
+        width: settings.width,
+        height: settings.height,
+      }, false);
+      settings.left = bounds.x;
+      settings.top = bounds.y;
+      frame = {
+        lanes: frame.lanes,
+        cardHeight: settings.height - 32,
+        windowHeight: settings.height,
+      };
+      send('magpie:frame', frame);
+    }
+    send('magpie:settings', publicSettings());
+    if (gatewayChanged) rebuildClient();
+    saveSettings();
+    refreshTrayMenu();
+    let raw = '';
+    try {
+      raw = fs.readFileSync(settingsPath, 'utf8');
+    } catch {
+      raw = JSON.stringify(settings, null, 2);
+    }
+    return {
+      ok: true,
+      sizeChanged,
+      raw,
+      path: settingsPath,
+      settings: { ...settings, gateway: settings.gateway || '' },
+      resolvedGateway: displayAddress(resolveGateway()),
+    };
+  } catch (error) {
+    log(`save settings: ${error.message}`);
+    return { ok: false, error: error.message };
+  }
+});
+
+ipcMain.on('settings:open-file', () => {
+  if (!fs.existsSync(settingsPath)) saveSettings();
+  shell.showItemInFolder(settingsPath);
+});
+
+ipcMain.on('settings:close', () => {
+  if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.close();
+});
+
 ipcMain.on('busy:end-layout', () => endLayout());
 ipcMain.on('busy:drag-start', () => startDrag());
 ipcMain.on('busy:drag-end', () => endDrag());
@@ -824,6 +961,9 @@ function init() {
 
   if (START_IN_LAYOUT) {
     setTimeout(beginLayout, 1500);
+  }
+  if (START_IN_SETTINGS) {
+    setTimeout(openSettingsWindow, 1200);
   }
 }
 

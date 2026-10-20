@@ -8,8 +8,9 @@ import fs from 'node:fs';
 
 const port = process.env.CDP_PORT || '9223';
 const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-const page = targets.find((target) => target.type === 'page');
-if (!page) throw new Error('no page target');
+const match = process.env.CDP_MATCH || '';
+const page = targets.find((target) => target.type === 'page' && target.url.includes(match));
+if (!page) throw new Error(`no page target${match ? ` matching ${match}` : ''}`);
 
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 let nextId = 0;
