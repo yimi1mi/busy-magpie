@@ -5,15 +5,18 @@
 // already installed. The gateway request is always passed through untouched.
 
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { createHash } from 'node:crypto';
+import { existsSync, promises as fsp } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 
 const RELEASE = 'https://github.com/yimi1mi/busy-magpie/releases/latest';
+const API = 'https://api.github.com/repos/yimi1mi/busy-magpie/releases/latest';
 const EXE = 'Busy Magpie.exe';
 
 let launched = false;
-let lastAttempt = 0;
+let installing = false;
+let installTried = false;
 let warned = false;
 
 function candidates() {
@@ -60,24 +63,7 @@ function findApp() {
   return '';
 }
 
-function launch() {
-  if (process.env.BUSY_MAGPIE_NO_LAUNCH === '1' || launched) return;
-  const now = Date.now();
-  if (now - lastAttempt < 30000) return;
-  lastAttempt = now;
-
-  const exe = findApp();
-  if (!exe) {
-    if (!warned) {
-      warned = true;
-      console.warn(
-        `[busy-magpie] app not found; install it from ${RELEASE} `
-        + 'or set BUSY_MAGPIE_APP to Busy Magpie.exe',
-      );
-    }
-    return;
-  }
-
+function spawnApp(exe) {
   try {
     // Electron switches to a headless Node mode when this leaks in from a
     // terminal that launched magpie. The GUI must inherit everything else.
@@ -101,11 +87,90 @@ function launch() {
   }
 }
 
+async function installApp() {
+  if (process.platform !== 'win32') return '';
+  console.log('[busy-magpie] app not installed; downloading the latest release');
+
+  const meta = await fetch(API, {
+    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'busy-magpie-plugin' },
+  });
+  if (!meta.ok) throw new Error(`GitHub answered ${meta.status}`);
+  const release = await meta.json();
+  const asset = (release.assets || []).find((item) => (
+    !/sha256/i.test(item.name) && /win-x64\.exe$/i.test(item.name)
+  ));
+  if (!asset) throw new Error('no Windows x64 installer in the latest release');
+
+  const download = await fetch(asset.browser_download_url, {
+    headers: { 'User-Agent': 'busy-magpie-plugin' },
+  });
+  if (!download.ok) throw new Error(`download answered ${download.status}`);
+  const body = Buffer.from(await download.arrayBuffer());
+  if (asset.digest && asset.digest.startsWith('sha256:')) {
+    const got = createHash('sha256').update(body).digest('hex');
+    if (got !== asset.digest.slice(7).toLowerCase()) {
+      throw new Error('installer checksum does not match the release');
+    }
+  }
+
+  const installer = path.join(tmpdir(), 'busy-magpie-setup.exe');
+  await fsp.writeFile(installer, body);
+  console.log(`[busy-magpie] installing ${release.tag_name} silently`);
+  await new Promise((resolve, reject) => {
+    const child = spawn(installer, ['/S'], {
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`installer exited with ${code}`));
+    });
+  });
+  await fsp.rm(installer, { force: true });
+  return findApp();
+}
+
+function ensureApp() {
+  if (process.env.BUSY_MAGPIE_NO_LAUNCH === '1' || launched || installing) return;
+  const existing = findApp();
+  if (existing) {
+    spawnApp(existing);
+    return;
+  }
+  if (process.env.BUSY_MAGPIE_NO_INSTALL === '1' || installTried) {
+    if (!warned) {
+      warned = true;
+      console.warn(
+        `[busy-magpie] app not found; install it from ${RELEASE} `
+        + 'or set BUSY_MAGPIE_APP to Busy Magpie.exe',
+      );
+    }
+    return;
+  }
+
+  installTried = true;
+  installing = true;
+  installApp()
+    .then((installed) => {
+      if (installed) spawnApp(installed);
+      else if (!warned) {
+        warned = true;
+        console.warn(`[busy-magpie] installed, but ${EXE} was not found`);
+      }
+    })
+    .catch((error) => {
+      console.warn(`[busy-magpie] install failed: ${error.message}; `
+        + `download it from ${RELEASE}`);
+    })
+    .finally(() => { installing = false; });
+}
+
 // Start as soon as the hook module is loaded. onRequest remains a fallback
 // for hosts that import this file before spawning their first request.
-launch();
+ensureApp();
 
 export function onRequest(body) {
-  launch();
+  ensureApp();
   return body;
 }
