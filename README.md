@@ -1,8 +1,10 @@
 # Busy Magpie
 
-**把 magpie 正在做的路由决定，放到桌面上。**
+**把 magpie 正在做的路由决定，放到桌面上。 / Put magpie's live routing decisions on your desktop.**
 
 一张透明、无边框、鼠标可以穿透的实时卡片。它读取 magpie 本机 trace，显示当前 Agent 经过了哪些路由、最终落到哪个账号，以及这段时间用了多少 token。
+
+A transparent, borderless, click-through card that reads magpie's local trace and shows which routes each agent took, which account it landed on, and the total tokens used.
 
 [![platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20%C2%B7%20macOS%2012%2B-4b465c?style=flat-square)](#)
 [![electron](https://img.shields.io/badge/Electron-39-8f7cff?style=flat-square)](https://www.electronjs.org/)
