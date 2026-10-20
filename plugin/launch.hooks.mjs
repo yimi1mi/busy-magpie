@@ -34,6 +34,10 @@ let checking = false;
 let installTried = false;
 let warned = false;
 let releaseCache = null;
+// A newer release waits for a quiet moment rather than interrupting a look.
+let pendingUpdate = '';
+let notifiedUpdate = '';
+let lastRequest = Date.now();
 
 function psQuote(value) {
   return String(value).replace(/'/g, "''");
@@ -301,7 +305,13 @@ function ensureApp() {
 
         if (appRunning()) {
           console.warn(`[busy-magpie] ${current} -> ${target} available; app is running`);
-          notify('Busy Magpie', `发现 ${target}，退出 Busy Magpie 后重启插件即可更新`);
+          // Not while someone is watching: the swap waits for a quiet five
+          // minutes, then quits the card, installs and starts it again.
+          pendingUpdate = target;
+          if (notifiedUpdate !== target) {
+            notifiedUpdate = target;
+            notify('Busy Magpie', `发现 ${target}，空闲几分钟后自动更新`);
+          }
           spawnApp(existing);
           return;
         }
@@ -361,11 +371,46 @@ function ensureApp() {
     .finally(() => { installing = false; });
 }
 
+// A card that stays open would otherwise never update: the check refuses to
+// install over a running app. So a newer release waits here until nothing has
+// gone through the gateway for a while, and then the swap happens.
+const IDLE_MS = 5 * 60 * 1000;
+
+async function applyPendingUpdate() {
+  if (!pendingUpdate || installing || checking) return;
+  if (Date.now() - lastRequest < IDLE_MS) return;
+  if (!appRunning()) return; // the next launch's check installs it
+
+  const target = pendingUpdate;
+  pendingUpdate = '';
+  installing = true;
+  try {
+    console.log(`[busy-magpie] idle: updating to ${target}`);
+    notify('Busy Magpie', `正在更新到 ${target}…`);
+    try {
+      execFileSync('taskkill.exe', ['/IM', EXE, '/F'], { timeout: 5000, windowsHide: true });
+    } catch {
+      // It may have exited on its own between the check and the kill.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    const installed = await installApp();
+    if (installed) spawnApp(installed);
+  } catch (error) {
+    console.warn(`[busy-magpie] idle update failed: ${error.message}`);
+    notify('Busy Magpie', '自动更新失败，已保留当前版本');
+  } finally {
+    installing = false;
+  }
+}
+
+setInterval(() => { applyPendingUpdate().catch(() => {}); }, 60000);
+
 // Start as soon as the hook module is loaded. onRequest remains a fallback
 // for hosts that import this file before spawning their first request.
 ensureApp();
 
 export function onRequest(body) {
+  lastRequest = Date.now();
   ensureApp();
   return body;
 }
