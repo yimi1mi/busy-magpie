@@ -19,6 +19,42 @@ let installing = false;
 let installTried = false;
 let warned = false;
 
+function psQuote(value) {
+  return String(value).replace(/'/g, "''");
+}
+
+function notify(title, message) {
+  try {
+    if (process.platform === 'win32') {
+      const script = [
+        'Add-Type -AssemblyName System.Windows.Forms',
+        'Add-Type -AssemblyName System.Drawing',
+        '$n = New-Object System.Windows.Forms.NotifyIcon',
+        '$n.Icon = [System.Drawing.SystemIcons]::Information',
+        '$n.Visible = $true',
+        `$n.ShowBalloonTip(6000, '${psQuote(title)}', '${psQuote(message)}', [System.Windows.Forms.ToolTipIcon]::Info)`,
+        'Start-Sleep -Seconds 7',
+        '$n.Dispose()',
+      ].join('; ');
+      const encoded = Buffer.from(script, 'utf16le').toString('base64');
+      const child = spawn('powershell.exe', [
+        '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded,
+      ], { detached: true, stdio: 'ignore', windowsHide: true });
+      child.on('error', () => {});
+      child.unref();
+    } else if (process.platform === 'darwin') {
+      const esc = (value) => String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      const child = spawn('osascript', [
+        '-e', `display notification "${esc(message)}" with title "${esc(title)}"`,
+      ], { detached: true, stdio: 'ignore' });
+      child.on('error', () => {});
+      child.unref();
+    }
+  } catch {
+    // Notifications are best effort; they must never stop the launcher.
+  }
+}
+
 function candidates() {
   const out = [];
   const custom = process.env.BUSY_MAGPIE_APP;
@@ -90,6 +126,7 @@ function spawnApp(exe) {
 async function installApp() {
   if (process.platform !== 'win32') return '';
   console.log('[busy-magpie] app not installed; downloading the latest release');
+  notify('Busy Magpie', '正在下载安装包，完成后会自动打开…');
 
   const meta = await fetch(API, {
     headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'busy-magpie-plugin' },
@@ -116,6 +153,7 @@ async function installApp() {
   const installer = path.join(tmpdir(), 'busy-magpie-setup.exe');
   await fsp.writeFile(installer, body);
   console.log(`[busy-magpie] installing ${release.tag_name} silently`);
+  notify('Busy Magpie', '下载完成，正在安装…');
   await new Promise((resolve, reject) => {
     const child = spawn(installer, ['/S'], {
       stdio: 'ignore',
@@ -153,15 +191,19 @@ function ensureApp() {
   installing = true;
   installApp()
     .then((installed) => {
-      if (installed) spawnApp(installed);
-      else if (!warned) {
+      if (installed) {
+        notify('Busy Magpie', '安装完成，正在启动桌面卡片');
+        spawnApp(installed);
+      } else if (!warned) {
         warned = true;
         console.warn(`[busy-magpie] installed, but ${EXE} was not found`);
+        notify('Busy Magpie', '安装完成，但没有找到启动文件');
       }
     })
     .catch((error) => {
       console.warn(`[busy-magpie] install failed: ${error.message}; `
         + `download it from ${RELEASE}`);
+      notify('Busy Magpie', '自动安装失败，请从 GitHub Releases 手动安装');
     })
     .finally(() => { installing = false; });
 }
