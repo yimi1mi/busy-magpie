@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('busy', {
     deepseek: readAsset('deepseek-path.txt'),
   },
   bootstrap: () => ipcRenderer.invoke('busy:bootstrap'),
+  ready: () => ipcRenderer.send('busy:ready'),
   endLayout: () => ipcRenderer.send('busy:end-layout'),
   dragStart: () => ipcRenderer.send('busy:drag-start'),
   dragEnd: () => ipcRenderer.send('busy:drag-end'),

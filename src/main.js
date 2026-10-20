@@ -20,7 +20,12 @@ const START_IN_SETTINGS = process.argv.includes('--settings');
 
 let win = null;
 let settingsOpen = false;
+let settingsClosing = false;
+let rendererReady = false;
+let pendingSettings = false;
 let settingsBaseBounds = null;
+let settingsPaneHeight = 430;
+let boundsAnimation = null;
 let tray = null;
 let settings = null;
 let settingsPath = null;
@@ -242,12 +247,20 @@ function createWindow() {
     refreshTrayMenu();
   });
 
+  win.webContents.on('did-start-loading', () => { rendererReady = false; });
   win.webContents.on('did-finish-load', () => {
     win.webContents.send('magpie:settings', publicSettings());
     win.webContents.send('magpie:frame', frame);
     if (lastTrace) win.webContents.send('magpie:trace', lastTrace);
     win.webContents.send('magpie:connection', connection);
     win.webContents.send('magpie:layout', layoutMode);
+    if (settingsOpen && settingsBaseBounds) {
+      win.webContents.send('magpie:settings-panel', {
+        open: true,
+        baseCardHeight: settingsBaseBounds.height - 32,
+        paneHeight: settingsPaneHeight,
+      });
+    }
   });
 }
 
@@ -275,7 +288,7 @@ function applyTopmost() {
 
 function applyClickThrough() {
   if (!win || win.isDestroyed()) return;
-  if (settingsOpen || layoutMode || hoverInteractive) {
+  if (settingsOpen || settingsClosing || layoutMode || hoverInteractive) {
     win.setIgnoreMouseEvents(false);
     win.setFocusable(true);
   } else {
@@ -292,9 +305,46 @@ function showWindow() {
   refreshTrayMenu();
 }
 
+function stopBoundsAnimation() {
+  if (!boundsAnimation) return;
+  clearTimeout(boundsAnimation);
+  boundsAnimation = null;
+}
+
+function animateBounds(from, to, duration, done) {
+  stopBoundsAnimation();
+  const start = Date.now();
+  const ease = (value) => 1 - (1 - value) ** 3;
+  const step = () => {
+    if (!win || win.isDestroyed()) {
+      boundsAnimation = null;
+      return;
+    }
+    const t = Math.min(1, (Date.now() - start) / duration);
+    const k = ease(t);
+    win.setBounds({
+      x: Math.round(from.x + (to.x - from.x) * k),
+      y: Math.round(from.y + (to.y - from.y) * k),
+      width: Math.round(from.width + (to.width - from.width) * k),
+      height: Math.round(from.height + (to.height - from.height) * k),
+    }, false);
+    if (t < 1) {
+      boundsAnimation = setTimeout(step, 16);
+    } else {
+      boundsAnimation = null;
+      if (done) done();
+    }
+  };
+  step();
+}
+
 function openSettingsPanel() {
   if (!win || win.isDestroyed()) return;
-  if (settingsOpen) {
+  if (!rendererReady) {
+    pendingSettings = true;
+    return;
+  }
+  if (settingsOpen || settingsClosing) {
     win.showInactive();
     win.focus();
     return;
@@ -310,6 +360,7 @@ function openSettingsPanel() {
   const preferred = 430;
   const maxPane = Math.max(260, area.height - settingsBaseBounds.height - 16);
   const paneHeight = Math.min(preferred, maxPane);
+  settingsPaneHeight = paneHeight;
   const height = settingsBaseBounds.height + paneHeight;
   let y = settingsBaseBounds.y;
   if (y + height > area.y + area.height - 8) {
@@ -317,41 +368,54 @@ function openSettingsPanel() {
   }
 
   settingsOpen = true;
+  settingsClosing = false;
   hoverInteractive = false;
   win.setIgnoreMouseEvents(false);
   win.setFocusable(true);
-  win.setBounds({
-    x: settingsBaseBounds.x,
-    y,
-    width: settingsBaseBounds.width,
-    height,
-  }, false);
   win.focus();
   send('magpie:settings-panel', {
     open: true,
     baseCardHeight: settingsBaseBounds.height - 32,
     paneHeight,
   });
+  animateBounds(settingsBaseBounds, {
+    x: settingsBaseBounds.x,
+    y,
+    width: settingsBaseBounds.width,
+    height,
+  }, 280);
   refreshTrayMenu();
 }
 
 function closeSettingsPanel() {
-  if (!settingsOpen) return;
+  if (!settingsOpen || settingsClosing) return;
+  settingsClosing = true;
   settingsOpen = false;
-  if (win && !win.isDestroyed() && settingsBaseBounds) {
-    win.setBounds(settingsBaseBounds, false);
-    settings.left = settingsBaseBounds.x;
-    settings.top = settingsBaseBounds.y;
-    win.setIgnoreMouseEvents(true, { forward: true });
-    win.setFocusable(false);
-    win.blur();
-    applyTopmost();
-  }
-  settingsBaseBounds = null;
-  hoverInteractive = false;
-  hoverKind = null;
+  const from = win && !win.isDestroyed() ? win.getBounds() : settingsBaseBounds;
+  const to = settingsBaseBounds;
   send('magpie:settings-panel', { open: false });
-  refreshTrayMenu();
+  if (!win || win.isDestroyed() || !to) {
+    settingsBaseBounds = null;
+    settingsClosing = false;
+    return;
+  }
+  setTimeout(() => {
+    animateBounds(from, to, 220, () => {
+      if (win && !win.isDestroyed()) {
+        win.setIgnoreMouseEvents(true, { forward: true });
+        win.setFocusable(false);
+        win.blur();
+        applyTopmost();
+      }
+      settings.left = to.x;
+      settings.top = to.y;
+      settingsBaseBounds = null;
+      settingsClosing = false;
+      hoverInteractive = false;
+      hoverKind = null;
+      refreshTrayMenu();
+    });
+  }, 30);
 }
 
 function toggleVisible() {
@@ -379,7 +443,7 @@ function setHoverInteractive(value, kind = null) {
 function watchHover() {
   clearInterval(hoverTimer);
   hoverTimer = setInterval(() => {
-    if (!win || win.isDestroyed() || !win.isVisible() || settingsOpen || layoutMode || dragState || resizeState) return;
+    if (!win || win.isDestroyed() || !win.isVisible() || settingsOpen || settingsClosing || layoutMode || dragState || resizeState) return;
     const point = screen.getCursorScreenPoint();
     const bounds = win.getBounds();
     const card = {
@@ -406,7 +470,7 @@ function watchHover() {
 }
 
 function startDrag() {
-  if (!win || win.isDestroyed() || settingsOpen || dragState) return;
+  if (!win || win.isDestroyed() || settingsOpen || settingsClosing || dragState) return;
   const point = screen.getCursorScreenPoint();
   const [x, y] = win.getPosition();
   hoverInteractive = false;
@@ -455,7 +519,7 @@ function endDrag() {
 }
 
 function startResize(direction = 'se') {
-  if (!win || win.isDestroyed() || settingsOpen || resizeState) return;
+  if (!win || win.isDestroyed() || settingsOpen || settingsClosing || resizeState) return;
   const dir = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].includes(direction)
     ? direction
     : 'se';
@@ -545,7 +609,7 @@ function endResize() {
 }
 
 function beginLayout() {
-  if (!win || win.isDestroyed() || settingsOpen || layoutMode) return;
+  if (!win || win.isDestroyed() || settingsOpen || settingsClosing || layoutMode) return;
   layoutMode = true;
   if (!win.isVisible()) win.showInactive();
   win.setIgnoreMouseEvents(false);
@@ -844,6 +908,7 @@ function quit() {
   clearTimeout(layoutTimer);
   clearInterval(hoverTimer);
   clearInterval(usageTimer);
+  stopBoundsAnimation();
   if (dragState) {
     clearInterval(dragState.timer);
     clearTimeout(dragState.max);
@@ -968,6 +1033,14 @@ ipcMain.on('settings:open-file', () => {
 });
 
 ipcMain.on('settings:close', () => closeSettingsPanel());
+
+ipcMain.on('busy:ready', () => {
+  rendererReady = true;
+  if (pendingSettings) {
+    pendingSettings = false;
+    openSettingsPanel();
+  }
+});
 
 ipcMain.on('busy:end-layout', () => endLayout());
 ipcMain.on('busy:drag-start', () => startDrag());

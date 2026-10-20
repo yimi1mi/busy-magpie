@@ -315,6 +315,7 @@ function setupSettingsPanel() {
   const save = $('settingsSave');
   let open = false;
   let busy = false;
+  let closeTimer = 0;
 
   const setStatus = (text, error = false) => {
     status.textContent = text || '';
@@ -346,16 +347,25 @@ function setupSettingsPanel() {
   const close = () => {
     if (!open) return;
     open = false;
-    pane.hidden = true;
-    document.body.classList.remove('settings-open');
-    document.documentElement.style.removeProperty('--base-content-h');
+    document.body.classList.add('settings-closing');
+    closeTimer = window.setTimeout(() => {
+      pane.hidden = true;
+      document.body.classList.remove('settings-open', 'settings-closing');
+      document.documentElement.style.removeProperty('--base-content-h');
+    }, 260);
   };
 
   const show = (data) => {
+    window.clearTimeout(closeTimer);
     open = true;
     document.documentElement.style.setProperty('--base-content-h', `${Math.max(120, data.baseCardHeight || 368)}px`);
-    document.body.classList.add('settings-open');
+    document.body.classList.remove('settings-closing');
     pane.hidden = false;
+    // Restart the drawer entrance even when it was reopened quickly.
+    pane.style.animation = 'none';
+    void pane.offsetWidth;
+    pane.style.animation = '';
+    document.body.classList.add('settings-open');
     pane.scrollTop = 0;
     load();
   };
@@ -1157,6 +1167,7 @@ async function boot() {
   setupDragBar();
   setupResizeHandles();
   setupSettingsPanel();
+  window.busy.ready?.();
 }
 
 boot().catch((error) => {

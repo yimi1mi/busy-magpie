@@ -2072,3 +2072,33 @@ body.settings-open .content {
   opacity: 0.55;
   cursor: wait;
 }
+
+@keyframes settingsDrawerIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes settingsDrawerOut {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+.settings-pane:not([hidden]) {
+  animation: settingsDrawerIn 0.24s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+body.settings-closing .settings-pane:not([hidden]) {
+  animation: settingsDrawerOut 0.16s ease-in both;
+}
