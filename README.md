@@ -51,7 +51,7 @@ setx BUSY_MAGPIE_APP "D:\Apps\Busy Magpie\Busy Magpie.exe"
 
 插件只负责启动桌面层；透明穿透、实时 trace 和所有界面仍然由 Electron 应用提供。magpie 的插件页面运行在沙盒 iframe 里，既拿不到实时 trace，也不能创建跨应用的透明窗口，所以这里采用启动器，而不是页面插件。
 
-版本号取自 `package.json` 的 `version`（当前 `v1.3.1`）：magpie 的插件列表会显示它，桌面卡片右上角也会显示同一个版本；设置面板标题同样显示版本。
+版本号取自 `package.json` 的 `version`（当前 `v1.4.0`）：magpie 的插件列表会显示它，桌面卡片右上角也会显示同一个版本；设置面板标题同样显示版本。
 
 ## 截图
 
@@ -277,6 +277,17 @@ Codex            ┈┘              OpenAI
 
 - Windows：`%APPDATA%\Busy Magpie\settings.json`
 - macOS：`~/Library/Application Support/Busy Magpie/settings.json`
+
+## magpie 重启了
+
+卡片会自己接回去，不用点托盘里的「重新连接」：
+
+- 读 trace 的长轮询失败后按 1 秒、2 秒、4 秒、5 秒退避重试，卡片右上角显示「重连中」；magpie 回来后几秒内自动恢复「实时」。
+- 重启后的 magpie 是另一个进程（`pid` 变了），卡片会丢掉上一个进程留下的路由，重新取一份完整快照，不会把旧请求留在屏幕上。
+- magpie 换了端口也能跟上：每次重试都会重新解析网关地址。
+- 万一读 trace 的循环自己卡死或退出，每 15 秒一次的看门狗在 60 秒没有心跳时把它重建。
+
+这条默认开着，没有开关，也不需要设置。
 
 ## 窗口不见了
 

@@ -1229,6 +1229,14 @@ class TraceClient {
     this.stopped = false;
     this.controller = null;
     this.lastError = '';
+    // Failed reads in a row: they decide how long the next retry waits.
+    this.misses = 0;
+    // The gateway's pid: a different one is a magpie that started again, so
+    // its sequence and routes are not the ones this client remembers.
+    this.pid = 0;
+    // The last time the loop did anything at all. The watchdog reads it to
+    // tell a retrying loop from one that stopped without saying so.
+    this.lastBeat = Date.now();
     // The endpoint after a non-zero seq returns only changed routes, not a
     // full snapshot. Keep the union so a request that started earlier stays
     // on the card until it is done.
@@ -1237,7 +1245,13 @@ class TraceClient {
 
   start() {
     this.stopped = false;
-    this.loop();
+    this.lastBeat = Date.now();
+    // The loop itself retries every failure, but a fault outside the try (a
+    // throw from the renderer bridge, a rejected promise nobody awaited) used
+    // to end it for good. Nothing below the watchdog depends on it surviving.
+    this.loop().catch((error) => {
+      log(`trace loop stopped: ${error && error.stack ? error.stack : error}`);
+    });
   }
 
   stop() {
@@ -1249,11 +1263,24 @@ class TraceClient {
     if (this.controller) this.controller.abort();
   }
 
+  // A loop that is retrying still touches lastBeat; one that is stuck in a
+  // read should never sit there much past the read's own 40 s abort.
+  idleFor() {
+    return Date.now() - this.lastBeat;
+  }
+
   async loop() {
+    // A read that fails leaves its own 40 s abort armed. Without clearing it
+    // in a finally, every retry starts with a timer that can abort the *next*
+    // read: after a gateway restart the card could stay "读取超时" for the
+    // whole minute its timers were still queued. The timer belongs to one
+    // attempt and dies with it, whatever the attempt did.
     while (!this.stopped) {
+      let timeout = null;
+      this.lastBeat = Date.now();
       try {
         this.controller = new AbortController();
-        const timeout = setTimeout(() => this.controller.abort(), 40000);
+        timeout = setTimeout(() => this.controller.abort(), 40000);
         const suffix = this.first ? '' : '&wait=1';
         const url = `${this.base}/v1/magpie/trace?after=${this.seq}${suffix}`;
         const response = await fetch(url, {
@@ -1261,22 +1288,29 @@ class TraceClient {
           headers: { Accept: 'application/json' },
           cache: 'no-store',
         });
-        clearTimeout(timeout);
         if (!response.ok) {
           const error = new Error(`magpie answered ${response.status}`);
           error.status = response.status;
           throw error;
         }
         const data = await response.json();
-        if (this.seq > 0 && Number(data.seq) < this.seq) {
+        const pid = Number(data.pid) || 0;
+        const restarted = (pid && this.pid && pid !== this.pid)
+          || (this.seq > 0 && Number(data.seq) < this.seq);
+        if (restarted) {
+          // magpie started over: its sequence means nothing here any more, and
+          // the routes it never ran must not stay on the card.
+          this.pid = pid;
           this.seq = 0;
           this.first = true;
           this.routes.clear();
           continue;
         }
+        this.pid = pid || this.pid;
         this.seq = Number(data.seq) || 0;
         this.first = false;
         this.lastError = '';
+        this.misses = 0;
         for (const route of Array.isArray(data.routes) ? data.routes : []) {
           this.routes.set(String(route.id), route);
         }
@@ -1302,13 +1336,50 @@ class TraceClient {
           this.lastError = detail;
           log(`trace unavailable at ${this.base}: ${detail}`);
         }
-        connection = { online: false, detail, at: Date.now() };
+        // magpie may come back on another port than the one it left on: the
+        // address is resolved again on every retry instead of once at start.
+        const base = resolveGateway();
+        if (base !== this.base) {
+          log(`trace gateway moved: ${this.base} -> ${base}`);
+          this.base = base;
+          this.pid = 0;
+          this.seq = 0;
+          this.first = true;
+          this.routes.clear();
+        }
+        connection = { online: false, detail, retry: true, at: Date.now() };
         fitWindow(0);
         send('magpie:connection', connection);
-        await delay(2000);
+        // Back off instead of hammering a gateway that is down: 1 s, 2 s, 4 s,
+        // then a steady 5 s. The card shows "重连中" while the loop retries,
+        // so no click and no setting is needed once magpie is back.
+        this.misses = Math.min(this.misses + 1, 5);
+        const wait = Math.min(1000 * 2 ** (this.misses - 1), 5000);
+        await delay(wait);
+        continue;
+      } finally {
+        if (timeout) clearTimeout(timeout);
       }
     }
   }
+}
+
+// The trace loop is the card's only link to magpie, so it gets a watchdog of
+// its own: a loop that dies or hangs is rebuilt instead of waiting for the
+// user to find 重新连接 in the tray. This is on by default, with no setting.
+const WATCHDOG_MS = 15000;
+const STALLED_MS = 60000;
+let watchdogTimer = null;
+
+function watchTrace() {
+  clearInterval(watchdogTimer);
+  watchdogTimer = setInterval(() => {
+    if (quitting || !client) return;
+    if (client.idleFor() < STALLED_MS) return;
+    log(`trace loop stalled for ${Math.round(client.idleFor() / 1000)}s: rebuilding`);
+    rebuildClient();
+    send('magpie:connection', { online: false, detail: '正在重新连接', retry: true });
+  }, WATCHDOG_MS);
 }
 
 function describeError(error) {
@@ -1531,6 +1602,8 @@ function quit() {
   clearInterval(updateTimer);
   globalShortcut.unregisterAll();
   clearInterval(aliveTimer);
+  clearInterval(watchdogTimer);
+  watchdogTimer = null;
   if (dragState) {
     clearInterval(dragState.timer);
     clearTimeout(dragState.max);
@@ -1784,6 +1857,7 @@ function init() {
   aliveTimer = setInterval(touchAlive, 10000);
   watchHover();
   rebuildClient();
+  watchTrace();
   usageTimer = setInterval(refreshUsage, 20000);
   setTimeout(() => checkForUpdates(false), 2500);
   updateTimer = setInterval(() => checkForUpdates(false), UPDATE_CHECK_MS);

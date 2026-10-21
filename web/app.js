@@ -1245,7 +1245,10 @@ function animateNumber(target, value) {
 
 function setLiveChrome(view) {
   const waiting = !connection.detail || connection.detail === '正在连接' || connection.detail === '正在重新连接';
-  const state = connection.online ? 'real' : waiting ? 'connecting' : 'offline';
+  // A card that lost the gateway retries on its own; saying so keeps it from
+  // looking like a dead end that needs 重新连接 in the tray.
+  const retrying = !connection.online && Boolean(connection.retry);
+  const state = connection.online ? 'real' : waiting || retrying ? 'connecting' : 'offline';
   el.live.classList.toggle('active', Boolean(connection.online && view?.inFlight));
   el.live.classList.toggle('connecting', state === 'connecting');
   el.live.classList.toggle('offline', state === 'offline');
@@ -1253,7 +1256,7 @@ function setLiveChrome(view) {
   if (state === 'real') {
     el.liveState.textContent = '实时';
   } else if (state === 'connecting') {
-    el.liveState.textContent = '连接中';
+    el.liveState.textContent = retrying ? '重连中' : '连接中';
   } else {
     el.liveState.textContent = '未连接';
   }
