@@ -455,7 +455,12 @@ function stateText(route, lastTry, failed, inFlight, forAccount) {
   if (inFlight) {
     return lastTry && !lastTry.done ? '回答中…' : '排队中…';
   }
-  return forAccount ? '回答了这个请求' : `已回答 · ${formatDuration(route.ms)}`;
+  if (forAccount) return '回答了这个请求';
+  // The newest reply keeps its speed here, so it stays readable while the
+  // next request is already running and the stage above shows that one.
+  const speed = speedInfo(route, lastTry);
+  const rate = speed ? ` · ${Math.round(speed.rate)} tok/s` : '';
+  return `已回答 · ${formatDuration(route.ms)}${rate}`;
 }
 
 function who(route, picked, provider) {
