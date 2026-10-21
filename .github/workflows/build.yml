@@ -16,10 +16,11 @@ jobs:
           - os: windows-latest
             script: dist:win
             artifact: windows
-          # macOS build disabled for now; re-enable when signing is set up.
-          # - os: macos-latest
-          #   script: dist:mac
-          #   artifact: macos
+          # Unsigned (ad-hoc) macOS builds: fine for a manual install, not for
+          # in-app updates, which need a Developer ID signature and notarizing.
+          - os: macos-latest
+            script: dist:mac
+            artifact: macos
     runs-on: ${{ matrix.os }}
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
