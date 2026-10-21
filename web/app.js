@@ -246,7 +246,10 @@ function renderAccountDetail(view) {
   const timing = settings.showTiming !== false ? view.timing : null;
   const parts = [];
   if (view.tokenDetail) parts.push(view.tokenDetail);
-  if (timing && timing.ttft > 0) parts.push(`首字 ${formatLatency(timing.ttft)}`);
+  if (timing?.speed) parts.push(`${Math.round(timing.speed.rate)} tok/s`);
+  // One row only: with a speed to show, the first-token wait moves to the
+  // hover tip instead of pushing the line into an ellipsis.
+  if (timing && timing.ttft > 0 && !timing.speed) parts.push(`首字 ${formatLatency(timing.ttft)}`);
   const detail = parts.join(' · ');
   el.accountToken.textContent = detail;
   el.accountToken.hidden = !detail;
@@ -274,6 +277,9 @@ function renderAccountDetail(view) {
   }
   if (timing) {
     const bits = [];
+    if (timing.speed) {
+      bits.push(`${Math.round(timing.speed.rate)} tok/s（${Math.round(timing.speed.tokens).toLocaleString('zh-CN')} token / ${formatDuration(timing.speed.window)}）`);
+    }
     if (timing.ttft > 0) bits.push(`首字 ${formatLatency(timing.ttft)}`);
     if (timing.ms > 0) bits.push(`总 ${formatDuration(timing.ms)}`);
     if (timing.queued > 0) bits.push(`排队 ${formatDuration(timing.queued)}`);
@@ -868,7 +874,12 @@ function setupAbout() {
     }
   };
 
-  button?.addEventListener('click', () => window.busy.aboutOpen());
+  // The header is where people ask "is there a newer one?": open 关于 and ask
+  // straight away, instead of making them find 检查更新 in the panel.
+  button?.addEventListener('click', () => {
+    window.busy.aboutOpen();
+    window.busy.updatesCheck();
+  });
   chip?.addEventListener('click', () => {
     if (!chip.disabled) window.busy.updatesInstall();
   });
