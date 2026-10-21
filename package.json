@@ -30,7 +30,7 @@
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "dist:win": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-win.ps1",
-    "dist:mac": "electron-builder --mac dmg zip --x64 --arm64"
+    "dist:mac": "electron-builder --mac dmg zip --x64 --arm64 --publish never"
   },
   "devDependencies": {
     "electron": "^39.8.7",
