@@ -762,9 +762,15 @@ async function installUpdate() {
 function spawnDetached(file, args) {
   try {
     const { spawn } = require('child_process');
+    // The card started at the end of the update is an Electron app, and one
+    // begun from a terminal that exported ELECTRON_RUN_AS_NODE would run as
+    // Node instead. The launcher strips it for the card; so does this.
+    const env = { ...process.env };
+    delete env.ELECTRON_RUN_AS_NODE;
     const child = spawn('cmd.exe', ['/c', 'start', '', '/b', file, ...args], {
       stdio: 'ignore',
       windowsHide: true,
+      env,
     });
     child.unref();
     return child;
