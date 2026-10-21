@@ -989,13 +989,19 @@ function syncFlights(routes, multi) {  if (reducedMotion.matches) {
   }
 
   for (const [key, flight] of [...flights]) {
-    if (!wanted.has(key)) {
-      flight.active = false;
-      flight.bird.remove();
-      flight.guides.remove();
-      flight.fx.remove();
-      flights.delete(key);
+    if (wanted.has(key)) continue;
+    // The route finished, not the layout: let the bird land where it is
+    // going, then go. Removing it on the spot made the answer look like it
+    // vanished halfway through the return.
+    if (flight.single === !multi) {
+      flight.finishing = true;
+      continue;
     }
+    flight.active = false;
+    flight.bird.remove();
+    flight.guides.remove();
+    flight.fx.remove();
+    flights.delete(key);
   }
 
   for (const [key, route] of wanted) {
@@ -1017,13 +1023,18 @@ function startFlight(key, route, multi, color) {
   bird.setAttribute('class', 'flying-bird');
   bird.style.setProperty('--agent', color);
   bird.style.opacity = '0';
-  bird.innerHTML = FLIER;
+  // The flier and the packet are separate on purpose: magpie's own routing
+  // page drops the bird at the account and leaves the request's dot waiting
+  // there, so the wait belongs to the dot, not to the courier.
+  const flier = document.createElementNS(SVG_NS, 'g');
+  flier.setAttribute('class', 'flier');
+  flier.innerHTML = FLIER;
   const packet = document.createElementNS(SVG_NS, 'circle');
   packet.setAttribute('class', 'packet');
   packet.setAttribute('r', '3.2');
   packet.setAttribute('cx', '0');
   packet.setAttribute('cy', '0');
-  bird.append(packet);
+  bird.append(flier, packet);
 
   const guides = document.createElementNS(SVG_NS, 'g');
   guides.setAttribute('aria-hidden', 'true');
@@ -1038,6 +1049,7 @@ function startFlight(key, route, multi, color) {
     single: !multi,
     color,
     bird,
+    flier,
     guides,
     fx,
     hubCenter: null,
@@ -1050,11 +1062,14 @@ function startFlight(key, route, multi, color) {
     born: performance.now(),
     wobPhase: Math.random() * Math.PI * 2,
     pace: 1,
+    // The bank angle eases towards the path's tangent, the way it does on
+    // magpie's own stage, instead of snapping on every corner.
+    aim: null,
+    aimFlip: false,
     active: true,
     leg1: null,
     leg2: null,
     phase: 160 + Math.random() * 900,
-    answerHold: 480 + Math.random() * 300,
     rest: 820 + Math.random() * 500,
     legPause: 110 + Math.random() * 90,
   };
@@ -1227,8 +1242,17 @@ function flyTrip(flight, reverse) {
         vy = -vy;
       }
       if (Math.abs(vx) + Math.abs(vy) < 0.01) vx = reverse ? -1 : 1;
-      const bank = Math.max(-24, Math.min(24, Math.atan2(vy, Math.abs(vx)) * 180 / Math.PI));
+      const aim = Math.max(-24, Math.min(24, Math.atan2(vy, Math.abs(vx)) * 180 / Math.PI));
       const flip = vx < 0 ? -1 : 1;
+      // Ease towards the tangent instead of snapping to it: turning round at
+      // the account would otherwise whip the bird through 180° in one frame.
+      if (flight.aim === null || flight.aimFlip !== (vx < 0)) {
+        flight.aim = aim;
+        flight.aimFlip = vx < 0;
+      } else {
+        flight.aim += (aim - flight.aim) * 0.12;
+      }
+      const bank = flight.aim;
       const scale = 0.68 * (flight.fxScale || 1);
       // A wing-beat of lateral drift on top of the curve: without it the bird
       // slides along a rail, with it the flight looks steered.
@@ -1243,7 +1267,9 @@ function flyTrip(flight, reverse) {
         'transform',
         `translate(${px.toFixed(1)} ${py.toFixed(1)}) scale(${(flip * scale).toFixed(3)} ${scale.toFixed(3)}) rotate(${(bank + roll).toFixed(1)})`,
       );
-      const alpha = smoothstep(raw / FADE_SHARE);
+      // A trip fades in where it starts; the reply starts from a dot that is
+      // already visible, so it does not blink out and back in.
+      const alpha = reverse ? 1 : smoothstep(raw / FADE_SHARE);
       flight.bird.style.opacity = (alpha * (flight.fxAlpha ?? 1)).toFixed(3);
       if (raw < 1) requestAnimationFrame(step);
       else resolve();
@@ -1253,13 +1279,12 @@ function flyTrip(flight, reverse) {
 }
 
 // Arriving is part of the trip: the bird reaches the account, sits there for a
-// beat, and only then fades out. Without the beat it vanished mid-wire and the
-// arrival never read as an arrival.
+// beat, and then lets go — the request's dot stays at the account while the
+// answer is on its way, which is exactly what magpie's own stage does with it.
 const PERCH_MS = 160;
 const PERCH_FADE_MS = 200;
 
-function perch(flight) {
-  const bird = flight.bird;
+function arrive(flight) {
   return new Promise((resolve) => {
     const t0 = performance.now();
     const hold = (now) => {
@@ -1267,14 +1292,14 @@ function perch(flight) {
         resolve();
         return;
       }
-      bird.style.opacity = '1';
+      flight.bird.style.opacity = '1';
       // A short settle where it landed: the bird dips and comes to rest
       // instead of freezing the instant the path ends.
       const pose = flight.pose;
       const dt = now - t0;
       if (pose) {
         const bob = Math.sin(dt / 130) * 1.6 * Math.exp(-dt / 320);
-        bird.setAttribute(
+        flight.bird.setAttribute(
           'transform',
           `translate(${pose.x.toFixed(1)} ${(pose.y + bob).toFixed(1)}) scale(${(pose.flip * pose.scale).toFixed(3)} ${pose.scale.toFixed(3)}) rotate(${pose.bank.toFixed(1)})`,
         );
@@ -1283,14 +1308,52 @@ function perch(flight) {
         requestAnimationFrame(hold);
         return;
       }
-      bird.style.transition = `opacity ${PERCH_FADE_MS}ms ease-out`;
-      requestAnimationFrame(() => { bird.style.opacity = '0'; });
-      window.setTimeout(() => {
-        bird.style.transition = '';
-        resolve();
-      }, PERCH_FADE_MS + 20);
+      // The courier dissolves; the dot it was carrying stays behind, held.
+      flight.flier.style.opacity = '0';
+      flight.bird.classList.add('held');
+      window.setTimeout(resolve, PERCH_FADE_MS);
     };
     requestAnimationFrame(hold);
+  });
+}
+
+// The answer is ready: a bird takes the dot back on.
+function depart(flight) {
+  flight.bird.classList.remove('held');
+  flight.flier.style.opacity = '1';
+}
+
+// The dot waits at the account for as long as the answer takes, which is what
+// magpie's own stage does with it. A floor keeps a very fast answer readable
+// and a cap keeps a stale trace from parking a dot there forever.
+const ANSWER_MIN_MS = 650;
+const ANSWER_MAX_MS = 8000;
+
+function waitForAnswer(flight) {
+  return new Promise((resolve) => {
+    const t0 = performance.now();
+    const check = () => {
+      const waited = performance.now() - t0;
+      if (!flight.active || waited >= ANSWER_MAX_MS
+        || (flight.finishing && waited >= ANSWER_MIN_MS)) {
+        resolve();
+        return;
+      }
+      window.setTimeout(check, 120);
+    };
+    check();
+  });
+}
+
+// The reply has landed; nothing of the flight stays.
+function land(flight) {
+  return new Promise((resolve) => {
+    flight.bird.style.transition = `opacity ${PERCH_FADE_MS}ms ease-out`;
+    requestAnimationFrame(() => { flight.bird.style.opacity = '0'; });
+    window.setTimeout(() => {
+      flight.bird.style.transition = '';
+      resolve();
+    }, PERCH_FADE_MS + 20);
   });
 }
 
@@ -1306,20 +1369,31 @@ async function runFlight(flight) {
     flight.bird.classList.remove('back');
     await flyTrip(flight, false);
     if (!flight.active) break;
-    await perch(flight);
+    await arrive(flight);
     if (!flight.active) break;
-    await pause(flight.answerHold);
+    // A route that finished while its answer was owed still gets its reply
+    // flown home; only the idle wait between rounds is skipped.
+    if (flight.finishing) {
+      depart(flight);
+      await flyTrip(flight, true);
+      if (!flight.active) break;
+      await land(flight);
+      break;
+    }
+    await waitForAnswer(flight);
 
     flight.bird.classList.add('back');
+    depart(flight);
     await flyTrip(flight, true);
     if (!flight.active) break;
-    await perch(flight);
-    if (!flight.active) break;
+    await land(flight);
+    if (!flight.active || flight.finishing) break;
     await pause(flight.rest);
   }
   flight.bird.remove();
   flight.guides.remove();
   flight.fx.remove();
+  flights.delete(flight.key);
 }
 
 // ── the hub a request flies through ────────────────────────────────────

@@ -145,6 +145,26 @@ body {
   will-change: transform, opacity;
 }
 
+/* The courier can dissolve while the dot it carried stays held at the
+   account, so the two fade independently. */
+.flying-bird .flier {
+  transition: opacity 0.16s ease;
+}
+
+.flying-bird.held .packet {
+  animation: packetWait 1.3s ease-in-out infinite;
+}
+
+@keyframes packetWait {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 .flying-bird .body,
 .flying-bird .tail,
 .flying-bird .wing path:first-child,
