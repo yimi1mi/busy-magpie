@@ -1,7 +1,7 @@
 {
   "name": "busy-magpie",
   "productName": "Busy Magpie",
-  "version": "1.3.5",
+  "version": "1.3.6",
   "description": "magpie 实时路由桌面挂件 · A transparent, click-through live routing perch for your desktop.",
   "main": "src/main.js",
   "exports": {
@@ -39,7 +39,14 @@
   "build": {
     "appId": "dev.busymagpie.widget",
     "productName": "Busy Magpie",
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "artifactName": "Busy.Magpie-${version}-${os}-${arch}.${ext}",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "yimi1mi",
+        "repo": "busy-magpie"
+      }
+    ],
     "asar": true,
     "files": [
       "src/**/*",
@@ -93,5 +100,8 @@
         "height": 380
       }
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }

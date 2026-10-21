@@ -5,10 +5,9 @@ const {
   globalShortcut,
 } = require('electron');
 const fs = require('fs');
-const https = require('https');
-const crypto = require('crypto');
 const os = require('os');
 const path = require('path');
+const { autoUpdater } = require('electron-updater');
 
 app.setName('Busy Magpie');
 
@@ -35,10 +34,8 @@ const START_IN_LAYOUT = process.argv.includes('--layout');
 const START_IN_SETTINGS = process.argv.includes('--settings');
 const FIRST_INSTALL = process.env.BUSY_MAGPIE_FIRST_INSTALL === '1';
 const PLUGIN_VERSION = process.env.BUSY_MAGPIE_PLUGIN_VERSION || '';
-const UPDATE_API = 'https://api.github.com/repos/yimi1mi/busy-magpie/releases/latest';
 // A card that stays open all day should learn about a release the same day,
-// so it looks again every hour. The unauthenticated API allows 60 reads an
-// hour per address and the redirect fallback needs no token at all.
+// so it looks again every hour.
 const UPDATE_CHECK_MS = 60 * 60 * 1000;
 
 let win = null;
@@ -55,12 +52,12 @@ let settingsPath = null;
 let logPath = null;
 let client = null;
 let updateTimer = null;
-let updateRelease = null;
 let updateState = {
   checking: false,
   available: false,
   skipped: false,
   downloading: false,
+  ready: false,
   installing: false,
   progress: 0,
   current: app.getVersion(),
@@ -455,142 +452,116 @@ function refreshUpdateAvailability() {
   );
 }
 
-function httpsJson(url, redirects = 0) {
-  return new Promise((resolve, reject) => {
-    const request = https.get(url, {
-      headers: {
-        Accept: 'application/vnd.github+json',
-        'User-Agent': 'busy-magpie',
-      },
-    }, (response) => {
-      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-        response.resume();
-        if (redirects > 4) {
-          reject(new Error('too many redirects'));
-          return;
-        }
-        httpsJson(response.headers.location, redirects + 1).then(resolve, reject);
-        return;
-      }
-      if (response.statusCode !== 200) {
-        response.resume();
-        reject(new Error(`GitHub answered ${response.statusCode}`));
-        return;
-      }
-      let body = '';
-      response.setEncoding('utf8');
-      response.on('data', (chunk) => { body += chunk; });
-      response.on('end', () => {
-        try {
-          resolve(JSON.parse(body));
-        } catch (error) {
-          reject(error);
-        }
-      });
-    });
-    request.setTimeout(15000, () => request.destroy(new Error('GitHub request timed out')));
-    request.on('error', reject);
-  });
+// ── updates ───────────────────────────────────────────────────────────────
+//
+// electron-updater owns the download and the installer: it checks the sha512
+// from the release feed, fetches only the changed blocks when it has a block
+// map, runs the NSIS installer once the card has quit and starts it again.
+// Ours stays the when and the whether: the update mode, the skipped version,
+// the hourly look, the idle moment to install, and the one thing the library
+// cannot know — the launcher plugin starts the card again when its heartbeat
+// goes stale, so an install in progress has to leave a marker.
+
+const QUIET_BEFORE_INSTALL_MS = 5 * 60 * 1000;
+let lastActivity = Date.now();
+let quietTimer = null;
+let lastNotifiedUpdate = '';
+
+// A request through the gateway is a sign someone is looking.
+function markActivity() {
+  lastActivity = Date.now();
 }
 
-function httpsText(url, redirects = 0) {
-  return new Promise((resolve, reject) => {
-    const request = https.get(url, {
-      headers: { 'User-Agent': 'busy-magpie' },
-    }, (response) => {
-      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-        response.resume();
-        if (redirects > 4) {
-          reject(new Error('too many redirects'));
-          return;
-        }
-        httpsText(response.headers.location, redirects + 1).then(resolve, reject);
-        return;
-      }
-      if (response.statusCode !== 200) {
-        response.resume();
-        reject(new Error(`download answered ${response.statusCode}`));
-        return;
-      }
-      let body = '';
-      response.setEncoding('utf8');
-      response.on('data', (chunk) => { body += chunk; });
-      response.on('end', () => resolve(body));
-    });
-    request.setTimeout(15000, () => request.destroy(new Error('request timed out')));
-    request.on('error', reject);
-  });
+function updatingMarker() {
+  return path.join(app.getPath('userData'), 'updating');
 }
 
-function releaseFromRedirect() {
-  return new Promise((resolve, reject) => {
-    const request = https.get('https://github.com/yimi1mi/busy-magpie/releases/latest', {
-      headers: { 'User-Agent': 'busy-magpie' },
-    }, (response) => {
-      const location = response.headers.location || '';
-      response.resume();
-      const match = /\/releases\/tag\/([^/?#]+)/.exec(location);
-      const tag = match ? decodeURIComponent(match[1]) : '';
-      if (!tag) {
-        reject(new Error(`GitHub answered ${response.statusCode}`));
-        return;
-      }
-      const base = `https://github.com/yimi1mi/busy-magpie/releases/download/${tag}/`;
-      const name = `Busy.Magpie-${tag.replace(/^v/i, '')}-win-x64.exe`;
-      resolve({
-        tag_name: tag,
-        html_url: `https://github.com/yimi1mi/busy-magpie/releases/tag/${tag}`,
-        assets: [
-          { name, browser_download_url: base + name },
-          { name: `${name}.sha256`, browser_download_url: `${base}${name}.sha256` },
-        ],
-      });
-    });
-    request.setTimeout(15000, () => request.destroy(new Error('GitHub request timed out')));
-    request.on('error', reject);
-  });
+function writeUpdatingMarker() {
+  try {
+    fs.writeFileSync(updatingMarker(), JSON.stringify({ at: Date.now() }));
+  } catch {
+    // The marker is a courtesy to the launcher, never a reason to fail.
+  }
 }
 
-function downloadFile(url, destination, redirects = 0) {
-  return new Promise((resolve, reject) => {
-    const request = https.get(url, {
-      headers: { 'User-Agent': 'busy-magpie' },
-    }, (response) => {
-      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-        response.resume();
-        if (redirects > 4) {
-          reject(new Error('too many redirects'));
-          return;
-        }
-        downloadFile(response.headers.location, destination, redirects + 1).then(resolve, reject);
-        return;
+function clearUpdatingMarker() {
+  try { fs.rmSync(updatingMarker(), { force: true }); } catch { /* ignore */ }
+}
+
+function releaseNotesOf(info) {
+  const notes = info && info.releaseNotes;
+  if (typeof notes === 'string') return notes;
+  if (Array.isArray(notes)) {
+    return notes.map((item) => String((item && item.note) || '')).join('\n\n');
+  }
+  return '';
+}
+
+function setupUpdater() {
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.allowPrerelease = false;
+
+  autoUpdater.on('checking-for-update', () => {
+    updateState.checking = true;
+    updateState.error = '';
+    sendUpdateState();
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    updateState.checking = false;
+    updateState.checkedAt = Date.now();
+    updateState.latest = String((info && info.version) || '').replace(/^v/i, '');
+    updateState.notes = releaseNotesOf(info);
+    updateState.releaseUrl = updateState.latest
+      ? `https://github.com/yimi1mi/busy-magpie/releases/tag/v${updateState.latest}`
+      : '';
+    refreshUpdateAvailability();
+    sendUpdateState();
+    const mode = normalizeUpdateMode(settings.updateMode);
+    if (updateState.available && !updateState.skipped && !updateState.downloading) {
+      if (mode === 'idle') downloadUpdate();
+      if (mode === 'notice' && lastNotifiedUpdate !== updateState.latest) {
+        lastNotifiedUpdate = updateState.latest;
+        notifyUpdate();
       }
-      if (response.statusCode !== 200) {
-        response.resume();
-        reject(new Error(`download answered ${response.statusCode}`));
-        return;
-      }
-      const total = Number(response.headers['content-length']) || 0;
-      const hash = crypto.createHash('sha256');
-      let received = 0;
-      const file = fs.createWriteStream(destination);
-      response.on('data', (chunk) => {
-        received += chunk.length;
-        hash.update(chunk);
-        file.write(chunk);
-        if (total) {
-          updateState.progress = Math.min(1, received / total);
-          sendUpdateState();
-        }
-      });
-      response.on('end', () => {
-        file.end(() => resolve({ sha256: hash.digest('hex'), size: received }));
-      });
-      response.on('error', reject);
-      file.on('error', reject);
-    });
-    request.setTimeout(30000, () => request.destroy(new Error('download timed out')));
-    request.on('error', reject);
+    }
+  });
+
+  autoUpdater.on('update-not-available', (info) => {
+    updateState.checking = false;
+    updateState.checkedAt = Date.now();
+    updateState.latest = String((info && info.version) || app.getVersion()).replace(/^v/i, '');
+    updateState.available = false;
+    updateState.skipped = false;
+    updateState.ready = false;
+    updateState.downloading = false;
+    updateState.progress = 0;
+    sendUpdateState();
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    updateState.downloading = true;
+    updateState.installing = false;
+    updateState.progress = Math.max(0, Math.min(1, Number(progress && progress.percent) / 100 || 0));
+    sendUpdateState();
+  });
+
+  autoUpdater.on('update-downloaded', () => {
+    updateState.downloading = false;
+    updateState.ready = true;
+    updateState.progress = 1;
+    sendUpdateState();
+    scheduleQuietInstall();
+  });
+
+  autoUpdater.on('error', (error) => {
+    updateState.checking = false;
+    updateState.downloading = false;
+    updateState.installing = false;
+    updateState.error = (error && error.message) || '更新失败';
+    log(`update: ${updateState.error}`);
+    sendUpdateState();
   });
 }
 
@@ -609,32 +580,28 @@ function notifyUpdate() {
 async function checkForUpdates(manual = false) {
   if (updateState.checking) return updateView();
   if (!manual && normalizeUpdateMode(settings.updateMode) === 'never') return updateView();
+  if (!app.isPackaged) {
+    // A dev run has no release feed of its own: say it is current instead of
+    // failing through the updater.
+    updateState.checkedAt = Date.now();
+    updateState.latest = app.getVersion();
+    updateState.available = false;
+    updateState.error = '';
+    sendUpdateState();
+    return updateView();
+  }
   updateState.checking = true;
   updateState.error = '';
   sendUpdateState();
   try {
-    let release;
-    try {
-      release = await httpsJson(UPDATE_API);
-    } catch {
-      // The unauthenticated API is rate limited per IP; the release
-      // redirect has the tag and needs no token.
-      release = await releaseFromRedirect();
-    }
-    updateRelease = release;
-    updateState.latest = String(release.tag_name || '').replace(/^v/i, '');
-    updateState.releaseUrl = release.html_url || '';
-    updateState.notes = release.body || '';
-    updateState.checkedAt = Date.now();
-    updateState.error = '';
-    refreshUpdateAvailability();
-    if (updateState.available && !updateState.skipped && !manual
-      && updateState.latest !== lastNotifiedUpdate) {
-      lastNotifiedUpdate = updateState.latest;
-      notifyUpdate();
+    const result = await autoUpdater.checkForUpdates();
+    if (result && result.updateInfo) {
+      updateState.latest = String(result.updateInfo.version || '').replace(/^v/i, '');
+      refreshUpdateAvailability();
     }
   } catch (error) {
-    updateState.error = error.message || '检查更新失败';
+    updateState.error = (error && error.message) || '检查更新失败';
+    log(`update check: ${updateState.error}`);
   } finally {
     updateState.checking = false;
     sendUpdateState();
@@ -642,141 +609,67 @@ async function checkForUpdates(manual = false) {
   return updateView();
 }
 
-let lastNotifiedUpdate = '';
+async function downloadUpdate() {
+  if (!app.isPackaged || updateState.downloading || updateState.ready) return;
+  if (updateState.skipped) return;
+  try {
+    updateState.downloading = true;
+    updateState.error = '';
+    sendUpdateState();
+    await autoUpdater.downloadUpdate();
+  } catch (error) {
+    updateState.downloading = false;
+    updateState.error = (error && error.message) || '下载更新失败';
+    log(`update download: ${updateState.error}`);
+    sendUpdateState();
+  }
+}
+
+// "空闲" lets the card restart itself, but not over a look: wait until
+// nothing has gone through the gateway for five minutes.
+function scheduleQuietInstall() {
+  clearInterval(quietTimer);
+  quietTimer = null;
+  if (normalizeUpdateMode(settings.updateMode) !== 'idle') return;
+  quietTimer = setInterval(() => {
+    if (!updateState.ready || quitting) return;
+    if (Date.now() - lastActivity < QUIET_BEFORE_INSTALL_MS) return;
+    clearInterval(quietTimer);
+    quietTimer = null;
+    log(`update: quiet for five minutes, installing ${updateState.latest}`);
+    installUpdate();
+  }, 60 * 1000);
+}
 
 async function installUpdate() {
-  if (updateState.downloading || updateState.installing) return updateView();
+  if (!app.isPackaged) return updateView();
+  if (updateState.installing) return updateView();
   if (process.platform !== 'win32') {
+    // An unsigned mac app cannot replace itself; the release page is honest.
     if (updateState.releaseUrl) shell.openExternal(updateState.releaseUrl);
     return updateView();
   }
-  if (!updateRelease || !updateState.available) {
-    await checkForUpdates(true);
+  if (!updateState.ready) {
+    await downloadUpdate();
+    if (!updateState.ready) return updateView();
   }
-  if (!updateRelease || !updateState.available) return updateView();
-
-  const asset = (updateRelease.assets || []).find((item) => (
-    !/sha256/i.test(item.name) && /win-x64\.exe$/i.test(item.name)
-  ));
-  if (!asset) {
-    updateState.error = '最新版本没有 Windows 安装包';
-    sendUpdateState();
-    return updateView();
-  }
-
-  updateState.downloading = true;
-  updateState.installing = false;
-  updateState.progress = 0;
-  updateState.error = '';
-  sendUpdateState();
-
-  const destination = path.join(app.getPath('temp'), `busy-magpie-${updateState.latest}.exe`);
   try {
-    const downloaded = await downloadFile(asset.browser_download_url, destination);
-    let expected = String(asset.digest || '').replace(/^sha256:/i, '').toLowerCase();
-    if (!expected) {
-      const checksumAsset = (updateRelease.assets || []).find((item) => (
-        item.name === `${asset.name}.sha256`
-      ));
-      if (checksumAsset?.browser_download_url) {
-        try {
-          const text = await httpsText(checksumAsset.browser_download_url);
-          expected = (text.match(/[a-f0-9]{64}/i) || [''])[0].toLowerCase();
-        } catch {
-          // The .sha256 asset is optional in the fallback path.
-        }
-      }
-    }
-    if (expected && downloaded.sha256 !== expected) {
-      throw new Error('安装包校验失败');
-    }
-
-    updateState.downloading = false;
     updateState.installing = true;
-    updateState.progress = 1;
-    sendUpdateState();
-
-    const helper = path.join(app.getPath('temp'), 'busy-magpie-update.ps1');
-    const helperLog = path.join(app.getPath('temp'), 'busy-magpie-update.log');
-    const target = String(updateState.latest || '');
-    const quote = (value) => String(value).replace(/'/g, "''");
-    // The helper outlives the app, so everything it learns has to be written
-    // down: the app's own log is closed by the time the installer runs.
-    fs.writeFileSync(helper, [
-      `$ErrorActionPreference = 'Continue'`,
-      `$installer = '${quote(destination)}'`,
-      `$app = '${quote(app.getPath('exe'))}'`,
-      `$log = '${quote(helperLog)}'`,
-      `function Note($message) { "$(Get-Date -Format 'HH:mm:ss')  $message" | Out-File -LiteralPath $log -Append -Encoding utf8 }`,
-      `Note 'helper started, waiting for the card'`,
-      `Wait-Process -Id ${process.pid} -ErrorAction SilentlyContinue`,
-      `Start-Sleep -Milliseconds 400`,
-      `Note 'card exited'`,
-      // The launcher plugin can bring the card back while the installer runs,
-      // and then the installer cannot replace its files: put it down again.
-      `for ($try = 1; $try -le 3; $try++) {`,
-      `  Get-Process -Name 'Busy Magpie' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue`,
-      `  Start-Sleep -Milliseconds 700`,
-      `  $run = Start-Process -FilePath $installer -ArgumentList '/S' -PassThru -Wait`,
-      `  Note "installer try $try exited $($run.ExitCode)"`,
-      `  Start-Sleep -Milliseconds 800`,
-      `  $now = (Get-Item -LiteralPath $app).VersionInfo.ProductVersion`,
-      `  Note "installed $now, wanted '${quote(target)}'"`,
-      `  if ($now -eq '${quote(target)}') { break }`,
-      `  Start-Sleep -Seconds 2`,
-      `}`,
-      `Note 'starting the card'`,
-      `Start-Process -FilePath $app`,
-      `Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue`,
-      `Note 'helper done'`,
-    ].join('\r\n'), 'utf8');
-
-    log(`update: ${target} downloaded to ${destination}, starting the helper`);
-    const child = spawnDetached('powershell.exe', [
-      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
-      '-File', helper,
-    ]);
-    if (!child) throw new Error('无法启动安装程序');
-    log(`update: helper pid ${child.pid}`);
-    setTimeout(() => app.quit(), 250);
-    // The helper waits for this process to go: a quit that is held up by a
-    // window or a handler must not leave the install waiting forever.
-    setTimeout(() => app.exit(0), 5000);
-  } catch (error) {
     updateState.downloading = false;
-    updateState.installing = false;
-    updateState.error = error.message || '更新失败';
-    log(`update failed: ${error.message}`);
+    updateState.error = '';
     sendUpdateState();
-    try { fs.rmSync(destination, { force: true }); } catch { /* ignore */ }
+    clearInterval(quietTimer);
+    quietTimer = null;
+    writeUpdatingMarker();
+    log(`update: installing ${updateState.latest}`);
+    setImmediate(() => autoUpdater.quitAndInstall(true, true));
+  } catch (error) {
+    updateState.installing = false;
+    updateState.error = (error && error.message) || '更新失败';
+    log(`update install: ${updateState.error}`);
+    sendUpdateState();
   }
   return updateView();
-}
-
-// A child that outlives this process, with a console of its own.
-//
-// A plain child shares the app's console and is killed when the app exits;
-// `detached: true` hands a console program no console at all, and PowerShell
-// then exits at once without running its script (Windows, checked). `start`
-// gives it a console of its own, hidden behind the window cmd was given.
-function spawnDetached(file, args) {
-  try {
-    const { spawn } = require('child_process');
-    // The card started at the end of the update is an Electron app, and one
-    // begun from a terminal that exported ELECTRON_RUN_AS_NODE would run as
-    // Node instead. The launcher strips it for the card; so does this.
-    const env = { ...process.env };
-    delete env.ELECTRON_RUN_AS_NODE;
-    const child = spawn('cmd.exe', ['/c', 'start', '', '/b', file, ...args], {
-      stdio: 'ignore',
-      windowsHide: true,
-      env,
-    });
-    child.unref();
-    return child;
-  } catch {
-    return null;
-  }
 }
 
 function skipUpdate() {
@@ -1237,6 +1130,7 @@ async function refreshUsage() {
     }
     const data = await response.json();
     usageData = data;
+    markActivity();
     send('magpie:usage', data);
     return data;
   } catch (error) {
@@ -1370,6 +1264,7 @@ class TraceClient {
         }
         const snapshot = { ...data, routes: [...this.routes.values()] };
         lastTrace = snapshot;
+        markActivity();
         connection = { online: true, detail: this.base, at: Date.now() };
         fitWindow(activeCount(snapshot.routes));
         send('magpie:trace', snapshot);
@@ -1645,6 +1540,8 @@ function quit() {
   clearInterval(hoverTimer);
   clearInterval(usageTimer);
   clearInterval(updateTimer);
+  clearInterval(quietTimer);
+  quietTimer = null;
   globalShortcut.unregisterAll();
   clearInterval(aliveTimer);
   clearInterval(watchdogTimer);
@@ -1890,6 +1787,10 @@ function init() {
     // A version marker is an optimization, never a reason not to start.
   }
   settings = loadSettings();
+  // A marker left by an install that did not finish would keep the launcher
+  // from starting the card; this process running means it is over.
+  clearUpdatingMarker();
+  setupUpdater();
 
   if (IS_MAC) app.dock.hide();
   if (IS_WIN) app.setAppUserModelId('dev.busymagpie.widget');

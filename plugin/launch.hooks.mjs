@@ -34,10 +34,6 @@ let checking = false;
 let installTried = false;
 let warned = false;
 let releaseCache = null;
-// A newer release waits for a quiet moment rather than interrupting a look.
-let pendingUpdate = '';
-let notifiedUpdate = '';
-let lastRequest = Date.now();
 
 function psQuote(value) {
   return String(value).replace(/'/g, "''");
@@ -155,51 +151,6 @@ async function getRelease() {
   return releaseCache;
 }
 
-function versionOf(exe) {
-  if (process.platform !== 'win32') return '';
-  // The app writes its real package version here. The PE ProductVersion can
-  // lag behind when electron-builder's rcedit pass fails, so prefer the marker.
-  try {
-    const marker = path.join(process.env.APPDATA || '', 'Busy Magpie', 'version');
-    const marked = readFileSync(marker, 'utf8').trim().replace(/^v/i, '');
-    if (marked) return marked;
-  } catch {
-    // No marker yet: this is an older install or a first run.
-  }
-  try {
-    const escaped = exe.replace(/'/g, "''");
-    const out = execFileSync('powershell.exe', [
-      '-NoProfile', '-NonInteractive', '-Command',
-      `(Get-Item -LiteralPath '${escaped}').VersionInfo.ProductVersion`,
-    ], { encoding: 'utf8', timeout: 1500, windowsHide: true });
-    return String(out || '').trim().replace(/^v/i, '');
-  } catch {
-    return '';
-  }
-}
-
-function compareVersions(a, b) {
-  const left = String(a || '').replace(/^v/i, '').split(/[.+-]/).map((part) => Number(part) || 0);
-  const right = String(b || '').replace(/^v/i, '').split(/[.+-]/).map((part) => Number(part) || 0);
-  for (let i = 0; i < Math.max(left.length, right.length); i++) {
-    const delta = (left[i] || 0) - (right[i] || 0);
-    if (delta !== 0) return delta < 0 ? -1 : 1;
-  }
-  return 0;
-}
-
-function appRunning() {
-  if (process.platform !== 'win32') return false;
-  try {
-    const out = execFileSync('tasklist.exe', [
-      '/FI', 'IMAGENAME eq Busy Magpie.exe', '/NH',
-    ], { encoding: 'utf8', timeout: 1200, windowsHide: true });
-    return out.toLowerCase().includes('busy magpie.exe');
-  } catch {
-    return false;
-  }
-}
-
 async function installApp() {
   if (process.platform !== 'win32') return '';
   console.log('[busy-magpie] downloading the latest release installer');
@@ -258,19 +209,6 @@ function heartbeatPath() {
   return path.join(supportDir(), 'alive');
 }
 
-// How the user asked for updates: 'idle' (when quiet), 'notice' (only tell
-// them) or 'never'. Read from the app's own settings, which is where the
-// switch lives.
-function updateMode() {
-  try {
-    const raw = JSON.parse(readFileSync(path.join(supportDir(), 'settings.json'), 'utf8'));
-    const mode = String(raw?.updateMode || '').toLowerCase();
-    return ['idle', 'notice', 'never'].includes(mode) ? mode : 'idle';
-  } catch {
-    return 'idle';
-  }
-}
-
 // 'unknown' is an app older than the heartbeat: only the launched flag then.
 // 'off' means the user switched keep-alive off, so a quit stays a quit.
 function appState() {
@@ -290,8 +228,23 @@ function appState() {
     return error?.code === 'ENOENT' ? 'unknown' : 'dead';
   }
 }
+// electron-updater has quit the card and is replacing its files: starting it
+// now would hold the very files the installer is writing. The card writes
+// this marker just before it quits and removes it when it comes back.
+const UPDATING_MS = 10 * 60 * 1000;
+
+function updateInProgress() {
+  try {
+    const stat = statSync(path.join(supportDir(), 'updating'));
+    return Date.now() - stat.mtimeMs < UPDATING_MS;
+  } catch {
+    return false;
+  }
+}
+
 function ensureApp() {
   if (process.env.BUSY_MAGPIE_NO_LAUNCH === '1' || installing || checking) return;
+  if (updateInProgress()) return;
 
   const state = appState();
   if (state === 'alive') {
@@ -309,68 +262,12 @@ function ensureApp() {
 
   const existing = findApp();
   if (existing) {
-    const mode = updateMode();
-    if (mode === 'never') {
-      spawnApp(existing);
-      return;
-    }
-    checking = true;
-    getRelease()
-      .then(async (release) => {
-        const target = String(release?.tag_name || '');
-        const current = versionOf(existing);
-        if (!current || !target || compareVersions(current, target) >= 0) {
-          console.log(`[busy-magpie] installed ${current || '?'}, target ${target || '?'}`);
-          spawnApp(existing);
-          return;
-        }
-
-        if (appRunning()) {
-          console.warn(`[busy-magpie] ${current} -> ${target} available; app is running`);
-          if (mode === 'idle') {
-            // Not while someone is watching: the swap waits for a quiet five
-            // minutes, then quits the card, installs and starts it again.
-            pendingUpdate = target;
-            if (notifiedUpdate !== target) {
-              notifiedUpdate = target;
-              notify('Busy Magpie', `发现 ${target}，空闲几分钟后自动更新`);
-            }
-          } else if (notifiedUpdate !== target) {
-            notifiedUpdate = target;
-            notify('Busy Magpie', `发现 ${target}，可在「关于」里更新`);
-          }
-          spawnApp(existing);
-          return;
-        }
-
-        if (mode !== 'idle') {
-          spawnApp(existing);
-          return;
-        }
-
-        console.log(`[busy-magpie] updating ${current} -> ${target}`);
-        notify('Busy Magpie', `发现新版本 ${target}，正在更新…`);
-        installing = true;
-        try {
-          const installed = await installApp();
-          if (installed) spawnApp(installed);
-          else spawnApp(existing);
-        } catch (error) {
-          console.warn(`[busy-magpie] update failed: ${error.message}`);
-          notify('Busy Magpie', '自动更新失败，已启动当前版本');
-          spawnApp(existing);
-        } finally {
-          installing = false;
-        }
-      })
-      .catch(() => {
-        // GitHub being unreachable must not stop an installed app from opening.
-        spawnApp(existing);
-      })
-      .finally(() => { checking = false; });
+    // Updates belong to the card (electron-updater); the launcher only starts
+    // what is installed. Starting it during an install would hold the files
+    // the installer has to replace, so an install in progress says so.
+    spawnApp(existing);
     return;
   }
-
   if (process.env.BUSY_MAGPIE_NO_INSTALL === '1' || installTried) {
     if (!warned) {
       warned = true;
@@ -403,50 +300,11 @@ function ensureApp() {
     .finally(() => { installing = false; });
 }
 
-// A card that stays open would otherwise never update: the check refuses to
-// install over a running app. So a newer release waits here until nothing has
-// gone through the gateway for a while, and then the swap happens.
-const IDLE_MS = 5 * 60 * 1000;
-
-async function applyPendingUpdate() {
-  if (!pendingUpdate || installing || checking) return;
-  if (updateMode() !== 'idle') {
-    pendingUpdate = '';
-    return;
-  }
-  if (Date.now() - lastRequest < IDLE_MS) return;
-  if (!appRunning()) return; // the next launch's check installs it
-
-  const target = pendingUpdate;
-  pendingUpdate = '';
-  installing = true;
-  try {
-    console.log(`[busy-magpie] idle: updating to ${target}`);
-    notify('Busy Magpie', `正在更新到 ${target}…`);
-    try {
-      execFileSync('taskkill.exe', ['/IM', EXE, '/F'], { timeout: 5000, windowsHide: true });
-    } catch {
-      // It may have exited on its own between the check and the kill.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 900));
-    const installed = await installApp();
-    if (installed) spawnApp(installed);
-  } catch (error) {
-    console.warn(`[busy-magpie] idle update failed: ${error.message}`);
-    notify('Busy Magpie', '自动更新失败，已保留当前版本');
-  } finally {
-    installing = false;
-  }
-}
-
-setInterval(() => { applyPendingUpdate().catch(() => {}); }, 60000);
-
 // Start as soon as the hook module is loaded. onRequest remains a fallback
 // for hosts that import this file before spawning their first request.
 ensureApp();
 
 export function onRequest(body) {
-  lastRequest = Date.now();
   ensureApp();
   return body;
 }

@@ -40,6 +40,21 @@ Copy-Item (Join-Path $root 'assets') $app -Recurse -Force
 Copy-Item (Join-Path $root 'package.json') $app -Force
 Copy-Item (Join-Path $root 'LICENSE') $app -Force
 
+# electron-updater reads its provider from resources\app-update.yml, which
+# electron-builder writes when it packages by itself. This build stages the app
+# itself (to dodge the EPERM some antivirus causes), so write the same file
+# from the "publish" block in package.json.
+$publish = (Get-Content (Join-Path $root 'package.json') -Raw | ConvertFrom-Json).build.publish | Select-Object -First 1
+if ($publish) {
+    $updateYml = @(
+        "provider: $($publish.provider)"
+        "owner: $($publish.owner)"
+        "repo: $($publish.repo)"
+        'updaterCacheDirName: busy-magpie-updater'
+    ) -join "`n"
+    Set-Content -LiteralPath (Join-Path $unpacked 'resources\app-update.yml') -Value $updateYml -Encoding utf8
+}
+
 $rcedit = Join-Path $root 'node_modules\electron-winstaller\vendor\rcedit.exe'
 # The exe's version comes from package.json, so a release only bumps one place.
 $version = (Get-Content (Join-Path $root 'package.json') -Raw | ConvertFrom-Json).version
