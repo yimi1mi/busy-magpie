@@ -24,9 +24,11 @@ magpie 的「路由」页很好看，但它只在 magpie 自己的窗口里。Bu
 - **点击穿透**：正常状态下鼠标点击会落到下面的窗口，不抢焦点。
 - **不修改 magpie**：只读取本机的 `/v1/magpie/trace` 和 `/v1/magpie/usage`。
 - **同时显示所有正在执行的 Agent**：Agent 在左，magpie 在中间，账号在右；线路在 magpie 处交叉。
+- **线路是活的**：点状虚线朝账号方向流动；鸟穿过 magpie 时按「穿过动效」给一次涟漪 / 漩涡 / 溶解 / 电弧，也可以关掉。
+- **每只鸟用自己的品牌色**：鸟、圆点和虚线取该 Agent 的颜色，四路并发时一眼能看出是谁在飞。
 - **不随 Agent 数量变高变矮**：窗口尺寸稳定，只有上半部视图收紧；需要更大或更小时手动拖边框。
 - **总 token + 逐位滚动 + 单击换窗口**：读取 magpie usage，单击在 今日 / 7 天 / 30 天 / 全部 之间循环。
-- **设置直接在当前面板展开**，保存后缩回，不额外弹窗。
+- **设置直接在当前面板展开**，保存后收回，不额外弹窗。
 
 ## 作为 magpie 插件
 
@@ -51,7 +53,7 @@ setx BUSY_MAGPIE_APP "D:\Apps\Busy Magpie\Busy Magpie.exe"
 
 插件只负责启动桌面层；透明穿透、实时 trace 和所有界面仍然由 Electron 应用提供。magpie 的插件页面运行在沙盒 iframe 里，既拿不到实时 trace，也不能创建跨应用的透明窗口，所以这里采用启动器，而不是页面插件。
 
-版本号取自 `package.json` 的 `version`（当前 `v1.3.8`）：magpie 的插件列表会显示它，桌面卡片右上角也会显示同一个版本；设置面板标题同样显示版本。
+版本号取自 `package.json` 的 `version`（当前 `v1.3.9`）：magpie 的插件列表会显示它，桌面卡片右上角也会显示同一个版本；设置面板标题、托盘菜单的「关于 Busy Magpie…」同样显示版本。
 
 ## 截图
 
@@ -71,7 +73,7 @@ setx BUSY_MAGPIE_APP "D:\Apps\Busy Magpie\Busy Magpie.exe"
 
 ![设置面板](./docs/screenshots/settings.png)
 
-设置不是独立窗口，而是从当前卡片下方展开；关闭或保存后带缓动缩回。
+设置不是独立窗口，而是盖在卡片上展开，选项多了就在面板里滚动；关闭或保存后淡出回到卡片。
 
 ### 关于与更新
 
@@ -111,7 +113,7 @@ macOS 构建默认**未签名、未公证**；首次打开如果被 Gatekeeper �
 xattr -dr com.apple.quarantine "/Applications/Busy Magpie.app"
 ```
 
-当前 CI 在 `windows-latest` 上构建 Windows 安装包；macOS 的构建配置仍然保留，需要时在 [`.github/workflows/build.yml`](./.github/workflows/build.yml) 里重新启用 `macos-latest` 任务。
+当前 CI 在 `windows-latest` 和 `macos-latest` 上分别构建 Windows 安装包与 macOS 的 dmg / zip；macOS 产物未签名，`latest-mac.yml` 也会生成，但应用内自动更新只在 Windows 上可用。
 
 ## 安装路径
 
@@ -170,17 +172,18 @@ magpie 插件没有卸载生命周期钩子，所以**移除插件不会自动�
 
 - 鼠标移到卡片**任意一条边框或四个角**，出现对应方向的缩放光标后直接拖动。
 - 上边/左边拖动时会同时移动窗口，保持对面的边不动。
-- 最小 `600×432`，最大不超过当前屏幕可用区域。
+- 最小约 `632×432`（再小会按比例拉回），最大不超过当前屏幕可用区域。
 - 尺寸会写入 `settings.json`，下次启动保持。
 
 ### 点击穿透
 
-正常状态只有两个很小的区域会在鼠标悬停时临时接收指针：
+正常状态只有三处会在鼠标悬停时临时接收指针：
 
 - 顶部约 28px 的移动条
 - 边框/四角约 8px 的缩放带
+- 顶部中间的 token 胶囊
 
-其余区域始终穿透，点击会落到下面的窗口。
+其余区域始终穿透，点击会落到下面的窗口。设置、关于、调整位置模式下整张卡片会接收指针，关闭后恢复穿透。
 
 ## 路由视图
 
@@ -203,16 +206,33 @@ Codex            ┈┘              OpenAI
 ```
 
 - 所有进行中的请求同时展开。
-- 每个 Agent 一条彩色虚线，收束到同一个 magpie。
-- 账号列独立排序，不跟 Agent 行对齐，所以线路会交叉。
+- 每个 Agent 一条彩色虚线，收束到同一个 magpie，再分到自己的账号；账号列独立排序，不跟 Agent 行对齐，所以线路会交叉。
 - Agent 越多，节点越紧凑；更多时隐藏模型、状态等次要信息，保证每个 Agent 仍在画面里。
-- 小喜鹊沿着真实线路飞行，穿过 magpie，喙上带着该 Agent 颜色的小点；回答时再飞回来。
+- 虚线朝账号方向流动，新出现的线会先亮一下；每根线的相位错开，刷新 trace 也不会跳回原点。
+- 每只鸟和它的线、圆点共用该 Agent 的品牌色。
+- 去程是一条连续曲线：穿过 magpie 时只减速、不停顿；每轮重掷弧度，带一点横向摆动和滚转，到站停在账号卡片边缘。
+- 鸟停一瞬后溶解，请求的圆点留在账号旁等待，直到这条请求真正结束（最低 650ms、最高 8s），再由一只鸟把圆点叼回 Agent。请求在途中结束时，回复也会先飞回家再消失。
+- 穿过 magpie 时触发一次「穿过动效」（默认涟漪），见下一节。
+
+### 穿过动效
+
+请求经过 magpie 时，卡片会用这个 Agent 的颜色亮一下，并按设置里的「穿过动效」做一个一次性手势：
+
+| 选项 | 效果 |
+| --- | --- |
+| 涟漪 | 一圈波纹和几点火花；默认，最安静 |
+| 漩涡 | 鸟被卷进去、压小，再被吐出来 |
+| 溶解 | 鸟散成尘埃，在卡片另一侧重新聚拢 |
+| 电弧 | 几道电弧扫过 magpie 卡片 |
+| 无 | 不触发，鸟照常飞 |
+
+并发多时最多同时保留 3 组光效，避免糊成一片。系统开启「减少动态效果」时，飞行和穿过动效都不画。
 
 ### 总 token
 
 顶部 token 胶囊读取 magpie 的 `/v1/magpie/usage`，显示当前时间窗的 token。数字变化时逐位向上滚动（可在设置里关掉，改成直接替换），下面的细条是缓存命中率。单请求的账号卡片还会显示这一条请求的「输出 324 · 缓存 98% · 首字 2.9s」明细。
 
-**单击胶囊切换时间窗**：在设置里勾选的那几个窗口之间循环（默认 今日 → 近 7 天 → 近 30 天 → 全部），选择写进 `settings.json`，重启后保持。胶囊是卡片里唯一吃鼠标点击的控件——卡片其余部分仍然点击穿透，鼠标悬到胶囊上时主进程才把指针放进来。
+**单击胶囊切换时间窗**：在设置里勾选的那几个窗口之间循环（默认 今日 → 近 7 天 → 近 30 天 → 全部），选择写进 `settings.json`，重启后保持。卡片上只有胶囊和右上角版本号吃鼠标点击——其余部分仍然点击穿透，鼠标悬到胶囊上时主进程才把指针放进来。
 
 胶囊显示的数值可以在设置里切换：总 token（输入 + 输出 + 缓存读/写）、输入、输出、缓存读。
 
@@ -230,7 +250,8 @@ Codex            ┈┘              OpenAI
 
 - 总在最前 / 隐藏账号名称 / 不透明度
 - 时间窗（多选：勾选的才会在单击胶囊时循环）、胶囊数值、数字滚动
-- 额度条、耗时拆解（首字延迟、输出 tok/s）、启动时检查更新
+- 额度条、耗时拆解（首字延迟、输出 tok/s）、更新方式（空闲 / 提示 / 不检查）、保活
+- 穿过动效（无 / 涟漪 / 漩涡 / 溶解 / 电弧）
 - 网关地址（留空自动检测）
 
 右上角「打开文件夹」直达 `settings.json` 所在目录；保存后立即应用并写回文件。
@@ -249,12 +270,20 @@ Codex            ┈┘              OpenAI
   "width": 632,
   "height": 432,
   "gateway": null,
+  "checkUpdates": true,
+  "updateMode": "idle",
+  "skippedUpdate": "",
   "usagePeriod": "30d",
   "enabledPeriods": ["today", "7d", "30d", "all"],
   "pillMetric": "total",
   "rollTokens": true,
   "showQuota": true,
-  "showTiming": true
+  "showTiming": true,
+  "hubEffect": "ripple",
+  "keepAlive": true,
+  "hotkey": "Control+Alt+M",
+  "hotkeyOn": true,
+  "autostart": false
 }
 ```
 
@@ -266,12 +295,20 @@ Codex            ┈┘              OpenAI
 | `left` / `top` | 窗口位置 |
 | `width` / `height` | 窗口尺寸 |
 | `gateway` | 固定网关；`null` 表示自动检测 |
+| `checkUpdates` | 旧版开关，等价于 `updateMode !== "never"`；读旧配置时自动换算 |
+| `updateMode` | 更新方式：`idle`（空闲装）/ `notice`（只提示）/ `never`（不检查） |
+| `skippedUpdate` | 在「关于」里跳过的版本号 |
 | `usagePeriod` | token 胶囊当前的时间窗：`today` / `7d` / `30d` / `all` |
 | `enabledPeriods` | 单击胶囊时循环哪几个窗口；至少一个，选中的才参与滚动 |
 | `pillMetric` | 胶囊数值：`total` / `input` / `output` / `cache` |
 | `rollTokens` | 数字是否逐位滚动；`false` 直接替换 |
 | `showQuota` | 账号卡片里是否显示额度条 |
 | `showTiming` | 是否把首字延迟写进请求明细 |
+| `hubEffect` | 穿过动效：`none` / `ripple` / `vortex` / `dissolve` / `arc` |
+| `keepAlive` | 请求时是否自动拉起隐藏或退出的卡片 |
+| `hotkey` | 显示 / 隐藏卡片的全局快捷键 |
+| `hotkeyOn` | 快捷键是否启用 |
+| `autostart` | 是否登录时自动启动（托盘菜单切换） |
 
 配置文件位置：
 
@@ -315,7 +352,7 @@ Codex            ┈┘              OpenAI
 - **一键更新**：有新版时，那个位置直接变成「更新 vX」按钮——点一下就走完下载、校验、退出、静默安装、重启，不用先打开「关于」；更新期间它显示下载进度。这时版本号暂时让位，「关于」可以从托盘菜单打开。
 - **启动器插件**：由 magpie 管理。到 magpie → Plugins → Busy Magpie 点 Update；不要在应用里直接覆盖插件文件。
 - **更新方式**：设置里的「更新」三选一——
-  - **空闲**（默认）：发现新版先记着，等你 5 分钟没有请求经过网关，插件自己退出卡片、静默安装、重新拉起；你正在用的时候不会被打断；
+  - **空闲**（默认）：发现新版先记着，等你 5 分钟没有请求经过网关，卡片自己退出、静默安装、重新拉起；你正在用的时候不会被打断；
   - **提示**：只弹一次通知，更新留给你在「关于」里点；
   - **不检查**：连版本都不查。
 - **版本不一致没关系**：应用版本读取自 `%APPDATA%\Busy Magpie\version`，插件版本由 magpie 插件目录决定，两者可以不同。
@@ -324,12 +361,13 @@ Codex            ┈┘              OpenAI
 
 按以下顺序解析：
 
-1. `BUSY_MAGPIE_GATEWAY` 环境变量
-2. `MAGPIE_ADDR` 环境变量
-3. `~/.config/magpie/settings.json` 里的 `port`
-4. `127.0.0.1:3425`
+1. `settings.json` 里的 `gateway`（设置面板里也能改）
+2. `BUSY_MAGPIE_GATEWAY` 环境变量
+3. `MAGPIE_ADDR` 环境变量
+4. `~/.config/magpie/settings.json` 里的 `port`
+5. `127.0.0.1:3425`
 
-`MAGPIE_ADDR=0.0.0.0:3425` 这类监听地址会自动改连 `127.0.0.1:3425`。也可以在 `settings.json` 里固定：
+`MAGPIE_ADDR=0.0.0.0:3425` 这类监听地址会自动改连 `127.0.0.1:3425`。不想写环境变量时，直接固定：
 
 ```json
 {
@@ -401,8 +439,8 @@ CDP_SCALE=2 node tools/cdp.mjs shot "docs/screenshots/multi.png"
 ```text
 src/main.js             窗口、托盘、长轮询、usage、拖动/缩放、设置面板
 src/preload.js          contextBridge 白名单
-web/index.html          卡片结构（含设置抽屉）
-web/app.js              渲染、SVG 虚线、飞鸟、数字滚动、设置交互
+web/index.html          卡片结构（含设置 / 关于抽屉）
+web/app.js              渲染、SVG 虚线、飞鸟、穿过动效、数字滚动、设置交互
 web/presenter.js        只根据 trace 生成文案
 web/styles.css          透明卡片、布局、动效
 plugin/launch.hooks.mjs magpie 启动器插件（magpie.hooks 入口）
@@ -421,6 +459,7 @@ tools/                  图标生成、模拟 trace、CDP 检查、Windows 打�
 
 - 只展示本机 magpie 网关；远程 magpie 的 trace 由 magpie 自身限制为本机读取。
 - 多请求时窗口尺寸不自动增长；并发很多时会隐藏次要信息，极小节点只保留 Agent / 账号名称。
+- 系统开启「减少动态效果」时，飞鸟和穿过动效都不会画。
 - macOS 版本需要在 macOS 上构建；默认未签名、未公证。
 - 不修改 magpie，因此不会在 magpie 的「路由」页里增加额外入口；入口是托盘图标。
 
