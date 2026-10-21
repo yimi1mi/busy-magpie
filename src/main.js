@@ -36,7 +36,10 @@ const START_IN_SETTINGS = process.argv.includes('--settings');
 const FIRST_INSTALL = process.env.BUSY_MAGPIE_FIRST_INSTALL === '1';
 const PLUGIN_VERSION = process.env.BUSY_MAGPIE_PLUGIN_VERSION || '';
 const UPDATE_API = 'https://api.github.com/repos/yimi1mi/busy-magpie/releases/latest';
-const UPDATE_CHECK_MS = 24 * 60 * 60 * 1000;
+// A card that stays open all day should learn about a release the same day,
+// so it looks again every hour. The unauthenticated API allows 60 reads an
+// hour per address and the redirect fallback needs no token at all.
+const UPDATE_CHECK_MS = 60 * 60 * 1000;
 
 let win = null;
 let firstRunOpen = FIRST_INSTALL;
