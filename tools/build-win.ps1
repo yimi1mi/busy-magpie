@@ -40,6 +40,24 @@ Copy-Item (Join-Path $root 'assets') $app -Recurse -Force
 Copy-Item (Join-Path $root 'package.json') $app -Force
 Copy-Item (Join-Path $root 'LICENSE') $app -Force
 
+# Runtime dependencies (electron-updater and what it imports) are not dev
+# tooling, but this build stages the app by hand, so electron-builder never
+# collects them: copy the production tree in, nesting kept.
+$modules = Join-Path $app 'node_modules'
+New-Item -ItemType Directory -Force $modules | Out-Null
+Push-Location $root
+$production = & npm ls --omit=dev --all --parseable 2>$null
+Pop-Location
+foreach ($pkg in $production) {
+    if (-not $pkg -or $pkg.Trim() -eq $root.Trim()) { continue }
+    $relative = $pkg.Substring($root.Length).TrimStart('\', '/')
+    $target = Join-Path $app $relative
+    $parent = Split-Path $target -Parent
+    New-Item -ItemType Directory -Force $parent | Out-Null
+    if (Test-Path $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+    Copy-Item -LiteralPath $pkg -Destination $target -Recurse -Force
+}
+
 # electron-updater reads its provider from resources\app-update.yml, which
 # electron-builder writes when it packages by itself. This build stages the app
 # itself (to dodge the EPERM some antivirus causes), so write the same file

@@ -806,6 +806,9 @@ function setupAbout() {
     const available = Boolean(data.available && !data.skipped);
     const pct = Math.round((Number(data.progress) || 0) * 100);
     const showLatest = Boolean(data.latest && (available || data.skipped || data.error));
+    // electron-updater downloads first and installs on the way out, so a
+    // ready update is a restart, not another download.
+    const ready = Boolean(data.ready && available);
     dot.hidden = !available;
     // The card's own one-click path: it only says which version and how far
     // along the download is, and quits into the installer on its own.
@@ -815,7 +818,8 @@ function setupAbout() {
       if (!chip.hidden) {
         chipVersion.textContent = data.installing
           ? '安装中'
-          : data.downloading ? `${pct}%` : `v${data.latest || ''}`;
+          : data.downloading ? `${pct}%` : ready ? '' : `v${data.latest || ''}`;
+        chip.firstChild.textContent = ready ? '重启更新' : '更新 ';
         chip.disabled = running;
       }
       // The two share one spot: a pending release takes the version's place,
@@ -829,7 +833,7 @@ function setupAbout() {
     $('aboutPlugin').textContent = data.pluginVersion ? `v${data.pluginVersion}` : '未提供';
 
     update.hidden = !available || data.downloading || data.installing;
-    update.textContent = `更新到 v${data.latest || ''}`;
+    update.textContent = ready ? '重启并安装' : `更新到 v${data.latest || ''}`;
     skip.hidden = !available || data.downloading || data.installing;
     check.disabled = Boolean(data.checking || data.downloading || data.installing);
     release.hidden = !data.releaseUrl || (!available && !data.error && !data.skipped);
@@ -845,6 +849,9 @@ function setupAbout() {
       error.textContent = '';
     } else if (data.installing) {
       status.textContent = '正在安装，应用会重启…';
+      error.textContent = '';
+    } else if (data.ready && available) {
+      status.textContent = `已下载 v${data.latest}，点「重启并安装」完成`;
       error.textContent = '';
     } else if (data.checking) {
       status.textContent = '正在检查更新…';
