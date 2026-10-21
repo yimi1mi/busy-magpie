@@ -70,6 +70,7 @@ let settings = {
   rollTokens: true,
   showQuota: true,
   showTiming: true,
+  hubEffect: 'ripple',
 };
 let lastTrace = null;
 let usageData = null;
@@ -597,6 +598,7 @@ function setupSettingsPanel() {
   const gatewayHint = $('settingsGatewayHint');
   const periodChips = [...document.querySelectorAll('#settingsPeriods .settings-chip')];
   const metricChips = [...document.querySelectorAll('#settingsMetrics .settings-chip')];
+  const effectChips = [...document.querySelectorAll('#settingsEffects .settings-chip')];
   const roll = $('settingsRoll');
   const quota = $('settingsQuota');
   const timing = $('settingsTiming');
@@ -618,7 +620,8 @@ function setupSettingsPanel() {
 
   const pressChips = (chips, active) => {
     for (const chip of chips) {
-      const key = chip.dataset.period || chip.dataset.metric || chip.dataset.update;
+      const key = chip.dataset.period || chip.dataset.metric
+        || chip.dataset.update || chip.dataset.effect;
       chip.setAttribute('aria-pressed', active.has(key) ? 'true' : 'false');
     }
   };
@@ -649,6 +652,17 @@ function setupSettingsPanel() {
     });
   }
 
+  for (const chip of effectChips) {
+    chip.addEventListener('click', () => {
+      for (const other of effectChips) {
+        other.setAttribute('aria-pressed', other === chip ? 'true' : 'false');
+      }
+      // Preview right away: the drawer sits over the card, so the next
+      // crossing already uses the new gesture.
+      settings = { ...settings, hubEffect: chip.dataset.effect };
+    });
+  }
+
   const fill = (data) => {
     const s = data.settings || {};
     topmost.checked = Boolean(s.topmost);
@@ -658,6 +672,7 @@ function setupSettingsPanel() {
       Array.isArray(s.enabledPeriods) && s.enabledPeriods.length ? s.enabledPeriods : USAGE_PERIODS,
     ));
     pressChips(metricChips, new Set([String(s.pillMetric || 'total')]));
+    pressChips(effectChips, new Set([String(s.hubEffect || 'ripple')]));
     roll.checked = s.rollTokens !== false;
     quota.checked = s.showQuota !== false;
     timing.checked = s.showTiming !== false;
@@ -744,6 +759,8 @@ function setupSettingsPanel() {
         rollTokens: roll.checked,
         showQuota: quota.checked,
         showTiming: timing.checked,
+        hubEffect: (effectChips.find((chip) => chip.getAttribute('aria-pressed') === 'true')
+          || effectChips[0]).dataset.effect,
         keepAlive: keepAlive.checked,
       });
       if (!result?.ok) {
@@ -946,6 +963,7 @@ function stopFlights() {
     flight.active = false;
     flight.bird.remove();
     flight.guides.remove();
+    flight.fx.remove();
   }
   flights.clear();
 }
@@ -975,6 +993,7 @@ function syncFlights(routes, multi) {  if (reducedMotion.matches) {
       flight.active = false;
       flight.bird.remove();
       flight.guides.remove();
+      flight.fx.remove();
       flights.delete(key);
     }
   }
@@ -1008,7 +1027,10 @@ function startFlight(key, route, multi, color) {
 
   const guides = document.createElementNS(SVG_NS, 'g');
   guides.setAttribute('aria-hidden', 'true');
-  el.birdSky.append(guides, bird);
+  // One-shot sparks and shockwaves from a hub pass live here, under the bird.
+  const fx = document.createElementNS(SVG_NS, 'g');
+  fx.setAttribute('aria-hidden', 'true');
+  el.birdSky.append(guides, fx, bird);
 
   const flight = {
     key,
@@ -1017,6 +1039,12 @@ function startFlight(key, route, multi, color) {
     color,
     bird,
     guides,
+    fx,
+    hubCenter: null,
+    hubHalf: null,
+    // A crossing effect may squeeze or dissolve the bird for a moment.
+    fxScale: 1,
+    fxAlpha: 1,
     active: true,
     leg1: null,
     leg2: null,
@@ -1062,10 +1090,13 @@ function buildFlightLegs(flight) {
   const hrx = (hr.right - sky.left) / s;
   const hy = (hr.top - sky.top + hr.height / 2) / s;
 
-  const d1 = `M ${ax - OVERSHOOT} ${ay} C ${(ax - OVERSHOOT) + (hl - (ax - OVERSHOOT)) * 0.45} ${ay}, ${hl - (hl - (ax - OVERSHOOT)) * 0.35} ${hy}, ${hl} ${hy}`;
+  // Both ends of the trip stop on the edge of their card, never inside it:
+  // the bird has to be visible when it arrives, and it is only parked there
+  // for a beat before it fades (see perch()).
+  const d1 = `M ${ax} ${ay} C ${ax + (hl - ax) * 0.45} ${ay}, ${hl - (hl - ax) * 0.35} ${hy}, ${hl} ${hy}`;
   // through magpie, not teleporting from its left edge to its right
   const dHub = `M ${hl} ${hy} C ${hl + (hrx - hl) * 0.32} ${hy - 11}, ${hrx - (hrx - hl) * 0.32} ${hy - 11}, ${hrx} ${hy}`;
-  const d2 = `M ${hrx} ${hy} C ${hrx + ((cx + OVERSHOOT) - hrx) * 0.35} ${hy}, ${(cx + OVERSHOOT) - ((cx + OVERSHOOT) - hrx) * 0.45} ${cy}, ${cx + OVERSHOOT} ${cy}`;
+  const d2 = `M ${hrx} ${hy} C ${hrx + (cx - hrx) * 0.35} ${hy}, ${cx - (cx - hrx) * 0.45} ${cy}, ${cx} ${cy}`;
 
   const leg1 = document.createElementNS(SVG_NS, 'path');
   const legHub = document.createElementNS(SVG_NS, 'path');
@@ -1081,21 +1112,23 @@ function buildFlightLegs(flight) {
   flight.leg1 = leg1;
   flight.legHub = legHub;
   flight.leg2 = leg2;
+  // Where the request crosses magpie, in the sky's own coordinates: passHub
+  // puts its ring and sparks here.
+  flight.hubCenter = { x: (hl + hrx) / 2, y: hy };
+  flight.hubHalf = { x: (hrx - hl) / 2, y: hr.height / s / 2 };
   return true;
 }
 
 // fade: 'in' or 'out' at the leg's own ends, so the magpie dissolves where
-// it meets the agent or the account instead of popping in and out. The
-// path runs a little past each end, so it also overshoots the target.
+// it meets the agent or the account instead of popping in and out.
 const FADE_SHARE = 0.38;
-const OVERSHOOT = 16;
 
 function smoothstep(t) {
   const x = Math.max(0, Math.min(1, t));
   return x * x * (3 - 2 * x);
 }
 
-function flyLeg(flight, path, reverse, fade = null) {
+function flyLeg(flight, path, reverse, fade = null, onMid = null) {
   return new Promise((resolve) => {
     const len = path.getTotalLength();
     if (!len) {
@@ -1104,12 +1137,19 @@ function flyLeg(flight, path, reverse, fade = null) {
     }
     const duration = Math.max(430, Math.min(1100, len * 8));
     const t0 = performance.now();
+    let midFired = false;
     const step = (now) => {
       if (!flight.active) {
         resolve();
         return;
       }
       const raw = Math.min(1, (now - t0) / duration);
+      // A leg that crosses magpie reports the moment the bird is inside the
+      // card, so the hub can answer while the bird is still there.
+      if (onMid && !midFired && raw >= 0.45) {
+        midFired = true;
+        onMid();
+      }
       const eased = (1 - Math.cos(Math.PI * raw)) / 2;
       const distance = reverse ? len * (1 - eased) : len * eased;
       const p0 = path.getPointAtLength(Math.max(0, distance - 2));
@@ -1126,7 +1166,7 @@ function flyLeg(flight, path, reverse, fade = null) {
       if (Math.abs(vx) + Math.abs(vy) < 0.01) vx = reverse ? -1 : 1;
       const bank = Math.max(-20, Math.min(20, Math.atan2(vy, Math.abs(vx)) * 180 / Math.PI));
       const flip = vx < 0 ? -1 : 1;
-      const scale = 0.68;
+      const scale = 0.68 * (flight.fxScale || 1);
       flight.bird.setAttribute(
         'transform',
         `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${(flip * scale).toFixed(3)} ${scale.toFixed(3)}) rotate(${bank.toFixed(1)})`,
@@ -1134,11 +1174,42 @@ function flyLeg(flight, path, reverse, fade = null) {
       let alpha = 1;
       if (fade === 'in') alpha = smoothstep(raw / FADE_SHARE);
       else if (fade === 'out') alpha = smoothstep((1 - raw) / FADE_SHARE);
-      flight.bird.style.opacity = alpha.toFixed(3);
+      flight.bird.style.opacity = (alpha * (flight.fxAlpha ?? 1)).toFixed(3);
       if (raw < 1) requestAnimationFrame(step);
       else resolve();
     };
     requestAnimationFrame(step);
+  });
+}
+
+// Arriving is part of the trip: the bird reaches the account, sits there for a
+// beat, and only then fades out. Without the beat it vanished mid-wire and the
+// arrival never read as an arrival.
+const PERCH_MS = 160;
+const PERCH_FADE_MS = 200;
+
+function perch(flight) {
+  const bird = flight.bird;
+  return new Promise((resolve) => {
+    const t0 = performance.now();
+    const hold = (now) => {
+      if (!flight.active) {
+        resolve();
+        return;
+      }
+      bird.style.opacity = '1';
+      if (now - t0 < PERCH_MS) {
+        requestAnimationFrame(hold);
+        return;
+      }
+      bird.style.transition = `opacity ${PERCH_FADE_MS}ms ease-out`;
+      requestAnimationFrame(() => { bird.style.opacity = '0'; });
+      window.setTimeout(() => {
+        bird.style.transition = '';
+        resolve();
+      }, PERCH_FADE_MS + 20);
+    };
+    requestAnimationFrame(hold);
   });
 }
 
@@ -1154,23 +1225,240 @@ async function runFlight(flight) {
     flight.bird.classList.remove('back');
     await flyLeg(flight, flight.leg1, false, 'in');
     if (!flight.active) break;
-    await flyLeg(flight, flight.legHub, false);
+    await flyLeg(flight, flight.legHub, false, null, () => passHub(flight));
     if (!flight.active) break;
-    await flyLeg(flight, flight.leg2, false, 'out');
+    await flyLeg(flight, flight.leg2, false);
+    if (!flight.active) break;
+    await perch(flight);
     if (!flight.active) break;
     await pause(flight.answerHold);
 
     flight.bird.classList.add('back');
     await flyLeg(flight, flight.leg2, true, 'in');
     if (!flight.active) break;
-    await flyLeg(flight, flight.legHub, true);
+    await flyLeg(flight, flight.legHub, true, null, () => passHub(flight, true));
     if (!flight.active) break;
-    await flyLeg(flight, flight.leg1, true, 'out');
+    await flyLeg(flight, flight.leg1, true);
+    if (!flight.active) break;
+    await perch(flight);
     if (!flight.active) break;
     await pause(flight.rest);
   }
   flight.bird.remove();
   flight.guides.remove();
+  flight.fx.remove();
+}
+
+// ── the hub a request flies through ────────────────────────────────────
+// Crossing magpie is the one moment every route shares, so it gets a
+// flourish. Four gestures are staged behind 设置 → 穿过动效; each is one-shot
+// and removes itself, so a transparent always-on window pays nothing once the
+// pass is over.
+const HUB_EFFECTS = ['ripple', 'vortex', 'dissolve', 'arc'];
+const HUB_FLASH_MS = 460;
+const HUB_BURSTS = 3;
+const hubPassTimers = new WeakMap();
+const hubBursts = new WeakMap();
+
+function passHub(flight, back = false) {
+  if (!flight.active) return;
+  const hub = flight.single ? el.hub : el.fanHub;
+  if (!hub || !hub.querySelector('.hub-card')) return;
+
+  // Shared opening: the card takes the agent's colour and the logo gives a
+  // small start, whichever gesture follows.
+  hub.style.setProperty('--route', flight.color);
+  hub.classList.remove('passing');
+  // Reading a layout property drops the previous animation, so two passes in
+  // quick succession each get a full gesture instead of sharing one.
+  void hub.offsetWidth;
+  hub.classList.add('passing');
+  clearTimeout(hubPassTimers.get(hub));
+  hubPassTimers.set(hub, window.setTimeout(
+    () => hub.classList.remove('passing'),
+    HUB_FLASH_MS,
+  ));
+
+  flight.bird.classList.add('passing');
+  window.setTimeout(() => flight.bird.classList.remove('passing'), 640);
+
+  const center = flight.hubCenter;
+  if (!center || !flight.fx) return;
+  const burst = hubBurst(hub, flight.fx);
+  const effect = HUB_EFFECTS.includes(settings.hubEffect) ? settings.hubEffect : 'ripple';
+  if (effect === 'vortex') vortexPass(burst, flight, center);
+  else if (effect === 'dissolve') dissolvePass(burst, flight, center);
+  else if (effect === 'arc') arcPass(burst, flight, center);
+  else ripplePass(burst, flight, center, back);
+}
+
+function hubBurst(hub, fx) {
+  const burst = document.createElementNS(SVG_NS, 'g');
+  burst.setAttribute('aria-hidden', 'true');
+  fx.append(burst);
+  // With several requests in the air the bursts would pile into a smear, so
+  // only the last few are kept: the hub still looks busy, but a crossing can
+  // still be read as one crossing.
+  let live = hubBursts.get(hub);
+  if (!live) {
+    live = [];
+    hubBursts.set(hub, live);
+  }
+  live.push(burst);
+  while (live.length > HUB_BURSTS) live.shift().remove();
+  window.setTimeout(() => {
+    burst.remove();
+    const at = live.indexOf(burst);
+    if (at >= 0) live.splice(at, 1);
+  }, 1000);
+  return burst;
+}
+
+function skyCircle(burst, center, r, paint = {}) {
+  const dot = document.createElementNS(SVG_NS, 'circle');
+  dot.setAttribute('cx', String(center.x));
+  dot.setAttribute('cy', String(center.y));
+  dot.setAttribute('r', String(r));
+  for (const [key, value] of Object.entries(paint)) dot.setAttribute(key, value);
+  // Scale must be measured from each shape's own box, or the dot would slide
+  // towards the sky's top-left corner as it shrinks.
+  dot.style.transformBox = 'fill-box';
+  dot.style.transformOrigin = 'center';
+  burst.append(dot);
+  return dot;
+}
+
+function tweenFlight(flight, ms, fn) {
+  const t0 = performance.now();
+  const step = (now) => {
+    if (!flight.active) return;
+    const t = Math.min(1, (now - t0) / ms);
+    fn(t);
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+/* 01 ─ a ring and a few sparks ─────────────────────────────────────────── */
+function ripplePass(burst, flight, center, back) {
+  skyCircle(burst, center, 9, { class: 'hub-shock', fill: 'none', stroke: flight.color });
+  // The answer is a quieter visitor than the request that went out.
+  const count = back ? 5 : 8;
+  for (let i = 0; i < count; i++) {
+    const spark = skyCircle(burst, center, (1 + Math.random() * 0.9).toFixed(2), {
+      class: 'hub-spark',
+      fill: flight.color,
+    });
+    const angle = (Math.PI * 2 * i) / count + Math.random() * 0.7;
+    const distance = 16 + Math.random() * 20;
+    spark.style.setProperty('--dx', `${(Math.cos(angle) * distance).toFixed(1)}px`);
+    spark.style.setProperty('--dy', `${(Math.sin(angle) * distance).toFixed(1)}px`);
+  }
+}
+
+/* 02 ─ the bird is pulled in, then spat out ────────────────────────────── */
+function vortexPass(burst, flight, center) {
+  const swirl = skyCircle(burst, center, 13, {
+    class: 'hub-swirl',
+    fill: 'none',
+    stroke: flight.color,
+    'stroke-width': '1.1',
+    'stroke-dasharray': '5 5',
+    'stroke-linecap': 'round',
+  });
+  swirl.animate([
+    { transform: 'scale(1.6) rotate(0deg)', opacity: 0 },
+    { transform: 'scale(1) rotate(200deg)', opacity: 0.9, offset: 0.55 },
+    { transform: 'scale(0.3) rotate(430deg)', opacity: 0 },
+  ], { duration: 620, easing: 'cubic-bezier(.4,0,.2,1)', fill: 'forwards' });
+
+  for (let i = 0; i < 10; i++) {
+    const dot = skyCircle(burst, center, 1.2, { class: 'hub-orbit', fill: i % 2 ? flight.color : '#ffffff' });
+    const a0 = (Math.PI * 2 * i) / 10;
+    const a1 = a0 + Math.PI * 0.9;
+    dot.animate([
+      {
+        transform: `translate(${(Math.cos(a0) * 46).toFixed(1)}px, ${(Math.sin(a0) * 46).toFixed(1)}px) scale(1)`,
+        opacity: 0,
+      },
+      {
+        transform: `translate(${(Math.cos(a1) * 22).toFixed(1)}px, ${(Math.sin(a1) * 22).toFixed(1)}px) scale(0.9)`,
+        opacity: 0.95,
+        offset: 0.45,
+      },
+      { transform: 'translate(0px, 0px) scale(0.1)', opacity: 0 },
+    ], { duration: 620, delay: i * 12, easing: 'cubic-bezier(.5,0,.3,1)', fill: 'forwards' });
+  }
+
+  // the bird is squeezed into a point while it is inside the door
+  tweenFlight(flight, 520, (t) => {
+    flight.fxScale = 1 - Math.sin(Math.PI * t) * 0.7;
+    if (t === 1) flight.fxScale = 1;
+  });
+}
+
+/* 03 ─ the bird comes apart and re-forms ───────────────────────────────── */
+function dissolvePass(burst, flight, center) {
+  for (let i = 0; i < 16; i++) {
+    const dot = skyCircle(burst, center, (0.9 + Math.random() * 0.9).toFixed(2), {
+      class: 'hub-dust',
+      fill: i % 3 === 0 ? '#ffffff' : flight.color,
+    });
+    const a = Math.random() * Math.PI * 2;
+    const d = 8 + Math.random() * 26;
+    dot.animate([
+      { transform: 'translate(0px, 0px) scale(1)', opacity: 1 },
+      {
+        transform: `translate(${(Math.cos(a) * d).toFixed(1)}px, ${(Math.sin(a) * d).toFixed(1)}px) scale(0.3)`,
+        opacity: 0,
+      },
+    ], {
+      duration: 420 + Math.random() * 220,
+      delay: Math.random() * 70,
+      easing: 'cubic-bezier(.2,.7,.4,1)',
+      fill: 'forwards',
+    });
+  }
+
+  // the bird becomes the dust while it is inside the card, then re-forms
+  tweenFlight(flight, 90, (t) => { flight.fxAlpha = 1 - t; });
+  window.setTimeout(() => {
+    if (!flight.active) return;
+    tweenFlight(flight, 170, (t) => { flight.fxAlpha = t; });
+  }, 190);
+}
+
+/* 04 ─ a few arcs across the card ──────────────────────────────────────── */
+function arcPass(burst, flight, center) {
+  const half = flight.hubHalf || { x: 22, y: 22 };
+  for (let i = 0; i < 3; i++) {
+    const points = [];
+    let x = center.x - half.x;
+    let y = center.y - half.y * 0.9;
+    points.push(`M ${x.toFixed(1)} ${y.toFixed(1)}`);
+    while (x < center.x + half.x) {
+      x += 3 + Math.random() * 4;
+      y += (Math.random() - 0.5) * 10;
+      y = Math.max(center.y - half.y, Math.min(center.y + half.y, y));
+      points.push(`L ${Math.min(center.x + half.x, x).toFixed(1)} ${y.toFixed(1)}`);
+    }
+    const bolt = document.createElementNS(SVG_NS, 'path');
+    bolt.setAttribute('class', 'hub-bolt');
+    bolt.setAttribute('d', points.join(' '));
+    bolt.setAttribute('fill', 'none');
+    bolt.setAttribute('stroke', i === 1 ? '#ffffff' : flight.color);
+    bolt.setAttribute('stroke-width', (0.8 + Math.random()).toFixed(2));
+    bolt.setAttribute('stroke-linejoin', 'round');
+    bolt.setAttribute('stroke-linecap', 'round');
+    burst.append(bolt);
+    bolt.animate([
+      { opacity: 0 },
+      { opacity: 1, offset: 0.16 },
+      { opacity: 0.15, offset: 0.48 },
+      { opacity: 1, offset: 0.64 },
+      { opacity: 0 },
+    ], { duration: 300 + i * 80, easing: 'steps(1, end)', fill: 'forwards' });
+  }
 }
 
 function agentMark(agent, glyph) {
@@ -1347,16 +1635,19 @@ function renderView(view, color = '#a18bff') {
   animateNumber(el.statErrors, view.errors);
 }
 
+// Each agent wears its own mark's colour. Codex, Cursor and Grok are monochrome
+// brands, so their black/white is lifted just enough to sit on a near-black
+// card; DeepSeek, Claude and Gemini keep their brand hue with more light.
 const ROUTE_COLORS = {
-  codex: '#B1A7FF',
-  dsh: '#61D7E7',
-  claude: '#DDA2FF',
-  'claude-code': '#DDA2FF',
-  cursor: '#8EB6FF',
-  gemini: '#F1C66B',
+  codex: '#EFEDF7',
+  dsh: '#7C93FF',
+  claude: '#EC9B7C',
+  'claude-code': '#EC9B7C',
+  cursor: '#9A97AD',
+  gemini: '#7FA9FF',
   opencode: '#8EDCB9',
   qoder: '#F2A98B',
-  grok: '#E3D6C7',
+  grok: '#E6E4EE',
   zcode: '#9BC7FF',
 };
 
@@ -1517,6 +1808,14 @@ function drawFanWires() {
   const hubY = hubCard.top - fan.top + hubCard.height / 2;
   const fragment = document.createDocumentFragment();
 
+  // The dash phase is seeded from the wall clock: every trace update rebuilds
+  // these paths, and a fresh CSS animation would otherwise snap the marching
+  // dots back to the same spot. Each wire is offset a little so the fan does
+  // not blink in lockstep.
+  const flowCycle = 1600;
+  const phase = -(performance.now() % flowCycle) / 1000;
+  let wireIndex = 0;
+
   const wire = (d, color, fresh, endX, endY) => {
     const under = document.createElementNS(SVG_NS, 'path');
     under.setAttribute('class', 'fan-wire-under');
@@ -1528,6 +1827,8 @@ function drawFanWires() {
     path.setAttribute('class', `fan-wire-path${fresh ? ' fresh' : ''}`);
     path.setAttribute('d', d);
     path.setAttribute('stroke', color);
+    path.style.setProperty('--flow', `${(phase - wireIndex * 0.37).toFixed(3)}s`);
+    wireIndex += 1;
     fragment.append(path);
 
     const end = document.createElementNS(SVG_NS, 'circle');

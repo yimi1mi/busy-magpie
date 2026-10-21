@@ -35,7 +35,7 @@
         <span class="brand">MAGPIE</span>
         <i class="brand-sep"></i>
         <button class="update-chip" id="updateChip" type="button" hidden>更新 <b id="updateChipVersion"></b></button>
-        <button class="app-version mono" id="appVersion" type="button" title="关于与更新"><span id="appVersionText">v1.3.8</span><i class="update-dot" id="updateDot" hidden></i></button>
+        <button class="app-version mono" id="appVersion" type="button" title="关于与更新"><span id="appVersionText">v1.3.9</span><i class="update-dot" id="updateDot" hidden></i></button>
       </div>
 
       <div class="content">
@@ -185,7 +185,7 @@
           <div class="settings-inner">
             <header class="settings-head">
               <div>
-                <b>设置 <em class="settings-version mono" id="settingsVersion">v1.3.8</em></b>
+                <b>设置 <em class="settings-version mono" id="settingsVersion">v1.3.9</em></b>
               </div>
               <div class="settings-head-actions">
                 <button type="button" class="settings-link" id="settingsOpenFile">打开文件夹</button>
@@ -262,6 +262,18 @@
                       <input type="checkbox" id="settingsKeepAlive">
                     </label>
                   </div>                </section>
+
+                <section class="settings-group">
+                  <div class="settings-field">
+                    <div class="settings-caption"><b>穿过动效</b></div>
+                    <div class="settings-chips" id="settingsEffects" role="group" aria-label="穿过动效">
+                      <button type="button" class="settings-chip" data-effect="ripple" aria-pressed="true">涟漪</button>
+                      <button type="button" class="settings-chip" data-effect="vortex" aria-pressed="false">漩涡</button>
+                      <button type="button" class="settings-chip" data-effect="dissolve" aria-pressed="false">溶解</button>
+                      <button type="button" class="settings-chip" data-effect="arc" aria-pressed="false">电弧</button>
+                    </div>
+                  </div>
+                </section>
 
                 <section class="settings-group">
                   <div class="settings-row">

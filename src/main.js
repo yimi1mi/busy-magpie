@@ -127,6 +127,7 @@ function defaults() {
     rollTokens: true,
     showQuota: true,
     showTiming: true,
+    hubEffect: 'ripple',
     keepAlive: true,
     hotkey: 'Control+Alt+M',
     hotkeyOn: true,
@@ -156,6 +157,15 @@ function normalizePeriods(value) {
 function normalizeMetric(value) {
   const metric = String(value || '').toLowerCase();
   return PILL_METRICS.includes(metric) ? metric : 'total';
+}
+
+// How the card answers a request crossing magpie: the four staged effects the
+// preview page showed. Ripple stays the default because it is the quietest.
+const HUB_EFFECTS = ['ripple', 'vortex', 'dissolve', 'arc'];
+
+function normalizeHubEffect(value) {
+  const effect = String(value || '').toLowerCase();
+  return HUB_EFFECTS.includes(effect) ? effect : 'ripple';
 }
 
 // How the desktop app takes a newer release: on idle, only after the user
@@ -201,6 +211,7 @@ function loadSettings() {
       rollTokens: parsed.rollTokens !== false,
       showQuota: parsed.showQuota !== false,
       showTiming: parsed.showTiming !== false,
+      hubEffect: normalizeHubEffect(parsed.hubEffect),
       keepAlive: parsed.keepAlive !== false,
       hotkey: String(parsed.hotkey || DEFAULT_HOTKEY).trim(),
       hotkeyOn: parsed.hotkeyOn !== false,
@@ -416,6 +427,7 @@ function publicSettings() {
     rollTokens: settings.rollTokens !== false,
     showQuota: settings.showQuota !== false,
     showTiming: settings.showTiming !== false,
+    hubEffect: settings.hubEffect,
   };
 }
 
@@ -1650,6 +1662,7 @@ ipcMain.handle('settings:save', (_event, input) => {
       showTiming: data.showTiming === undefined
         ? settings.showTiming !== false
         : Boolean(data.showTiming),
+      hubEffect: normalizeHubEffect(data.hubEffect ?? settings.hubEffect),
       keepAlive: data.keepAlive === undefined
         ? settings.keepAlive !== false
         : Boolean(data.keepAlive),

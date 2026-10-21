@@ -138,7 +138,10 @@ body {
 }
 
 .flying-bird {
-  color: rgba(247, 244, 255, 0.9);
+  /* Each bird wears its agent's colour, the same way the wires do: with four
+     requests in the air the card reads as four different senders, not four
+     identical white birds. */
+  color: color-mix(in srgb, var(--agent, #a18bff) 84%, #ffffff);
   will-change: transform, opacity;
 }
 
@@ -893,6 +896,9 @@ body.layout .token-pill {
     transparent 1.3px 6px
   );
   background-size: 6px 1px;
+  /* The dots drift towards the account, so the path reads as a wire that
+     carries something rather than a dotted rule. */
+  animation: wireMarch 1.5s linear infinite;
 }
 
 .wire .spark {
@@ -966,12 +972,17 @@ body.layout .token-pill {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.1),
     0 8px 22px rgba(0, 0, 0, 0.22);
+  transition:
+    border-color 0.3s ease,
+    box-shadow 0.5s ease;
 }
 
 .bird {
   width: 34px;
   height: 34px;
   overflow: visible;
+  transform-box: fill-box;
+  transform-origin: center;
 }
 
 .bird path {
@@ -991,6 +1002,52 @@ body.layout .token-pill {
   border-radius: 50%;
   background: var(--good);
   box-shadow: 0 0 7px rgba(91, 227, 154, 0.5);
+}
+
+/* A request passing through magpie: the card takes that agent's colour, the
+   logo gives a small start, and passHub() throws a ring and a few sparks into
+   the sky behind the bird. Both the portrait hub and the fan's hub answer to
+   the same class, so the gesture is identical in either layout. */
+.hub.passing .hub-card {
+  border-color: color-mix(in srgb, var(--route, #a18bff) 62%, rgba(255, 255, 255, 0.38));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 8px 22px rgba(0, 0, 0, 0.22),
+    0 0 26px color-mix(in srgb, var(--route, #a18bff) 38%, transparent);
+}
+
+.hub.passing .hub-glow {
+  animation: hubGlow 0.72s cubic-bezier(0.25, 0.8, 0.3, 1);
+}
+
+.hub.passing .bird {
+  animation: hubLogo 0.66s cubic-bezier(0.3, 0.8, 0.4, 1);
+}
+
+.hub-shock {
+  fill: none;
+  stroke-width: 1.4;
+  animation: hubShock 0.72s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+
+.hub-spark {
+  /* The sparks are placed with cx/cy and then scaled down as they fade. That
+     scale has to be measured from each spark's own box; from the SVG origin
+     it would drag them towards the sky's top-left corner instead of letting
+     them drift out from the hub. */
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: hubSpark 0.66s cubic-bezier(0.15, 0.65, 0.35, 1) forwards;
+}
+
+.flying-bird.passing {
+  filter: drop-shadow(0 0 7px var(--agent, #a18bff));
+}
+
+.flying-bird.passing .rt-lift {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: birdWarp 0.62s cubic-bezier(0.25, 0.75, 0.35, 1);
 }
 
 /* chosen account */
@@ -1530,10 +1587,20 @@ body.layout .token-pill {
   stroke-linecap: round;
   stroke-dasharray: 0.4 5;
   opacity: 0.88;
+  /* The dashes march along the path — out of the agent, through magpie, into
+     the account — so a live fan reads as traffic rather than a dotted rope.
+     The delay is seeded from the wall clock (see drawFanWires) because every
+     trace update rebuilds these paths; without it the dots would hop back to
+     the same phase on each rebuild. */
+  animation: wireFlow 1.6s linear infinite;
+  animation-delay: var(--flow, 0s);
 }
 
 .fan-wire-path.fresh {
-  animation: wireIn 0.7s ease-out both;
+  animation:
+    wireIn 0.7s ease-out both,
+    wireFlow 1.6s linear infinite;
+  animation-delay: 0s, calc(0.7s + var(--flow, 0s));
 }
 
 .fan-wire-end {
@@ -1916,6 +1983,93 @@ body.layout .layout-overlay {
   100% {
     opacity: 0;
     transform: translateX(var(--travel, 46px)) scale(0.7);
+  }
+}
+
+@keyframes wireFlow {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -5.4;
+  }
+}
+
+@keyframes wireMarch {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 6px 0;
+  }
+}
+
+@keyframes hubShock {
+  from {
+    r: 9px;
+    opacity: 0.9;
+    stroke-width: 1.8;
+  }
+  65% {
+    opacity: 0.32;
+  }
+  to {
+    r: 38px;
+    opacity: 0;
+    stroke-width: 0.3;
+  }
+}
+
+@keyframes hubSpark {
+  from {
+    opacity: 0.95;
+    transform: translate(0, 0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(var(--dx, 0px), var(--dy, 0px)) scale(0.25);
+  }
+}
+
+@keyframes hubGlow {
+  0% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1.22);
+  }
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+}
+
+@keyframes hubLogo {
+  0% {
+    transform: scale(1);
+  }
+  30% {
+    transform: scale(0.88) rotate(-4deg);
+  }
+  62% {
+    transform: scale(1.14) rotate(2deg);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes birdWarp {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.28);
+  }
+  100% {
+    transform: scale(1);
   }
 }
 
