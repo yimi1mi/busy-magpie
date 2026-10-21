@@ -697,36 +697,72 @@ async function installUpdate() {
     sendUpdateState();
 
     const helper = path.join(app.getPath('temp'), 'busy-magpie-update.ps1');
+    const helperLog = path.join(app.getPath('temp'), 'busy-magpie-update.log');
+    const target = String(updateState.latest || '');
     const quote = (value) => String(value).replace(/'/g, "''");
+    // The helper outlives the app, so everything it learns has to be written
+    // down: the app's own log is closed by the time the installer runs.
     fs.writeFileSync(helper, [
+      `$ErrorActionPreference = 'Continue'`,
       `$installer = '${quote(destination)}'`,
       `$app = '${quote(app.getPath('exe'))}'`,
+      `$log = '${quote(helperLog)}'`,
+      `function Note($message) { "$(Get-Date -Format 'HH:mm:ss')  $message" | Out-File -LiteralPath $log -Append -Encoding utf8 }`,
+      `Note 'helper started, waiting for the card'`,
       `Wait-Process -Id ${process.pid} -ErrorAction SilentlyContinue`,
-      "Start-Process -FilePath $installer -ArgumentList '/S' -Wait",
-      'Start-Process -FilePath $app',
+      `Start-Sleep -Milliseconds 400`,
+      `Note 'card exited'`,
+      // The launcher plugin can bring the card back while the installer runs,
+      // and then the installer cannot replace its files: put it down again.
+      `for ($try = 1; $try -le 3; $try++) {`,
+      `  Get-Process -Name 'Busy Magpie' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue`,
+      `  Start-Sleep -Milliseconds 700`,
+      `  $run = Start-Process -FilePath $installer -ArgumentList '/S' -PassThru -Wait`,
+      `  Note "installer try $try exited $($run.ExitCode)"`,
+      `  Start-Sleep -Milliseconds 800`,
+      `  $now = (Get-Item -LiteralPath $app).VersionInfo.ProductVersion`,
+      `  Note "installed $now, wanted '${quote(target)}'"`,
+      `  if ($now -eq '${quote(target)}') { break }`,
+      `  Start-Sleep -Seconds 2`,
+      `}`,
+      `Note 'starting the card'`,
+      `Start-Process -FilePath $app`,
+      `Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue`,
+      `Note 'helper done'`,
     ].join('\r\n'), 'utf8');
 
+    log(`update: ${target} downloaded to ${destination}, starting the helper`);
     const child = spawnDetached('powershell.exe', [
       '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden',
       '-File', helper,
     ]);
     if (!child) throw new Error('无法启动安装程序');
+    log(`update: helper pid ${child.pid}`);
     setTimeout(() => app.quit(), 250);
+    // The helper waits for this process to go: a quit that is held up by a
+    // window or a handler must not leave the install waiting forever.
+    setTimeout(() => app.exit(0), 5000);
   } catch (error) {
     updateState.downloading = false;
     updateState.installing = false;
     updateState.error = error.message || '更新失败';
+    log(`update failed: ${error.message}`);
     sendUpdateState();
     try { fs.rmSync(destination, { force: true }); } catch { /* ignore */ }
   }
   return updateView();
 }
 
+// A child that outlives this process, with a console of its own.
+//
+// A plain child shares the app's console and is killed when the app exits;
+// `detached: true` hands a console program no console at all, and PowerShell
+// then exits at once without running its script (Windows, checked). `start`
+// gives it a console of its own, hidden behind the window cmd was given.
 function spawnDetached(file, args) {
   try {
     const { spawn } = require('child_process');
-    const child = spawn(file, args, {
-      detached: true,
+    const child = spawn('cmd.exe', ['/c', 'start', '', '/b', file, ...args], {
       stdio: 'ignore',
       windowsHide: true,
     });
