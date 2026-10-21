@@ -159,9 +159,10 @@ function normalizeMetric(value) {
   return PILL_METRICS.includes(metric) ? metric : 'total';
 }
 
-// How the card answers a request crossing magpie: the four staged effects the
-// preview page showed. Ripple stays the default because it is the quietest.
-const HUB_EFFECTS = ['ripple', 'vortex', 'dissolve', 'arc'];
+// How the card answers a request crossing magpie: the staged effects the
+// preview page showed, plus 无 to switch the gesture off entirely. Ripple
+// stays the default because it is the quietest.
+const HUB_EFFECTS = ['none', 'ripple', 'vortex', 'dissolve', 'arc'];
 
 function normalizeHubEffect(value) {
   const effect = String(value || '').toLowerCase();
@@ -1459,7 +1460,7 @@ function buildTrayMenu() {
       click: () => openSettingsPanel('settings'),
     },
     {
-      label: '关于 Busy Magpie…',
+      label: `关于 Busy Magpie…（v${app.getVersion()}）`,
       click: () => openAbout(),
     },
     {

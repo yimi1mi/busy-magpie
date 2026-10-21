@@ -1045,6 +1045,11 @@ function startFlight(key, route, multi, color) {
     // A crossing effect may squeeze or dissolve the bird for a moment.
     fxScale: 1,
     fxAlpha: 1,
+    // Where the last frame left the bird, and the clock that drives its drift.
+    pose: null,
+    born: performance.now(),
+    wobPhase: Math.random() * Math.PI * 2,
+    pace: 1,
     active: true,
     leg1: null,
     leg2: null,
@@ -1093,25 +1098,48 @@ function buildFlightLegs(flight) {
   // Both ends of the trip stop on the edge of their card, never inside it:
   // the bird has to be visible when it arrives, and it is only parked there
   // for a beat before it fades (see perch()).
-  const d1 = `M ${ax} ${ay} C ${ax + (hl - ax) * 0.45} ${ay}, ${hl - (hl - ax) * 0.35} ${hy}, ${hl} ${hy}`;
+  //
+  // Every rebuild re-rolls the control points, so no two trips trace the same
+  // curve: the bird may climb, dip, or hop over magpie depending on the roll.
+  // The endpoints stay pinned to the cards, or it would miss them.
+  const wander = (amount) => (Math.random() - 0.5) * amount;
+  // The hop over magpie stays shallow: a tall arc over a 44px card reads as a
+  // jump, not as passing through.
+  const bow = 7 + Math.random() * 4;
+  const climb1 = wander(28);
+  const climb2 = wander(20);
+  const climb3 = wander(26);
+  const climb4 = wander(18);
+  const d1 = `M ${ax} ${ay} C ${(ax + (hl - ax) * 0.45).toFixed(1)} ${(ay + climb1).toFixed(1)}, ${(hl - (hl - ax) * 0.35).toFixed(1)} ${(hy + climb2).toFixed(1)}, ${hl} ${hy}`;
   // through magpie, not teleporting from its left edge to its right
-  const dHub = `M ${hl} ${hy} C ${hl + (hrx - hl) * 0.32} ${hy - 11}, ${hrx - (hrx - hl) * 0.32} ${hy - 11}, ${hrx} ${hy}`;
-  const d2 = `M ${hrx} ${hy} C ${hrx + (cx - hrx) * 0.35} ${hy}, ${cx - (cx - hrx) * 0.45} ${cy}, ${cx} ${cy}`;
+  const dHub = `M ${hl} ${hy} C ${(hl + (hrx - hl) * 0.32).toFixed(1)} ${(hy - bow).toFixed(1)}, ${(hrx - (hrx - hl) * 0.32).toFixed(1)} ${(hy - bow * (0.7 + Math.random() * 0.6)).toFixed(1)}, ${hrx} ${hy}`;
+  const d2 = `M ${hrx} ${hy} C ${(hrx + (cx - hrx) * 0.35).toFixed(1)} ${(hy + climb3).toFixed(1)}, ${(cx - (cx - hrx) * 0.45).toFixed(1)} ${(cy + climb4).toFixed(1)}, ${cx} ${cy}`;
+
+  // A slight change of pace per trip, so the loop never feels metronomic.
+  flight.pace = 0.8 + Math.random() * 0.45;
 
   const leg1 = document.createElementNS(SVG_NS, 'path');
   const legHub = document.createElementNS(SVG_NS, 'path');
   const leg2 = document.createElementNS(SVG_NS, 'path');
+  const legAll = document.createElementNS(SVG_NS, 'path');
   leg1.setAttribute('d', d1);
   legHub.setAttribute('d', dHub);
   leg2.setAttribute('d', d2);
-  for (const path of [leg1, legHub, leg2]) {
+  legAll.setAttribute('d', `${d1} ${dHub} ${d2}`);
+  for (const path of [leg1, legHub, leg2, legAll]) {
     path.setAttribute('fill', 'none');
     path.setAttribute('stroke', 'none');
   }
-  flight.guides.replaceChildren(leg1, legHub, leg2);
+  flight.guides.replaceChildren(leg1, legHub, leg2, legAll);
   flight.leg1 = leg1;
   flight.legHub = legHub;
   flight.leg2 = leg2;
+  flight.legAll = legAll;
+  // The bird flies the three legs as one path. Animating each leg with its own
+  // ease-in-out made it stop dead at every boundary, which read as a hop.
+  const l1 = leg1.getTotalLength();
+  const lHub = legHub.getTotalLength();
+  flight.hubMid = l1 + lHub * 0.45;
   // Where the request crosses magpie, in the sky's own coordinates: passHub
   // puts its ring and sparks here.
   flight.hubCenter = { x: (hl + hrx) / 2, y: hy };
@@ -1119,39 +1147,74 @@ function buildFlightLegs(flight) {
   return true;
 }
 
-// fade: 'in' or 'out' at the leg's own ends, so the magpie dissolves where
-// it meets the agent or the account instead of popping in and out.
-const FADE_SHARE = 0.38;
+// fade: the bird dissolves where it meets the agent or the account instead of
+// popping in and out. Only the start of a trip needs it now; perch() fades the
+// arrival.
+const FADE_SHARE = 0.12;
 
 function smoothstep(t) {
   const x = Math.max(0, Math.min(1, t));
   return x * x * (3 - 2 * x);
 }
 
-function flyLeg(flight, path, reverse, fade = null, onMid = null) {
+// The distance v. time curve for one trip: soft ends, and a slow zone over
+// magpie so the crossing effect gets read. It is one continuous curve, so the
+// bird loses speed at the hub without ever stopping dead (which used to read
+// as a hop).
+const TRIP_SAMPLES = 180;
+const tripProfile = (() => {
+  const cum = [0];
+  let prev = 0;
+  for (let i = 1; i <= TRIP_SAMPLES; i += 1) {
+    const u = i / TRIP_SAMPLES;
+    let speed = Math.sin(Math.PI * u) ** 0.85;
+    const d = Math.abs(u - 0.5) / 0.17;
+    if (d < 1) speed *= 1 - 0.55 * (0.5 + 0.5 * Math.cos(Math.PI * d));
+    cum.push(cum[i - 1] + (speed + prev) / 2);
+    prev = speed;
+  }
+  const total = cum[TRIP_SAMPLES] || 1;
+  return cum.map((value) => value / total);
+})();
+
+function tripProgress(raw) {
+  const at = Math.min(TRIP_SAMPLES, Math.max(0, raw * TRIP_SAMPLES));
+  const i0 = Math.floor(at);
+  const rest = at - i0;
+  const a = tripProfile[i0];
+  const b = tripProfile[Math.min(TRIP_SAMPLES, i0 + 1)];
+  return a + (b - a) * rest;
+}
+
+function flyTrip(flight, reverse) {
+  const path = flight.legAll;
+  const len = path.getTotalLength();
   return new Promise((resolve) => {
-    const len = path.getTotalLength();
     if (!len) {
       resolve();
       return;
     }
-    const duration = Math.max(430, Math.min(1100, len * 8));
+    // One continuous profile across agent → magpie → account, so the bird
+    // carries speed through the hub instead of stopping at its edges.
+    const duration = Math.max(1200, Math.min(2600, len * 6)) * (flight.pace || 1);
     const t0 = performance.now();
-    let midFired = false;
+    let fired = false;
     const step = (now) => {
       if (!flight.active) {
         resolve();
         return;
       }
-      const raw = Math.min(1, (now - t0) / duration);
-      // A leg that crosses magpie reports the moment the bird is inside the
-      // card, so the hub can answer while the bird is still there.
-      if (onMid && !midFired && raw >= 0.45) {
-        midFired = true;
-        onMid();
+      const raw = Math.max(0, Math.min(1, (now - t0) / duration));
+      const progress = tripProgress(raw);
+      const distance = reverse ? len * (1 - progress) : len * progress;
+      // The hub answers when the bird reaches it, whichever way it is going.
+      if (!fired) {
+        const reached = reverse ? distance <= flight.hubMid : distance >= flight.hubMid;
+        if (reached) {
+          fired = true;
+          passHub(flight, reverse);
+        }
       }
-      const eased = (1 - Math.cos(Math.PI * raw)) / 2;
-      const distance = reverse ? len * (1 - eased) : len * eased;
       const p0 = path.getPointAtLength(Math.max(0, distance - 2));
       const p1 = path.getPointAtLength(Math.min(len, distance + 2));
       const p = path.getPointAtLength(distance);
@@ -1164,16 +1227,23 @@ function flyLeg(flight, path, reverse, fade = null, onMid = null) {
         vy = -vy;
       }
       if (Math.abs(vx) + Math.abs(vy) < 0.01) vx = reverse ? -1 : 1;
-      const bank = Math.max(-20, Math.min(20, Math.atan2(vy, Math.abs(vx)) * 180 / Math.PI));
+      const bank = Math.max(-24, Math.min(24, Math.atan2(vy, Math.abs(vx)) * 180 / Math.PI));
       const flip = vx < 0 ? -1 : 1;
       const scale = 0.68 * (flight.fxScale || 1);
+      // A wing-beat of lateral drift on top of the curve: without it the bird
+      // slides along a rail, with it the flight looks steered.
+      const speed = Math.hypot(vx, vy) || 1;
+      const phase = ((now - flight.born) / 380) * Math.PI * 2 + flight.wobPhase;
+      const drift = Math.sin(phase) * 2.6;
+      const roll = Math.cos(phase) * 6;
+      const px = p.x - (vy / speed) * drift;
+      const py = p.y + (vx / speed) * drift;
+      flight.pose = { x: px, y: py, flip, scale, bank };
       flight.bird.setAttribute(
         'transform',
-        `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)}) scale(${(flip * scale).toFixed(3)} ${scale.toFixed(3)}) rotate(${bank.toFixed(1)})`,
+        `translate(${px.toFixed(1)} ${py.toFixed(1)}) scale(${(flip * scale).toFixed(3)} ${scale.toFixed(3)}) rotate(${(bank + roll).toFixed(1)})`,
       );
-      let alpha = 1;
-      if (fade === 'in') alpha = smoothstep(raw / FADE_SHARE);
-      else if (fade === 'out') alpha = smoothstep((1 - raw) / FADE_SHARE);
+      const alpha = smoothstep(raw / FADE_SHARE);
       flight.bird.style.opacity = (alpha * (flight.fxAlpha ?? 1)).toFixed(3);
       if (raw < 1) requestAnimationFrame(step);
       else resolve();
@@ -1198,7 +1268,18 @@ function perch(flight) {
         return;
       }
       bird.style.opacity = '1';
-      if (now - t0 < PERCH_MS) {
+      // A short settle where it landed: the bird dips and comes to rest
+      // instead of freezing the instant the path ends.
+      const pose = flight.pose;
+      const dt = now - t0;
+      if (pose) {
+        const bob = Math.sin(dt / 130) * 1.6 * Math.exp(-dt / 320);
+        bird.setAttribute(
+          'transform',
+          `translate(${pose.x.toFixed(1)} ${(pose.y + bob).toFixed(1)}) scale(${(pose.flip * pose.scale).toFixed(3)} ${pose.scale.toFixed(3)}) rotate(${pose.bank.toFixed(1)})`,
+        );
+      }
+      if (dt < PERCH_MS) {
         requestAnimationFrame(hold);
         return;
       }
@@ -1223,22 +1304,14 @@ async function runFlight(flight) {
     }
 
     flight.bird.classList.remove('back');
-    await flyLeg(flight, flight.leg1, false, 'in');
-    if (!flight.active) break;
-    await flyLeg(flight, flight.legHub, false, null, () => passHub(flight));
-    if (!flight.active) break;
-    await flyLeg(flight, flight.leg2, false);
+    await flyTrip(flight, false);
     if (!flight.active) break;
     await perch(flight);
     if (!flight.active) break;
     await pause(flight.answerHold);
 
     flight.bird.classList.add('back');
-    await flyLeg(flight, flight.leg2, true, 'in');
-    if (!flight.active) break;
-    await flyLeg(flight, flight.legHub, true, null, () => passHub(flight, true));
-    if (!flight.active) break;
-    await flyLeg(flight, flight.leg1, true);
+    await flyTrip(flight, true);
     if (!flight.active) break;
     await perch(flight);
     if (!flight.active) break;
@@ -1254,7 +1327,7 @@ async function runFlight(flight) {
 // flourish. Four gestures are staged behind 设置 → 穿过动效; each is one-shot
 // and removes itself, so a transparent always-on window pays nothing once the
 // pass is over.
-const HUB_EFFECTS = ['ripple', 'vortex', 'dissolve', 'arc'];
+const HUB_EFFECTS = ['none', 'ripple', 'vortex', 'dissolve', 'arc'];
 const HUB_FLASH_MS = 460;
 const HUB_BURSTS = 3;
 const hubPassTimers = new WeakMap();
@@ -1262,6 +1335,8 @@ const hubBursts = new WeakMap();
 
 function passHub(flight, back = false) {
   if (!flight.active) return;
+  // 设置 → 穿过动效 → 无: the crossing stays silent, and the bird just flies.
+  if (settings.hubEffect === 'none') return;
   const hub = flight.single ? el.hub : el.fanHub;
   if (!hub || !hub.querySelector('.hub-card')) return;
 
@@ -1660,6 +1735,8 @@ function agentColor(agent) {
   for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) % 9973;
   return FALLBACK_COLORS[hash % FALLBACK_COLORS.length];
 }
+
+
 
 function renderMulti(routes, totals) {
   setMulti(true);
