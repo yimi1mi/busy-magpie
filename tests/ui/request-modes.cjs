@@ -16,7 +16,7 @@ app.getVersion = () => JSON.parse(fs.readFileSync(path.join(root, 'package.json'
 app.disableHardwareAcceleration();
 
 let win, visible = false, finished = false, rendererReady = false;
-const checks = [], errors = [], screenshots = [];
+const checks = [], errors = [], screenshots = [], dynamicModes = [];
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const record = name => { checks.push(name); console.log('PASS', name); };
 const server = http.createServer((req, res) => {
@@ -120,7 +120,7 @@ async function finish(error) {
   if (finished) return;
   finished = true;
   fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({
-    ok: !error, checks, screenshots, rendererErrors: errors, error: error?.stack,
+    ok: !error, checks, screenshots, dynamicModes, rendererErrors: errors, error: error?.stack,
     rendererReady, url: win?.webContents.getURL(), pid: process.pid,
   }, null, 2));
   if (error && rendererReady && win && !win.isDestroyed()) {
@@ -227,6 +227,57 @@ async function run() {
         ? `2 groups keep mode symbols at least 3px below visible context (measured ${contextGaps.map(gap => gap.toFixed(2)).join(', ')}px)`
         : `${count} groups preserve correct effort levels and fit both symbols without overlapping context`);
     }
+    const dynamicSession = 'dynamic-chat';
+    const peer = row(650, { session: 'continuity-peer', tier: 'priority', effort: 'medium' });
+    let evolving = row(600, { session: dynamicSession, tier: 'priority', effort: 'low' });
+    await feed([evolving, peer]);
+    await js(`window.__modeContinuity = {
+      document, canvas: document.getElementById('stageCanvas'), timeOrigin: performance.timeOrigin,
+      agent: document.querySelector('#fanAgents [data-layout-key="agent:codex|dynamic-chat"]')
+    }; true`);
+    const dynamicStep = async (step, routes, expected) => {
+      const current = (await feed([...routes, peer])).find(card => card.key === 'agent:codex|' + dynamicSession);
+      const continuity = await js(`(() => {
+        const saved = window.__modeContinuity;
+        return { document: saved?.document === document,
+          canvas: saved?.canvas === document.getElementById('stageCanvas'),
+          agent: saved?.agent === document.querySelector('#fanAgents [data-layout-key="agent:codex|dynamic-chat"]'),
+          timeOrigin: saved?.timeOrigin === performance.timeOrigin };
+      })()`);
+      dynamicModes.push({ step, session: dynamicSession, requestIds: routes.map(route => route.id),
+        expected, continuity, rendered: { effort: current?.effort ?? null, lit: current?.lit ?? null,
+          symbolCount: current?.count, rowHidden: current?.visible === false }, dom: current });
+      fs.writeFileSync(path.join(output, 'dynamic-results.json'), JSON.stringify(dynamicModes, null, 2));
+      assert.ok(Object.values(continuity).every(Boolean), 'mode update must reuse the live document and Agent card: ' + JSON.stringify(continuity));
+      assertModes(current, expected);
+      assertFits(current);
+    };
+    for (const [effort, lit] of [['low', 2], ['high', 4], ['xhigh', 5], ['ultra', 6]]) {
+      evolving = { ...evolving, effort };
+      await dynamicStep('same request ' + effort, [evolving], { speed: 'fast', effort, lit });
+      if (effort === 'low' || effort === 'ultra') await capture('dynamic-' + effort);
+    }
+    const newerHigh = row(601, { session: dynamicSession, tier: 'priority', effort: 'high' });
+    await dynamicStep('new ordinary request high', [evolving, newerHigh], { speed: 'fast', effort: 'high', lit: 4 });
+    const newerGuardian = row(602, { session: dynamicSession, kind: 'guardian', effort: 'low' });
+    await dynamicStep('newer guardian low cannot override high', [evolving, newerHigh, newerGuardian],
+      { speed: 'fast', effort: 'high', lit: 4 });
+    let newest = row(603, { session: dynamicSession, tier: 'priority', effort: 'low' });
+    const earlier = [evolving, newerHigh, newerGuardian];
+    await dynamicStep('new ordinary request low', [...earlier, newest], { speed: 'fast', effort: 'low', lit: 2 });
+    newest = { ...newest, effort: 'none' };
+    await dynamicStep('explicit none retains an unlit effort symbol', [...earlier, newest],
+      { speed: 'fast', effort: 'none', lit: 0 });
+    delete newest.effort;
+    await dynamicStep('missing effort leaves speed only', [...earlier, newest],
+      { speed: 'fast', effort: 'unknown', lit: 0 });
+    delete newest.tier;
+    await dynamicStep('both fields missing hides the whole mode row', [...earlier, newest],
+      { speed: 'unknown', effort: 'unknown', lit: 0 });
+    newest = { ...newest, tier: 'priority', effort: 'future-level' };
+    await dynamicStep('unknown effort enum is hidden without guessing', [...earlier, newest],
+      { speed: 'fast', effort: 'unknown', lit: 0 });
+    record('11 same-session updates change effort symbols on the same live Agent node without reloading');
     assert.equal(errors.length, 0, errors.join('\n'));
     await finish();
   } catch (error) { await finish(error); }
