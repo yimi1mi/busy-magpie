@@ -1115,6 +1115,7 @@ function setupAbout() {
   const check = $('aboutCheck');
   const skip = $('aboutSkip');
   const release = $('aboutRelease');
+  $('aboutGitHub').addEventListener('click', () => window.busy.openGitHub());
   const error = $('aboutError');
 
   const render = (data) => {

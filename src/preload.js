@@ -47,6 +47,7 @@ contextBridge.exposeInMainWorld('busy', {
   openGuide: () => ipcRenderer.send('busy:guide-open'),
   openInstallDir: () => ipcRenderer.send('busy:open-install-dir'),
   aboutOpen: () => ipcRenderer.send('busy:about-open'),
+  openGitHub: () => ipcRenderer.send('busy:open-github'),
   updatesGet: () => ipcRenderer.invoke('updates:get'),
   updatesCheck: () => ipcRenderer.invoke('updates:check'),
   updatesInstall: () => ipcRenderer.invoke('updates:install'),

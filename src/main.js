@@ -2070,6 +2070,10 @@ ipcMain.on('updates:open-release', () => {
   if (updateState.releaseUrl) shell.openExternal(updateState.releaseUrl);
 });
 
+ipcMain.on('busy:open-github', () => {
+  shell.openExternal('https://github.com/yimi1mi/busy-magpie');
+});
+
 ipcMain.on('busy:first-run-dismiss', dismissGuide);
 ipcMain.on('busy:guide-open', showGuide);
 
