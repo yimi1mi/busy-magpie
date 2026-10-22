@@ -50,6 +50,8 @@ function mainHarness({ writeError = false } = {}) {
       settings:()=>settings,
       save:input=>ipcMain,
       usage:()=>refreshUsage(),
+      usageData:()=>usageData,
+      usageStatus:()=>usageStatus,
       schedule:()=>scheduleQuietInstall(),
       prepareUpdate:()=>{updateState.ready=true;updateState.available=true;updateState.latest='1.4.0';},
       changeMode:mode=>{settings.updateMode=mode;},
@@ -58,6 +60,8 @@ function mainHarness({ writeError = false } = {}) {
   return {
     api: context.testApi, files,
     save: input => handlers.get('settings:save')({}, input),
+    period: value => handlers.get('usage:set-period')({}, value),
+    setFetch(fn) { context.fetch = fn; },
     tick(ms) {now+=ms;for(const fn of [...intervals.values()])fn();},
     get installed() {return installed;},
   };

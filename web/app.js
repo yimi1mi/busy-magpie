@@ -74,6 +74,7 @@ let settings = {
 };
 let lastTrace = null;
 let usageData = null;
+let usageStatus = { loading: false, stale: false, at: 0, error: '' };
 let connection = { online: false, detail: '正在连接' };
 let layout = false;
 let frame = { lanes: 1, cardHeight: 400, windowHeight: 432 };
@@ -211,7 +212,7 @@ function applyUsageTokens() {
       // The bar is the cache hit rate; asking for the cache itself would
       // just repeat the number above it.
       pct: metricKey === 'cache' ? null : cacheRate,
-      windowLabel: PERIOD_SHORT[period] || '',
+      windowLabel: `${PERIOD_SHORT[period] || ''} · ${{ total: '总量', input: '输入', output: '输出', cache: '缓存' }[metricKey]}`,
       title: `${PERIOD_LONG[period] || usagePeriod(usageData)} · ${metric.label} ${formatTokens(value)}`
         + ` · 输入 ${formatTokens(input)} · 输出 ${formatTokens(output)}`
         + ` · 缓存 ${formatTokens(cache)}${cacheRate !== null ? `（${Math.round(cacheRate * 100)}%）` : ''}`
@@ -228,8 +229,19 @@ function applyUsageTokens() {
   ), 0);
   applyTokenPill({
     total: fallback,
+    windowLabel: '近期快照',
     title: `最近 ${recent.length} 个请求合计 ${formatTokens(fallback)}`,
   });
+}
+
+function renderUsageStatus() {
+  const label = $('usageStatus');
+  const at = usageStatus.at ? new Date(usageStatus.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '';
+  label.classList.toggle('stale', Boolean(usageStatus.error || usageStatus.stale));
+  label.textContent = usageStatus.loading ? `正在读取${PERIOD_SHORT[usageStatus.period] || '用量'}…`
+    : usageStatus.error ? (usageStatus.stale ? `暂未刷新 · 上次 ${at || '—'}` : '用量暂不可用')
+      : at ? `更新于 ${at}` : '等待用量数据';
+  label.title = usageStatus.error || '上方为所选时间窗的用量；下方请求数为网关本次启动以来累计';
 }
 
 let tokenText = '';
@@ -2188,10 +2200,12 @@ async function boot() {
   if (data.connection) connection = data.connection;
   if (data.trace) lastTrace = data.trace;
   if (data.usage) usageData = data.usage;
+  if (data.usageStatus) usageStatus = data.usageStatus;
   applyFrame(data.frame);
   applyGateway();
   setLayout(data.layout);
   render();
+  renderUsageStatus();
 
   window.busy.onTrace((trace) => {
     lastTrace = trace;
@@ -2210,6 +2224,10 @@ async function boot() {
   window.busy.onUsage((next) => {
     usageData = next;
     applyUsageTokens();
+  });
+  window.busy.onUsageStatus((next) => {
+    usageStatus = next;
+    renderUsageStatus();
   });
 
   new ResizeObserver(() => requestAnimationFrame(drawFanWires)).observe(el.fan);

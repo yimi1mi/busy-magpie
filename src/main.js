@@ -70,6 +70,8 @@ let updateState = {
 };
 let lastTrace = null;
 let usageData = null;
+let usageStatus = { loading: false, stale: false, at: 0, error: '', period: '' };
+let usageRequest = null;
 let usageTimer = null;
 let connection = { online: false, detail: '正在连接' };
 let layoutMode = false;
@@ -1144,33 +1146,53 @@ function rebuildClient() {
   if (client) client.stop();
   client = new TraceClient(resolveGateway());
   client.start();
-  refreshUsage();
+  refreshUsage(normalizePeriod(settings.usagePeriod));
 }
 
-async function refreshUsage() {
+async function refreshUsage(requestedPeriod) {
+  if (requestedPeriod === undefined && usageRequest) return usageRequest.promise;
+  const period = normalizePeriod(requestedPeriod ?? settings.usagePeriod);
+  if (usageRequest) usageRequest.controller.abort();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 6000);
-  try {
-    const period = normalizePeriod(settings.usagePeriod);
-    const response = await fetch(`${resolveGateway()}/v1/magpie/usage?period=${period}`, {
-      signal: controller.signal,
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-    });
-    if (!response.ok) {
-      log(`usage answered ${response.status}`);
+  const request = { controller, promise: null };
+  usageRequest = request;
+  usageStatus = { ...usageStatus, loading: true, error: '', period };
+  send('magpie:usage-status', usageStatus);
+  request.promise = readUsage();
+  return request.promise;
+
+  async function readUsage() {
+    const timeout = setTimeout(() => controller.abort(), 6000);
+    try {
+      const response = await fetch(`${resolveGateway()}/v1/magpie/usage?period=${period}`, {
+        signal: controller.signal,
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+      });
+      if (!response.ok) {
+        throw new Error(`用量接口返回 HTTP ${response.status}`);
+      }
+      const data = await response.json();
+      if (usageRequest !== request) return null;
+      if (!data || typeof data !== 'object' || !['input', 'output', 'cache_read', 'cache_write'].some(key => key in data)) {
+        throw new Error('用量接口未返回统计数据');
+      }
+      usageData = { ...data, period };
+      usageStatus = { loading: false, stale: false, at: Date.now(), error: '', period };
+      send('magpie:usage', usageData);
+      send('magpie:usage-status', usageStatus);
+      return usageData;
+    } catch (error) {
+      if (usageRequest !== request) return null;
+      const detail = error.name === 'AbortError' ? '读取用量超时' : error.message;
+      usageStatus = { ...usageStatus, loading: false, stale: Boolean(usageData), error: detail, period };
+      log(`usage unavailable: ${detail}`);
+      send('magpie:usage-status', usageStatus);
       return null;
+    } finally {
+      clearTimeout(timeout);
+      if (usageRequest === request) usageRequest = null;
     }
-    const data = await response.json();
-    usageData = data;
-    send('magpie:usage', data);
-    return data;
-  } catch (error) {
-    // A usage failure leaves the existing total on screen.
-    log(`usage unavailable: ${error.message}`);
-    return null;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -1184,12 +1206,18 @@ async function setUsagePeriod(value) {
   if (!settings.enabledPeriods.includes(period)) {
     return { period: settings.usagePeriod, usage: usageData };
   }
+  const usage = await refreshUsage(period);
+  if (!usage) return { ok: false, period: settings.usagePeriod, error: usageStatus.error };
   if (period !== settings.usagePeriod) {
     settings.usagePeriod = period;
-    saveSettings();
+    const saved = saveSettings();
+    if (!saved.ok) {
+      usageStatus = { ...usageStatus, error: '数据已切换，但时间窗未能保存' };
+      send('magpie:usage-status', usageStatus);
+    }
   }
-  const usage = await refreshUsage();
-  return { period, usage };
+  send('magpie:settings', publicSettings());
+  return { ok: true, period, usage };
 }
 
 class TraceClient {
@@ -1608,6 +1636,7 @@ ipcMain.handle('busy:bootstrap', () => ({
   connection,
   trace: lastTrace,
   usage: usageData,
+  usageStatus,
   layout: layoutMode,
   frame,
 }));

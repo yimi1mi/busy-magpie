@@ -482,6 +482,35 @@ body.can-grab .drag-grip {
   outline-offset: 2px;
 }
 
+.usage-status {
+  position: absolute;
+  top: 52px;
+  left: 50%;
+  z-index: 2;
+  transform: translateX(-50%);
+  color: var(--faint);
+  font-size: 8px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.usage-status.stale {
+  color: var(--warn);
+}
+
+.stats {
+  position: relative;
+}
+
+.stats-scope {
+  position: absolute;
+  top: -12px;
+  right: 0;
+  color: var(--faint);
+  font-size: 8px;
+  white-space: nowrap;
+}
+
 .token-pill.switching .token-window {
   color: rgba(255, 255, 255, 0.34);
 }

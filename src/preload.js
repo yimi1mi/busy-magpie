@@ -66,6 +66,9 @@ contextBridge.exposeInMainWorld('busy', {
   onUsage: (callback) => {
     ipcRenderer.on('magpie:usage', (_event, data) => callback(data));
   },
+  onUsageStatus: (callback) => {
+    ipcRenderer.on('magpie:usage-status', (_event, data) => callback(data));
+  },
   onResize: (callback) => {
     ipcRenderer.on('magpie:resize', (_event, data) => callback(data));
   },

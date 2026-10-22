@@ -31,6 +31,8 @@
         <i class="token-meter"><i id="tokenMeter"></i></i>
       </button>
 
+      <span class="usage-status" id="usageStatus" role="status"></span>
+
       <div class="gateway">
         <span class="brand">MAGPIE</span>
         <i class="brand-sep"></i>
@@ -140,7 +142,8 @@
 
         <section class="summary">
           <p class="caption" id="caption"></p>
-          <div class="stats">
+          <div class="stats" title="请求、改道和错误统计自本次 magpie 网关启动；不随上方 token 时间窗切换">
+            <span class="stats-scope">网关本次启动</span>
             <div class="stat">
               <b id="statRequests">0</b>
               <span>请求</span>
