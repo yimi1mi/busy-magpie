@@ -1343,8 +1343,8 @@ body.menu-open .stage-canvas {
 }
 
 .node.account.inflight {
-  border-color: rgba(161, 139, 255, 0.38);
-  background: rgba(161, 139, 255, 0.055);
+  border-color: color-mix(in srgb, var(--route, var(--accent)) 38%, transparent);
+  background: color-mix(in srgb, var(--route, var(--accent)) 5.5%, transparent);
 }
 
 .node.account.done {

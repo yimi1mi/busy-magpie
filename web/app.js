@@ -1944,6 +1944,7 @@ function renderView(view, color = '#a18bff') {
   setMulti(false);
   setLiveChrome(view);
   el.agentNode.style.setProperty('--route', color);
+  el.accountNode.style.setProperty('--route', color);
   el.wireIn.style.setProperty('--route', color);
   el.wireOut.style.setProperty('--route', color);
 
@@ -1991,7 +1992,7 @@ function renderView(view, color = '#a18bff') {
 
 // The same non-error palette as magpie's Routing page. Red remains an error.
 const ROUTE_COLORS = {
-  claude: '#d97757', 'claude-code': '#d97757', codex: '#6366f1', gemini: '#0ea5e9',
+  claude: '#d97757', 'claude-code': '#d97757', codex: '#EFEDF7', gemini: '#0ea5e9',
   copilot: '#a855f7', cursor: '#14b8a6', opencode: '#eab308', crush: '#ec4899',
   goose: '#84cc16', pi: '#10b981', omp: '#d946ef', omo: '#7c3aed', dsh: '#06b6d4',
   commandcode: '#f97316', mimocode: '#3b82f6', deveco: '#3c99cc',
