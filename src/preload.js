@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('busy', {
   copySummary: (text) => ipcRenderer.invoke('busy:copy-summary', text),
   settingsGet: () => ipcRenderer.invoke('settings:get'),
   settingsSave: (data) => ipcRenderer.invoke('settings:save', data),
+  testGateway: (raw) => ipcRenderer.invoke('gateway:test', raw),
   previewOpacity: (value) => ipcRenderer.send('settings:opacity', value),
   settingsOpenFile: () => ipcRenderer.send('settings:open-file'),
   settingsClose: () => ipcRenderer.send('settings:close'),

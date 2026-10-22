@@ -354,9 +354,9 @@ export function offline(detail, gateway, lastTotals) {
     accountName: '等待网关',
     accountState: '离线',
     caption: [
-      { text: '没有找到 magpie 的网关', role: ROLE.strong },
+      { text: '暂时无法读取 magpie 的路由', role: ROLE.strong },
       { text: ` · ${gateway}${why}。`, role: ROLE.muted },
-      { text: ' 启动 magpie 后会自动恢复。', role: ROLE.muted },
+      { text: ' 可在设置中测试连接、确认端口。', role: ROLE.muted },
     ],
     story: [
       {

@@ -17,3 +17,8 @@ test('a successful save persists the same settings shown in the app', () => {
   assert.equal(JSON.parse(h.files.get('/test/settings.json')).opacity,0.6);
   assert.equal(h.api.settings().opacity,0.6);
 });
+test('an invalid gateway is rejected without changing the live address', () => {
+  const h=mainHarness();const before=JSON.stringify(h.api.settings());
+  const result=h.save({...h.api.settings(),gateway:'this is not an address'});
+  assert.equal(result.ok,false);assert.equal(JSON.stringify(h.api.settings()),before);
+});

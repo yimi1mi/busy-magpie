@@ -9,6 +9,7 @@ const os = require('os');
 const path = require('path');
 const { autoUpdater } = require('electron-updater');
 const { heartbeat } = require('./launch-policy.cjs');
+const { parseGateway, gatewayProblem } = require('./gateway-config.cjs');
 
 app.setName('Busy Magpie');
 
@@ -266,27 +267,41 @@ function readMagpiePort() {
 }
 
 function normalizeGateway(raw) {
-  let value = String(raw || '').trim();
-  if (!value.includes('://')) value = `http://${value}`;
-  let url;
-  try {
-    url = new URL(value);
-  } catch {
-    return 'http://127.0.0.1:3425';
-  }
-  let host = url.hostname;
-  if (!host || host === '0.0.0.0' || host === '::' || host === '[::]' || host === 'localhost') {
-    host = '127.0.0.1';
-  }
-  const port = url.port || '3425';
-  return `http://${host}:${port}`;
+  return parseGateway(raw);
+}
+
+function gatewayInfo(override) {
+  const custom = override === undefined ? settings.gateway : override;
+  const raw = custom || process.env.BUSY_MAGPIE_GATEWAY || process.env.MAGPIE_ADDR || `127.0.0.1:${readMagpiePort()}`;
+  const source = custom ? override === undefined ? '手动设置' : '当前输入（尚未保存）'
+    : process.env.BUSY_MAGPIE_GATEWAY ? 'BUSY_MAGPIE_GATEWAY 环境变量'
+      : process.env.MAGPIE_ADDR ? 'MAGPIE_ADDR 环境变量' : '自动检测 magpie 配置 / 默认端口';
+  try { return { url: normalizeGateway(raw), source, error: '' }; }
+  catch (error) { return { url: '', source, error: error.message }; }
 }
 
 function resolveGateway() {
-  if (settings.gateway) return normalizeGateway(settings.gateway);
-  const env = process.env.BUSY_MAGPIE_GATEWAY || process.env.MAGPIE_ADDR;
-  if (env) return normalizeGateway(env);
-  return `http://127.0.0.1:${readMagpiePort()}`;
+  return gatewayInfo().url;
+}
+
+async function testGateway(raw) {
+  const info = gatewayInfo(String(raw || '').trim());
+  if (!info.url) return { ok: false, ...info, checks: [] };
+  const checks = await Promise.all(['trace', 'usage'].map(async name => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const start = Date.now();
+    try {
+      const response = await fetch(`${info.url}/v1/magpie/${name}${name === 'usage' ? '?period=today' : ''}`, {signal:controller.signal,headers:{Accept:'application/json'},cache:'no-store'});
+      if (!response.ok) throw Object.assign(new Error(), {status:response.status});
+      const data = await response.json();
+      const valid = name === 'trace' ? Array.isArray(data?.routes) : data && ['input','output','cache_read','cache_write'].some(key => key in data);
+      if (!valid) throw new Error('响应不是预期的 magpie 数据');
+      return { name, ok: true, ms: Date.now() - start, detail: '可读取' };
+    } catch (error) { return { name, ok: false, ms: Date.now() - start, detail: gatewayProblem(error) }; }
+    finally { clearTimeout(timeout); }
+  }));
+  return { ...info, ok: checks.every(check => check.ok), checks };
 }
 
 function displayAddress(base) {
@@ -1224,7 +1239,14 @@ function fitWindow(lanes) {
 
 function rebuildClient() {
   if (client) client.stop();
-  client = new TraceClient(resolveGateway());
+  const info = gatewayInfo();
+  if (!info.url) {
+    client = null;
+    connection = { online: false, detail: info.error, retry: false, at: Date.now() };
+    send('magpie:connection', connection);
+    return;
+  }
+  client = new TraceClient(info.url);
   client.start();
   refreshUsage(normalizePeriod(settings.usagePeriod));
 }
@@ -1244,7 +1266,9 @@ async function refreshUsage(requestedPeriod) {
   async function readUsage() {
     const timeout = setTimeout(() => controller.abort(), 6000);
     try {
-      const response = await fetch(`${resolveGateway()}/v1/magpie/usage?period=${period}`, {
+      const info = gatewayInfo();
+      if (!info.url) throw new Error(info.error);
+      const response = await fetch(`${info.url}/v1/magpie/usage?period=${period}`, {
         signal: controller.signal,
         headers: { Accept: 'application/json' },
         cache: 'no-store',
@@ -1463,12 +1487,7 @@ function watchTrace() {
 }
 
 function describeError(error) {
-  if (!error) return '读取失败';
-  if (error.name === 'AbortError') return '读取超时';
-  if (error.status) return `magpie answered ${error.status}`;
-  if (error.cause && error.cause.code === 'ECONNREFUSED') return 'magpie 未运行或端口不可达';
-  if (String(error.message || '').includes('ECONNREFUSED')) return 'magpie 未运行或端口不可达';
-  return error.message || '读取失败';
+  return gatewayProblem(error);
 }
 
 function send(channel, payload) {
@@ -1743,6 +1762,8 @@ ipcMain.handle('settings:get', () => {
       gateway: settings.gateway || '',
     },
     resolvedGateway: displayAddress(resolveGateway()),
+    gatewaySource: gatewayInfo().source,
+    gatewayError: gatewayInfo().error,
     path: settingsPath,
     raw,
   };
@@ -1866,6 +1887,8 @@ ipcMain.handle('settings:save', (_event, input) => {
       path: settingsPath,
       settings: { ...settings, gateway: settings.gateway || '' },
       resolvedGateway: displayAddress(resolveGateway()),
+      gatewaySource: gatewayInfo().source,
+      gatewayError: gatewayInfo().error,
     };
   } catch (error) {
     log(`save settings: ${error.message}`);
@@ -1879,6 +1902,7 @@ ipcMain.on('settings:open-file', () => {
 });
 
 ipcMain.on('settings:close', () => closeSettingsPanel());
+ipcMain.handle('gateway:test', (_event, raw) => testGateway(raw));
 
 // While the slider is dragged the window follows it at once; nothing is
 // written until Save, and closing the panel puts the stored value back.

@@ -775,6 +775,7 @@ function setupSettingsPanel() {
   // The opacity on disk, so a drag the user cancels can be put back.
   let savedOpacity = 1;
   let previewingOpacity = false;
+  let gatewayReport = '';
 
   const setStatus = (text, error = false) => {
     status.textContent = text || '';
@@ -848,7 +849,9 @@ function setupSettingsPanel() {
     previewingOpacity = false;
     gateway.value = s.gateway || '';
     gateway.placeholder = '留空自动检测';
-    gatewayHint.textContent = `当前 ${data.resolvedGateway || '127.0.0.1:3425'}`;
+    gatewayHint.textContent = data.gatewayError || `当前 ${data.resolvedGateway || '—'} · ${data.gatewaySource || '自动检测'}`;
+    gatewayReport = `Busy Magpie v${data.version}\n网关：${data.resolvedGateway || '未解析'}\n来源：${data.gatewaySource || '自动检测'}\n路由：${connection.online ? '可读取' : connection.detail}\n用量：${usageStatus.error || (usageData ? '可读取' : '尚未读取')}`;
+    $('gatewayResult').textContent = '';
     if (pathText) pathText.textContent = data.path || '';
     const openFile = $('settingsOpenFile');
     if (openFile && data.path) openFile.title = data.path;
@@ -960,6 +963,25 @@ function setupSettingsPanel() {
   $('settingsClose').addEventListener('click', () => window.busy.settingsClose());
   $('settingsCancel').addEventListener('click', () => window.busy.settingsClose());
   $('settingsOpenFile').addEventListener('click', () => window.busy.settingsOpenFile());
+  gateway.addEventListener('input', () => { $('gatewayResult').textContent = '当前输入尚未测试'; });
+  $('gatewayTest').addEventListener('click', async () => {
+    const button = $('gatewayTest'); button.disabled = true;
+    $('gatewayResult').textContent = '正在测试路由与用量接口…';
+    try {
+      const result = await window.busy.testGateway(gateway.value.trim());
+      const detail = result.checks.map(check => `${check.name === 'trace' ? '路由' : '用量'}：${check.detail}（${check.ms}ms）`).join('\n');
+      gatewayReport = `Busy Magpie ${$('settingsVersion').textContent}\n网关：${result.url || '未解析'}\n来源：${result.source}\n${result.error || detail}`;
+      $('gatewayResult').textContent = `${result.ok ? '连接正常' : '连接测试未通过'}\n${result.url || ''}\n${result.error || detail}`;
+      $('gatewayResult').classList.toggle('error', !result.ok);
+    } catch (error) { $('gatewayResult').textContent = error.message || '测试失败'; }
+    finally { button.disabled = false; }
+  });
+  $('gatewayCopy').addEventListener('click', async () => {
+    try {
+      const copied = await window.busy.copySummary(redactDiagnostic(gatewayReport, 5000));
+      $('gatewayResult').textContent = copied ? '已复制诊断信息，不含账号和凭据。' : '复制失败';
+    } catch { $('gatewayResult').textContent = '复制失败'; }
+  });
   $('modelsClose').addEventListener('click', () => window.busy.settingsClose());
   $('modelsPrev').addEventListener('click', () => { modelPage = Math.max(0, modelPage - 1); renderModelUsage(); });
   $('modelsNext').addEventListener('click', () => { modelPage++; renderModelUsage(); });
