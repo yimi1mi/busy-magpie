@@ -63,6 +63,9 @@ contextBridge.exposeInMainWorld('busy', {
   onSettings: (callback) => {
     ipcRenderer.on('magpie:settings', (_event, data) => callback(data));
   },
+  onSurfaceOpacity: (callback) => {
+    ipcRenderer.on('magpie:surface-opacity', (_event, value) => callback(value));
+  },
   onLayout: (callback) => {
     ipcRenderer.on('magpie:layout', (_event, data) => callback(data));
   },

@@ -2456,8 +2456,16 @@ function setLayout(on) {
   if (layout) document.activeElement?.blur();
 }
 
+function applySurface(value = settings.opacity) {
+  const native = settings.backgroundMaterial && settings.backgroundMaterial !== 'none';
+  const density = (Math.min(1, Math.max(0.4, Number(value) || 1)) - 0.4) / 0.6;
+  document.body.classList.toggle('native-material', Boolean(native));
+  document.documentElement.style.setProperty('--surface-alpha', String(native ? 0.12 + density * 0.38 : 0.75 + density * 0.22));
+}
+
 function applySettings(next) {
   settings = { ...settings, ...(next || {}) };
+  applySurface();
   document.body.classList.toggle('noanim', Boolean(settings.quietMotion));
   applyGateway();
   render();
@@ -2474,6 +2482,7 @@ async function boot() {
     ? `点击托盘图标，或按 ${data.hotkey.accelerator} 显示 / 隐藏。`
     : '点击托盘图标召回；可在设置中启用或重新录制快捷键。';
   if (data.settings) settings = { ...settings, ...data.settings };
+  applySurface();
   document.body.classList.toggle('noanim', Boolean(settings.quietMotion));
   if (data.connection) connection = data.connection;
   if (data.trace) lastTrace = data.trace;
@@ -2497,6 +2506,7 @@ async function boot() {
   });
 
   window.busy.onSettings((next) => applySettings(next));
+  window.busy.onSurfaceOpacity((value) => applySurface(value));
   window.busy.onLayout((on) => setLayout(on));
   window.busy.onFrame((next) => applyFrame(next));
   window.busy.onUsage((next) => {

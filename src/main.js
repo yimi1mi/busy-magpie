@@ -2,7 +2,7 @@
 
 const {
   app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, screen, shell, Notification,
-  globalShortcut, clipboard,
+  globalShortcut, clipboard, nativeTheme,
 } = require('electron');
 const fs = require('fs');
 const os = require('os');
@@ -11,6 +11,8 @@ const { autoUpdater } = require('electron-updater');
 const { heartbeat } = require('./launch-policy.cjs');
 const { parseGateway, gatewayProblem } = require('./gateway-config.cjs');
 const { fitWindowBounds } = require('./window-bounds.cjs');
+const { windowMaterial } = require('./window-material.cjs');
+const MATERIAL = windowMaterial(process.platform, os.release());
 
 const IS_PREVIEW = process.argv.includes('--preview');
 app.setName(IS_PREVIEW ? 'Busy Magpie Preview' : 'Busy Magpie');
@@ -336,6 +338,7 @@ function clampBounds(x, y, width = WIDTH, height = HEIGHT) {
 }
 
 function createWindow() {
+  nativeTheme.themeSource = 'dark';
   const area = screen.getPrimaryDisplay().workArea;
   let width = Math.max(600, Math.min(settings.width || WIDTH, area.width - 20));
   let height = heightForWidth(width);
@@ -361,18 +364,16 @@ function createWindow() {
     height,
     x: bounds.x,
     y: bounds.y,
-    transparent: true,
     frame: false,
     resizable: false,
     maximizable: false,
     minimizable: false,
     fullscreenable: false,
     show: false,
-    hasShadow: false,
     skipTaskbar: true,
     alwaysOnTop: settings.topmost,
     backgroundColor: '#00000000',
-    roundedCorners: false,
+    ...MATERIAL.options,
     acceptFirstMouse: true,
     title: IS_PREVIEW ? `Busy Magpie · 本地预览 ${app.getVersion()}` : 'Busy Magpie',
     webPreferences: {
@@ -398,7 +399,6 @@ function createWindow() {
 
   applyTopmost();
   applyClickThrough();
-  win.setOpacity(settings.opacity);
   win.loadFile(RENDERER);
 
   win.once('ready-to-show', () => {
@@ -473,6 +473,7 @@ function publicSettings() {
     maskAccounts: settings.maskAccounts,
     topmost: settings.topmost,
     opacity: settings.opacity,
+    backgroundMaterial: MATERIAL.kind,
     gateway: displayAddress(resolveGateway()),
     keepAlive: settings.keepAlive !== false,
     updateMode: settings.updateMode,
@@ -1689,7 +1690,7 @@ function buildTrayMenu() {
       },
     },
     {
-      label: '不透明度',
+      label: '背景浓度',
       submenu: opacityItems,
     },
     { type: 'separator' },
@@ -1787,9 +1788,10 @@ function createTray() {
 }
 
 function setOpacity(value) {
-  settings.opacity = Math.min(1, Math.max(0.4, value));
-  saveSettings();
-  if (win && !win.isDestroyed()) win.setOpacity(settings.opacity);
+  const next = { ...settings, opacity: Math.min(1, Math.max(0.4, value)) };
+  const saved = saveSettings(next);
+  if (!saved.ok) { send('magpie:action-error', saved.error); return; }
+  settings = next;
   send('magpie:settings', publicSettings());
   refreshTrayMenu();
 }
@@ -1942,7 +1944,6 @@ ipcMain.handle('settings:save', (_event, input) => {
     if (hotkeyChanged) registerHotkey();
     applyTopmost();
     if (win && !win.isDestroyed()) {
-      win.setOpacity(settings.opacity);
       // While the settings drawer is open the window is deliberately
       // taller; do not collapse it from inside the save call.
       if (!settingsOpen && !settings.compact) {
@@ -2013,8 +2014,7 @@ ipcMain.handle('window:reset', () => resetPlacement());
 // While the slider is dragged the window follows it at once; nothing is
 // written until Save, and closing the panel puts the stored value back.
 ipcMain.on('settings:opacity', (_event, value) => {
-  if (!win || win.isDestroyed()) return;
-  win.setOpacity(Math.min(1, Math.max(0.4, Number(value) || 1)));
+  send('magpie:surface-opacity', Math.min(1, Math.max(0.4, Number(value) || 1)));
 });
 
 ipcMain.on('busy:ready', () => {

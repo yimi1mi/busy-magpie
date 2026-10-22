@@ -60,7 +60,7 @@ body {
   border-radius: 22px;
   background:
     radial-gradient(120% 120% at 100% 0%, rgba(56, 48, 92, 0.28), transparent 48%),
-    linear-gradient(145deg, rgba(21, 21, 28, 0.972), rgba(13, 13, 19, 0.985) 52%, rgba(9, 9, 14, 0.992));
+    linear-gradient(145deg, rgb(21 21 28 / var(--surface-alpha, 0.97)), rgb(9 9 14 / var(--surface-alpha, 0.97)));
   box-shadow:
     0 18px 38px rgba(0, 0, 0, 0.52),
     0 3px 10px rgba(0, 0, 0, 0.38),
@@ -400,6 +400,11 @@ body.can-grab .drag-grip {
   flex: 1 1 auto;
   min-height: 0;
 }
+
+body.native-material #app { padding: 0; }
+body.native-material .card { border-radius: 8px; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.08); }
+body.native-material .stage-area { position: absolute; inset: 16px; }
+body.native-material .compact-view { position: absolute; inset: 16px; width: auto; height: auto; }
 
 .stage-canvas {
   position: absolute;
