@@ -76,7 +76,7 @@ function hostUpdater({version = '1.4.0', check} = {}) {
 }
 
 function harness(t, {feedUrl, host = hostUpdater(), allowLocal = true, enabled = true, fetchImpl, currentVersion = '1.4.0'} = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'busy-magpie-updater-'));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'busy-magpie-updater-')));
   t.after(() => fs.rmSync(root, {recursive: true, force: true}));
   const builtin = {root: path.join(root, 'builtin'), version: '1.4.0'};
   fs.mkdirSync(builtin.root);
@@ -94,10 +94,33 @@ function harness(t, {feedUrl, host = hostUpdater(), allowLocal = true, enabled =
   for (const name of ['checking-for-update', 'update-available', 'update-not-available', 'download-progress', 'update-downloaded', 'error']) {
     updater.on(name, value => events.push({name, value}));
   }
-  return {root, updater, store, journal, host, events, stageCalls};
+  return {root, builtin, updater, store, journal, host, events, stageCalls};
 }
 
 function eventsOf(h, name) { return h.events.filter(event => event.name === name).map(event => event.value); }
+
+function confirmCandidate(journal, descriptor) {
+  const token = journal.prepare(descriptor);
+  journal.select(token);
+  journal.ready(token, process.pid);
+  journal.confirm(token);
+}
+
+function reopen(previous, feedUrl) {
+  const {root, builtin} = previous;
+  const actualStore = createStore({root, trustedKeys, shellVersion: '1.4.0'});
+  const stageCalls = [];
+  const store = {verify: actualStore.verify, stage(bytes) { const descriptor = actualStore.stage(bytes); stageCalls.push(descriptor); return descriptor; }};
+  const journal = createJournal({root, builtin, store});
+  const selection = journal.select();
+  const events = [];
+  const host = hostUpdater();
+  const app = {getPath: () => path.join(root, 'user-data'), quit() { throw new Error('Real process handoff belongs to E2E tests'); }};
+  const updater = createUpdater({app, root, builtin, shellVersion: '1.4.0', currentVersion: selection.version, store, journal,
+    trustedKeys, feedUrl, hostUpdater: host, allowLocal: true});
+  for (const name of ['update-available', 'update-not-available', 'update-downloaded', 'error']) updater.on(name, value => events.push({name, value}));
+  return {root, builtin, updater, store, journal, host, events, stageCalls, selection};
+}
 
 test('a signed business release downloads with byte progress and stages without switching the running version', async t => {
   const release = payload({large: true});
@@ -385,4 +408,111 @@ test('safe relative redirects deliver bytes while redirect loops stop within the
   assert.deepEqual(remote.requests, ['/start', '/nested/next', '/payload']);
   await assert.rejects(readResponse(remote.base + '/loop', {limit: 128, allowLocal: true}), /重定向次数过多/);
   assert.ok(remote.requests.filter(url => url === '/loop').length <= 6);
+});
+
+test('successive signed releases remain current across reopened stores and preserve earlier version bytes', async t => {
+  let release = payload();
+  const remote = await service(t, (request, response) => request.url.endsWith('.bmpkg') ? send(response, release.bytes) : send(response, release.feed));
+  const feedUrl = remote.base + '/business-latest.json';
+  let h = harness(t, {feedUrl});
+  const originals = [];
+  for (const version of ['1.4.1', '1.4.2', '1.4.3']) {
+    release = payload({version, text: '// signed ' + version});
+    const before = h.journal.read().current;
+    assert.equal((await h.updater.checkForUpdates()).updateInfo.version, version);
+    await h.updater.downloadUpdate();
+    const descriptor = h.stageCalls.at(-1);
+    assert.deepEqual(h.journal.read().current, before, 'Downloading alone must not promote the candidate');
+    const verified = h.store.verify(descriptor);
+    originals.push({descriptor, archive: fs.readFileSync(path.join(verified.root, '.package.bmpkg')), main: fs.readFileSync(path.join(verified.root, 'src/main.js'))});
+    confirmCandidate(h.journal, descriptor);
+    h = reopen(h, feedUrl);
+    assert.equal(h.selection.version, version);
+    assert.deepEqual(h.journal.read().current, descriptor);
+    assert.equal(h.journal.read().pending, null);
+    for (const earlier of originals) {
+      const directory = h.store.verify(earlier.descriptor).root;
+      assert.deepEqual(fs.readFileSync(path.join(directory, '.package.bmpkg')), earlier.archive);
+      assert.deepEqual(fs.readFileSync(path.join(directory, 'src/main.js')), earlier.main);
+    }
+  }
+  release = payload({version: '1.4.2'});
+  await h.updater.checkForUpdates();
+  assert.equal(eventsOf(h, 'update-available').length, 0);
+  assert.equal(eventsOf(h, 'update-not-available').length, 1);
+  assert.equal(h.selection.version, '1.4.3');
+});
+
+test('candidate quarantine survives reopening and a later healthy release can still replace the cached current version', async t => {
+  let release = payload();
+  const remote = await service(t, (request, response) => request.url.endsWith('.bmpkg') ? send(response, release.bytes) : send(response, release.feed));
+  const feedUrl = remote.base + '/business-latest.json';
+  let h = harness(t, {feedUrl});
+  const healthy = h.store.stage(release.bytes);
+  confirmCandidate(h.journal, healthy);
+  release = payload({version: '1.4.2'});
+  const failed = h.store.stage(release.bytes);
+  h.journal.rollback(h.journal.prepare(failed), 'candidate-health-timeout');
+  h = reopen(h, feedUrl);
+  assert.equal(h.selection.version, '1.4.1');
+  const previousBytes = fs.readFileSync(path.join(h.selection.root, '.package.bmpkg'));
+  await h.updater.checkForUpdates();
+  assert.equal(eventsOf(h, 'update-available').length, 0);
+  assert.equal(h.stageCalls.length, 0);
+  release = payload({version: '1.4.3'});
+  assert.equal((await h.updater.checkForUpdates()).updateInfo.version, '1.4.3');
+  await h.updater.downloadUpdate();
+  const candidate = h.stageCalls[0];
+  confirmCandidate(h.journal, candidate);
+  h = reopen(h, feedUrl);
+  assert.equal(h.selection.version, '1.4.3');
+  assert.deepEqual(h.journal.read().previous, healthy);
+  assert.deepEqual(fs.readFileSync(path.join(h.store.verify(healthy).root, '.package.bmpkg')), previousBytes);
+  assert.ok(h.journal.read().failures.some(failure => failure.descriptor.version === '1.4.2'));
+});
+
+test('cache tampering on restart falls back to verified previous bytes, quarantines that version, and permits a later release', async t => {
+  let release = payload();
+  const remote = await service(t, (request, response) => request.url.endsWith('.bmpkg') ? send(response, release.bytes) : send(response, release.feed));
+  const feedUrl = remote.base + '/business-latest.json';
+  let h = harness(t, {feedUrl});
+  const previous = h.store.stage(release.bytes);
+  confirmCandidate(h.journal, previous);
+  release = payload({version: '1.4.2'});
+  const current = h.store.stage(release.bytes);
+  confirmCandidate(h.journal, current);
+  fs.writeFileSync(path.join(h.store.verify(current).root, 'src/main.js'), '// unsigned changed bytes');
+  h = reopen(h, feedUrl);
+  assert.equal(h.selection.version, '1.4.1');
+  assert.deepEqual(h.journal.read().current, previous);
+  assert.match(h.journal.read().failures.at(-1).reason, /current-invalid/);
+  await h.updater.checkForUpdates();
+  assert.equal(eventsOf(h, 'update-available').length, 0);
+  release = payload({version: '1.4.3'});
+  await h.updater.checkForUpdates();
+  await h.updater.downloadUpdate();
+  confirmCandidate(h.journal, h.stageCalls[0]);
+  assert.equal(reopen(h, feedUrl).selection.version, '1.4.3');
+});
+
+test('an invalid signed update cannot alter an already confirmed cache or its next startup selection', async t => {
+  const healthy = payload();
+  const bad = payload({version: '1.4.2'});
+  const document = JSON.parse(zlib.gunzipSync(bad.bytes));
+  document.signature = Buffer.alloc(64).toString('base64');
+  const bytes = zlib.gzipSync(Buffer.from(JSON.stringify(document)));
+  const feed = {...bad.feed, sha256: sha256(bytes), size: bytes.length};
+  const remote = await service(t, (request, response) => request.url.endsWith('.bmpkg') ? send(response, bytes) : send(response, feed));
+  const feedUrl = remote.base + '/business-latest.json';
+  let h = harness(t, {feedUrl});
+  const descriptor = h.store.stage(healthy.bytes);
+  confirmCandidate(h.journal, descriptor);
+  h = reopen(h, feedUrl);
+  const before = fs.readFileSync(path.join(h.root, 'journal.json'));
+  await h.updater.checkForUpdates();
+  await assert.rejects(h.updater.downloadUpdate(), error => error.code === 'INVALID_SIGNATURE');
+  assert.deepEqual(fs.readFileSync(path.join(h.root, 'journal.json')), before);
+  assert.equal(h.stageCalls.length, 0);
+  assert.equal(eventsOf(h, 'update-downloaded').length, 0);
+  assert.equal(reopen(h, feedUrl).selection.version, '1.4.1');
 });

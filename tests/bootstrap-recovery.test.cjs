@@ -35,7 +35,7 @@ function signedPayload(version) {
 }
 
 function context(t, {acceptPrevious = true} = {}) {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'busy-bootstrap-recovery-'));
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'busy-bootstrap-recovery-')));
   t.after(() => fs.rmSync(base, {recursive: true, force: true}));
   const userData = path.join(base, 'profile');
   const root = path.join(userData, 'business-updates');

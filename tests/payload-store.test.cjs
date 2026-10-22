@@ -40,7 +40,7 @@ function resign(document) {
 }
 function hasCode(code) { return error => error.code === code; }
 function temporary(t) {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'busy-magpie-payload-'));
+  const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'busy-magpie-payload-')));
   t.after(() => fs.rmSync(directory, {recursive: true, force: true}));
   return directory;
 }
