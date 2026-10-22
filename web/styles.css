@@ -1902,8 +1902,12 @@ body.menu-open .stage-canvas {
 .single-wires > g:not([data-state="live"]) .fan-wire-trail,
 .single-wires > g:not([data-state="live"]) .fan-wire-path { display: none; animation: none; }
 .fan-link:not([data-state="live"]) .fan-wire-end { animation: none; }
+.fan-link[data-state="lit"],
+.single-wires > g[data-state="lit"] { --wire-color: color-mix(in srgb, var(--route) 55%, #fff); }
+.fan-link[data-state="lit"] .fan-wire-under,
+.single-wires > g[data-state="lit"] .fan-wire-under { opacity: 0.16; }
 .fan-link[data-state="lit"] .fan-wire-track,
-.single-wires > g[data-state="lit"] .fan-wire-track { opacity: 0.85; stroke-width: 1.5; }
+.single-wires > g[data-state="lit"] .fan-wire-track { opacity: 1; stroke-width: 2; }
 .fan-link[data-state="rest"] .fan-wire-track,
 .single-wires > g[data-state="rest"] .fan-wire-track { stroke-dasharray: 2 6; opacity: 0.45; }
 .node.account[data-wire-state="rest"] { border-style: dashed; }
