@@ -29,6 +29,7 @@
         <b class="mono token-total" id="tokenTotal"></b>
         <span class="token-window" id="tokenWindow"></span>
         <i class="token-meter"><i id="tokenMeter"></i></i>
+        <svg class="token-orbits" id="tokenOrbits" aria-hidden="true" hidden></svg>
       </button>
 
       <span class="usage-status" id="usageStatus" role="status"></span>
@@ -45,6 +46,7 @@
 
       <div class="quick-menu" id="quickMenu" role="menu" aria-label="挂件操作" hidden>
         <button type="button" role="menuitem" data-menu-action="settings">设置</button>
+        <button type="button" role="menuitem" data-menu-action="models">模型用量</button>
         <button type="button" role="menuitem" data-menu-action="layout">调整位置</button>
         <button type="button" role="menuitem" data-menu-action="hide">隐藏挂件</button>
         <hr role="separator">
@@ -306,6 +308,16 @@
                 </div>
               </footer>
             </form>
+            <section class="panel-view models-view" id="modelsView" hidden>
+              <header class="panel-head"><div><b>模型用量</b><small>同一时间窗 · 同一统计口径</small></div><button class="settings-x" id="modelsClose" type="button" aria-label="关闭模型用量">×</button></header>
+              <div class="model-chart">
+                <svg id="modelTracks" aria-label="模型用量占比跑道" role="img"></svg>
+                <div class="model-chart-center"><b class="mono" id="modelsTotal"></b><span id="modelsPeriod"></span></div>
+              </div>
+              <p class="panel-note" id="modelsNote"></p>
+              <div class="models-list" id="modelsList"></div>
+              <div class="models-paging" id="modelsPaging" hidden><button type="button" id="modelsPrev">上一组</button><span id="modelsPage"></span><button type="button" id="modelsNext">下一组</button></div>
+            </section>
             <div class="about-view" id="aboutView" hidden>
               <header class="about-head">
                 <div>

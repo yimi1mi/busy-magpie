@@ -7,6 +7,7 @@ import {
   offline,
   present,
 } from './presenter.js';
+import { modelUsage, paintModelTracks } from './model-usage.mjs';
 
 const $ = (id) => document.getElementById(id);
 
@@ -75,6 +76,7 @@ let settings = {
 let lastTrace = null;
 let usageData = null;
 let usageStatus = { loading: false, stale: false, at: 0, error: '' };
+let modelPage = 0;
 let connection = { online: false, detail: '正在连接' };
 let layout = false;
 let frame = { lanes: 1, cardHeight: 400, windowHeight: 432 };
@@ -219,6 +221,7 @@ function applyUsageTokens() {
         + ` · ${Number(usageData.calls || 0).toLocaleString()} 请求`
         + ' · 单击切换时间窗',
     });
+    renderModelUsage();
     return;
   }
 
@@ -232,6 +235,37 @@ function applyUsageTokens() {
     windowLabel: '近期快照',
     title: `最近 ${recent.length} 个请求合计 ${formatTokens(fallback)}`,
   });
+  renderModelUsage();
+}
+
+function renderModelUsage() {
+  const view = modelUsage(usageData, pillMetric());
+  const orbit = $('tokenOrbits');
+  const rows = view.consistent ? view.rows : [];
+  orbit.toggleAttribute('hidden', !rows.length);
+  if (rows.length) paintModelTracks(orbit, rows.slice(0, 3), el.tokenPill.offsetWidth + 18, 45);
+  const pages = Math.max(1, Math.ceil(rows.length / 8));
+  modelPage = Math.min(modelPage, pages - 1);
+  const page = rows.slice(modelPage * 8, modelPage * 8 + 8);
+  paintModelTracks($('modelTracks'), page, 360, 146, 6);
+  $('modelsTotal').textContent = formatTokens(view.total);
+  $('modelsPeriod').textContent = `${PERIOD_SHORT[activePeriod()]} · ${PILL_METRICS[pillMetric()].label}`;
+  $('modelsPage').textContent = `${modelPage + 1} / ${pages}`;
+  $('modelsPrev').disabled = modelPage === 0;
+  $('modelsNext').disabled = modelPage + 1 === pages;
+  $('modelsPaging').hidden = pages === 1;
+  $('modelsNote').textContent = !view.consistent ? '模型明细与总量不一致，暂不绘制占比。'
+    : !rows.length ? '当前网关没有提供该时间窗的模型明细。'
+      : `弧长表示模型占当前总量的比例${view.unassigned > 0 ? ` · 未归类 ${formatTokens(view.unassigned)}` : ''}${usageStatus.stale ? ' · 当前为上次成功读取的数据' : ''}`;
+  const fragment = document.createDocumentFragment();
+  for (const row of page) {
+    const item = create('div', 'model-usage-row');
+    const dot = create('i', 'model-swatch'); dot.style.background = row.color;
+    const name = create('span', 'model-name', row.name); name.title = row.provider ? `${row.name} · ${row.provider}` : row.name;
+    item.append(dot, name, create('span', 'mono', formatTokens(row.value)), create('b', 'mono', `${(row.share * 100).toFixed(1)}%`));
+    fragment.append(item);
+  }
+  $('modelsList').replaceChildren(fragment);
 }
 
 function renderUsageStatus() {
@@ -242,6 +276,7 @@ function renderUsageStatus() {
     : usageStatus.error ? (usageStatus.stale ? `暂未刷新 · 上次 ${at || '—'}` : '用量暂不可用')
       : at ? `更新于 ${at}` : '等待用量数据';
   label.title = usageStatus.error || '上方为所选时间窗的用量；下方请求数为网关本次启动以来累计';
+  renderModelUsage();
 }
 
 let tokenText = '';
@@ -674,6 +709,7 @@ function setupSettingsPanel() {
   let closeTimer = 0;
   // The opacity on disk, so a drag the user cancels can be put back.
   let savedOpacity = 1;
+  let previewingOpacity = false;
 
   const setStatus = (text, error = false) => {
     status.textContent = text || '';
@@ -742,6 +778,7 @@ function setupSettingsPanel() {
     opacity.value = String(Math.round((Number(s.opacity) || 1) * 100));
     opacityOut.textContent = `${opacity.value}%`;
     savedOpacity = Math.min(1, Math.max(0.4, Number(s.opacity) || 1));
+    previewingOpacity = false;
     gateway.value = s.gateway || '';
     gateway.placeholder = '留空自动检测';
     gatewayHint.textContent = `当前 ${data.resolvedGateway || '127.0.0.1:3425'}`;
@@ -765,12 +802,14 @@ function setupSettingsPanel() {
     if (!open) return;
     open = false;
     // A drag that was never saved goes back to what is on disk.
-    window.busy.previewOpacity?.(savedOpacity);
+    if (previewingOpacity) window.busy.previewOpacity?.(savedOpacity);
+    previewingOpacity = false;
     document.body.classList.add('settings-closing');
     closeTimer = window.setTimeout(() => {
       pane.hidden = true;
       pane.classList.remove('about');
       $('aboutView').hidden = true;
+      $('modelsView').hidden = true;
       document.body.classList.remove('settings-open', 'settings-closing');
     }, 200);
   };
@@ -786,14 +825,19 @@ function setupSettingsPanel() {
     pane.style.animation = '';
     document.body.classList.add('settings-open');
     const about = data?.mode === 'about';
+    const models = data?.mode === 'models';
+    pane.dataset.panel = data?.mode || 'settings';
     pane.classList.toggle('about', about);
     $('aboutView').hidden = !about;
+    $('modelsView').hidden = !models;
     pane.scrollTop = 0;
     if (about) aboutRefresh?.();
+    else if (models) renderModelUsage();
     else load();
   };
 
   opacity.addEventListener('input', () => {
+    previewingOpacity = true;
     opacityOut.textContent = `${opacity.value}%`;
     window.busy.previewOpacity?.(Number(opacity.value) / 100);
   });
@@ -843,6 +887,9 @@ function setupSettingsPanel() {
   $('settingsClose').addEventListener('click', () => window.busy.settingsClose());
   $('settingsCancel').addEventListener('click', () => window.busy.settingsClose());
   $('settingsOpenFile').addEventListener('click', () => window.busy.settingsOpenFile());
+  $('modelsClose').addEventListener('click', () => window.busy.settingsClose());
+  $('modelsPrev').addEventListener('click', () => { modelPage = Math.max(0, modelPage - 1); renderModelUsage(); });
+  $('modelsNext').addEventListener('click', () => { modelPage++; renderModelUsage(); });
 
   window.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && open) {

@@ -1825,6 +1825,7 @@ ipcMain.on('busy:menu-action', (_event, action) => {
   if (!quickMenuOpen) return;
   switch (action) {
     case 'settings': openSettingsPanel(); break;
+    case 'models': openSettingsPanel('models'); break;
     case 'layout': beginLayout(); break;
     case 'hide': win.hide(); break;
     case 'about':
