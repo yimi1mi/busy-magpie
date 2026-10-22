@@ -1111,7 +1111,7 @@ function setupAbout() {
     update.hidden = !available || data.downloading || data.installing;
     update.textContent = ready ? '重启并安装' : `更新到 v${data.latest || ''}`;
     skip.hidden = !available || data.downloading || data.installing;
-    check.disabled = Boolean(data.checking || data.downloading || data.installing);
+    check.disabled = Boolean(data.preview || data.checking || data.downloading || data.installing);
     release.hidden = !data.releaseUrl || (!available && !data.error && !data.skipped);
 
     progress.hidden = !(data.downloading || data.installing);
@@ -1120,7 +1120,10 @@ function setupAbout() {
     $('updatePercent').textContent = `${pct}%`;
     $('updateProgressMeta').hidden = !(data.downloading || data.installing || data.ready);
 
-    if (data.error) {
+    if (data.preview) {
+      status.textContent = '本地预览版使用独立配置，不自动下载或安装更新。';
+      error.textContent = '';
+    } else if (data.error) {
       status.textContent = data.error;
       error.textContent = '可打开 GitHub Releases 手动安装。';
     } else if (data.downloading) {
@@ -2426,7 +2429,7 @@ async function boot() {
   applyGateway();
 
   const data = await window.busy.bootstrap();
-  if (data.version) $('appVersionText').textContent = `v${data.version}`;
+  if (data.version) $('appVersionText').textContent = `v${data.version}${data.preview ? ' 预览' : ''}`;
   $('guideVersion').textContent = `使用指南 · v${data.version || '1.3.10'}`;
   $('guideHotkey').textContent = data.hotkey?.on && data.hotkey?.ok
     ? `点击托盘图标，或按 ${data.hotkey.accelerator} 显示 / 隐藏。`

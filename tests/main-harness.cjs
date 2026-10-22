@@ -3,7 +3,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 
-function mainHarness({ writeError = false, hotkeyTaken = false } = {}) {
+function mainHarness({ writeError = false, hotkeyTaken = false, preview = false } = {}) {
   const root = path.resolve(__dirname, '..');
   const handlers = new Map();
   const listeners = new Map();
@@ -12,6 +12,9 @@ function mainHarness({ writeError = false, hotkeyTaken = false } = {}) {
   let now = 0;
   let nextTimer = 0;
   let installed = 0;
+  let updateChecks = 0;
+  let loginChanges = 0;
+  const paths = new Map();
   const disk = {
     mkdirSync() {},
     existsSync: file => files.has(file),
@@ -24,10 +27,10 @@ function mainHarness({ writeError = false, hotkeyTaken = false } = {}) {
   const autoUpdater = new EventEmitter();
   autoUpdater.quitAndInstall = () => { installed++; };
   autoUpdater.downloadUpdate = async () => {};
-  autoUpdater.checkForUpdates = async () => null;
+  autoUpdater.checkForUpdates = async () => {updateChecks++;return null;};
   const app = new EventEmitter();
   Object.assign(app, { setName() {}, getVersion: () => '1.3.10', isPackaged: true,
-    getPath: () => '/test', requestSingleInstanceLock: () => false, quit() {} });
+    getPath: () => '/test', setPath: (key,value) => paths.set(key,value), setLoginItemSettings() {loginChanges++;}, requestSingleInstanceLock: () => false, quit() {} });
   const electron = {
     app, ipcMain: { handle: (name, fn) => handlers.set(name, fn), on: (name, fn) => listeners.set(name, fn) },
     screen: { getDisplayNearestPoint: () => ({ workArea: {x:0,y:0,width:1920,height:1080} }) },
@@ -37,7 +40,7 @@ function mainHarness({ writeError = false, hotkeyTaken = false } = {}) {
   const context = vm.createContext({
     require: id => id === 'electron' ? electron : id === 'electron-updater' ? {autoUpdater}
       : id === 'fs' ? disk : require(id.startsWith('.') ? path.resolve(root,'src',id) : id),
-    __dirname: path.join(root,'src'), process: {platform:'win32',argv:[],env:{},on() {}},
+    __dirname: path.join(root,'src'), process: {platform:'win32',argv:preview?['--preview']:[],env:preview?{BUSY_MAGPIE_PREVIEW_DIR:'/test/preview'}:{},on() {}},
     console, URL, AbortController, Date: class extends Date { static now() { return now; } },
     fetch: async () => ({ok:true,json:async()=>({period:'today',input:1})}),
     setTimeout: () => ++nextTimer, clearTimeout() {}, setImmediate: fn => fn(),
@@ -56,14 +59,19 @@ function mainHarness({ writeError = false, hotkeyTaken = false } = {}) {
       prepareUpdate:()=>{updateState.ready=true;updateState.available=true;updateState.latest='1.4.0';},
       changeMode:mode=>{settings.updateMode=mode;},
       setTrace:routes=>{lastTrace={routes};},
+      autostart:()=>applyAutostart(),
+      checkUpdates:()=>checkForUpdates(true),
+      installUpdate:()=>installUpdate(),
     };`, context);
   return {
-    api: context.testApi, files,
+    api: context.testApi, files, paths,
     save: input => handlers.get('settings:save')({}, input),
     period: value => handlers.get('usage:set-period')({}, value),
     setFetch(fn) { context.fetch = fn; },
     tick(ms) {now+=ms;for(const fn of [...intervals.values()])fn();},
     get installed() {return installed;},
+    get updateChecks() {return updateChecks;},
+    get loginChanges() {return loginChanges;},
   };
 }
 module.exports = {mainHarness};

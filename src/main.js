@@ -12,7 +12,11 @@ const { heartbeat } = require('./launch-policy.cjs');
 const { parseGateway, gatewayProblem } = require('./gateway-config.cjs');
 const { fitWindowBounds } = require('./window-bounds.cjs');
 
-app.setName('Busy Magpie');
+const IS_PREVIEW = process.argv.includes('--preview');
+app.setName(IS_PREVIEW ? 'Busy Magpie Preview' : 'Busy Magpie');
+if (IS_PREVIEW) {
+  app.setPath('userData', path.resolve(process.env.BUSY_MAGPIE_PREVIEW_DIR || path.join(app.getPath('appData'), 'Busy Magpie Preview')));
+}
 
 const WIDTH = 632;
 const HEIGHT = 432;
@@ -370,7 +374,7 @@ function createWindow() {
     backgroundColor: '#00000000',
     roundedCorners: false,
     acceptFirstMouse: true,
-    title: 'Busy Magpie',
+    title: IS_PREVIEW ? `Busy Magpie · 本地预览 ${app.getVersion()}` : 'Busy Magpie',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -498,6 +502,7 @@ function updateView() {
   return {
     ...updateState,
     current: app.getVersion(),
+    preview: IS_PREVIEW,
     pluginVersion: PLUGIN_VERSION,
     auto: settings.checkUpdates !== false,
   };
@@ -648,7 +653,7 @@ function notifyUpdate() {
 async function checkForUpdates(manual = false) {
   if (updateState.checking) return updateView();
   if (!manual && normalizeUpdateMode(settings.updateMode) === 'never') return updateView();
-  if (!app.isPackaged) {
+  if (IS_PREVIEW || !app.isPackaged) {
     // A dev run has no release feed of its own: say it is current instead of
     // failing through the updater.
     updateState.checkedAt = Date.now();
@@ -678,7 +683,7 @@ async function checkForUpdates(manual = false) {
 }
 
 async function downloadUpdate() {
-  if (!app.isPackaged || updateState.downloading || updateState.ready) return;
+  if (IS_PREVIEW || !app.isPackaged || updateState.downloading || updateState.ready) return;
   if (updateState.skipped) return;
   try {
     updateState.downloading = true;
@@ -715,7 +720,7 @@ function scheduleQuietInstall() {
 }
 
 async function installUpdate() {
-  if (!app.isPackaged) return updateView();
+  if (IS_PREVIEW || !app.isPackaged) return updateView();
   if (updateState.installing) return updateView();
   if (process.platform !== 'win32') {
     // An unsigned mac app cannot replace itself; the release page is honest.
@@ -1650,9 +1655,9 @@ function buildTrayMenu() {
       },
     },
     {
-      label: app.isPackaged ? '开机自动启动' : '开机自动启动（需要安装版）',
+      label: IS_PREVIEW ? '开机自动启动（本地预览不可用）' : app.isPackaged ? '开机自动启动' : '开机自动启动（需要安装版）',
       type: 'checkbox',
-      enabled: app.isPackaged,
+      enabled: app.isPackaged && !IS_PREVIEW,
       checked: settings.autostart === true,
       click: (item) => {
         setAutostart(item.checked);
@@ -1735,6 +1740,7 @@ function buildTrayMenu() {
 // relaunching it (it does that on load and on every request), or starting
 // with the login session.
 function setAutostart(on) {
+  if (IS_PREVIEW) return;
   settings.autostart = Boolean(on);
   saveSettings();
   if (!app.isPackaged) {
@@ -1754,7 +1760,7 @@ function setAutostart(on) {
 }
 
 function applyAutostart() {
-  if (!app.isPackaged) return;
+  if (IS_PREVIEW || !app.isPackaged) return;
   try {
     app.setLoginItemSettings({
       openAtLogin: settings.autostart === true,
@@ -1768,7 +1774,7 @@ function applyAutostart() {
 
 function createTray() {
   tray = new Tray(trayImage());
-  tray.setToolTip(`Busy Magpie · ${displayHotkey()} 显示 / 隐藏`);
+  tray.setToolTip(IS_PREVIEW ? `Busy Magpie ${app.getVersion()} · 本地预览` : `Busy Magpie · ${displayHotkey()} 显示 / 隐藏`);
   refreshTrayMenu();
   if (IS_WIN) {
     // A single click brings the card back; double-click still toggles it.
@@ -1824,6 +1830,7 @@ function quit() {
 
 ipcMain.handle('busy:bootstrap', () => ({
   version: app.getVersion(),
+  preview: IS_PREVIEW,
   pluginVersion: PLUGIN_VERSION,
   update: updateView(),
   firstRun: firstRunOpen,
@@ -2097,7 +2104,7 @@ function init() {
   setupUpdater();
 
   if (IS_MAC) app.dock.hide();
-  if (IS_WIN) app.setAppUserModelId('dev.busymagpie.widget');
+  if (IS_WIN) app.setAppUserModelId(IS_PREVIEW ? 'dev.busymagpie.widget.preview' : 'dev.busymagpie.widget');
 
   createWindow();
   const screenChanged = () => {

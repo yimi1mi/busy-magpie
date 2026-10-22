@@ -428,9 +428,12 @@ Electron 主进程
 npm run dev                 # 打开开发者工具
 npm start -- --layout       # 启动即进入调整位置模式
 npm start -- --settings     # 启动即展开设置
+npm start -- --preview      # 独立配置的本地预览，不自动更新、不修改登录启动项
 ```
 
 开发实例和安装版共用 `%APPDATA%\Busy Magpie`，也就共用单实例锁：dev 那个开着的时候，安装版启动会静默退出（退出码 0、没有日志）。先关掉 dev 实例，再启动安装版。
+
+`--preview` 默认改用 `%APPDATA%\Busy Magpie Preview`，可通过 `BUSY_MAGPIE_PREVIEW_DIR` 指定独立目录。它与正式实例互不替换，右上角标记「预览」。
 
 本地模拟数据不需要真实请求：
 
