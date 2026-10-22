@@ -7,7 +7,6 @@ import {
   offline,
   present,
 } from './presenter.js';
-import { modelUsage, paintModelTracks } from './model-usage.mjs';
 import { brandKey, brandMark } from './brand-icons.mjs';
 import { downloadSize } from './download-progress.mjs';
 import { acceleratorFromEvent } from './hotkey.mjs';
@@ -81,9 +80,7 @@ let settings = {
 };
 let lastTrace = null;
 let usageData = null;
-let tokenBaseTitle = '';
 let usageStatus = { loading: false, stale: false, at: 0, error: '' };
-let modelPage = 0;
 let connection = { online: false, detail: '正在连接' };
 let layout = false;
 let frame = { lanes: 1, cardHeight: 400, windowHeight: 432 };
@@ -236,7 +233,6 @@ function applyUsageTokens() {
         + ` · 缓存 ${formatTokens(cache)}${cacheRate !== null ? `（${Math.round(cacheRate * 100)}%）` : ''}`
         + '\n单击切换时间窗',
     });
-    renderModelUsage();
     return;
   }
 
@@ -250,56 +246,6 @@ function applyUsageTokens() {
     windowLabel: '近期快照',
     title: `最近 ${recent.length} 个请求合计 ${formatTokens(fallback)}`,
   });
-  renderModelUsage();
-}
-
-function renderModelUsage() {
-  const view = modelUsage(usageData, pillMetric());
-  const rows = view.consistent ? view.rows : [];
-  const bar = $('tokenModelBar');
-  const segments = document.createDocumentFragment();
-  const major = rows.filter(row => row.value > 0).slice(0, 4);
-  for (const row of major) {
-    const segment = create('i', 'token-model-segment');
-    segment.style.width = `${row.share * 100}%`;
-    segment.style.background = row.color;
-    segments.append(segment);
-  }
-  bar.replaceChildren(segments);
-  bar.hidden = !major.length;
-  const highlighted = major.slice(0, 3);
-  const summary = highlighted.map(row => {
-    const name = Array.from(row.name.replace(/\s+/g, ' '));
-    const label = name.length > 32 ? `${name.slice(0, 31).join('')}…` : name.join('');
-    return `${label} ${(row.share * 100).toFixed(1)}%`;
-  });
-  const remainder = Math.max(0, view.total - highlighted.reduce((sum, row) => sum + row.value, 0));
-  if (highlighted.length && remainder > 0) summary.push(`其余用量 ${(remainder / view.total * 100).toFixed(1)}%`);
-  el.tokenPill.title = tokenBaseTitle + (summary.length
-    ? `\n\n模型占比 · ${PILL_METRICS[pillMetric()].label}\n${summary.join('\n')}\n完整明细：··· → 模型用量` : '');
-  const pageSize = 5;
-  const pages = Math.max(1, Math.ceil(rows.length / pageSize));
-  modelPage = Math.min(modelPage, pages - 1);
-  const page = rows.slice(modelPage * pageSize, (modelPage + 1) * pageSize);
-  paintModelTracks($('modelTracks'), page, 300, 104, 5);
-  $('modelsTotal').textContent = formatTokens(view.total);
-  $('modelsPeriod').textContent = `${PERIOD_SHORT[activePeriod()]} · ${PILL_METRICS[pillMetric()].label}`;
-  $('modelsPage').textContent = `${modelPage + 1} / ${pages}`;
-  $('modelsPrev').disabled = modelPage === 0;
-  $('modelsNext').disabled = modelPage + 1 === pages;
-  $('modelsPaging').hidden = pages === 1;
-  $('modelsNote').textContent = !view.consistent ? '模型明细与总量不一致，暂不绘制占比。'
-    : !rows.length ? '当前网关没有提供该时间窗的模型明细。'
-      : `弧长表示模型占当前总量的比例${view.unassigned > 0 ? ` · 未归类 ${formatTokens(view.unassigned)}` : ''}${usageStatus.stale ? ' · 当前为上次成功读取的数据' : ''}`;
-  const fragment = document.createDocumentFragment();
-  for (const row of page) {
-    const item = create('div', 'model-usage-row');
-    const dot = create('i', 'model-swatch'); dot.style.background = row.color;
-    const name = create('span', 'model-name', row.name); name.title = row.provider ? `${row.name} · ${row.provider}` : row.name;
-    item.append(dot, name, create('span', 'mono', formatTokens(row.value)), create('b', 'mono', `${(row.share * 100).toFixed(1)}%`));
-    fragment.append(item);
-  }
-  $('modelsList').replaceChildren(fragment);
 }
 
 function renderUsageStatus() {
@@ -310,7 +256,6 @@ function renderUsageStatus() {
     : usageStatus.error ? (usageStatus.stale ? `暂未刷新 · 上次 ${at || '—'}` : '用量暂不可用')
       : at ? `更新于 ${at}` : '等待用量数据';
   label.title = usageStatus.error || '上方为所选时间窗的用量；下方请求数为网关本次启动以来累计';
-  renderModelUsage();
 }
 
 let tokenText = '';
@@ -473,8 +418,7 @@ function applyTokenPill({ total = 0, title = '', windowLabel = '' } = {}) {
   const text = formatTokens(total);
   setTokenTotal(text, settings.rollTokens !== false && !motionReduced());
   if (el.tokenWindow) el.tokenWindow.textContent = windowLabel;
-  tokenBaseTitle = title || `${text} token`;
-  el.tokenPill.title = tokenBaseTitle;
+  el.tokenPill.title = title || `${text} token`;
   requestAnimationFrame(reportHitAreas);
 }
 
@@ -899,7 +843,6 @@ function setupSettingsPanel() {
       pane.hidden = true;
       pane.classList.remove('about');
       $('aboutView').hidden = true;
-      $('modelsView').hidden = true;
       document.body.classList.remove('settings-open', 'settings-closing');
     }, 200);
   };
@@ -915,14 +858,11 @@ function setupSettingsPanel() {
     pane.style.animation = '';
     document.body.classList.add('settings-open');
     const about = data?.mode === 'about';
-    const models = data?.mode === 'models';
     pane.dataset.panel = data?.mode || 'settings';
     pane.classList.toggle('about', about);
     $('aboutView').hidden = !about;
-    $('modelsView').hidden = !models;
     pane.scrollTop = 0;
     if (about) aboutRefresh?.();
-    else if (models) renderModelUsage();
     else load();
   };
 
@@ -1024,9 +964,7 @@ function setupSettingsPanel() {
       $('hotkeyStatus').textContent = result.ok ? '组合键可用，保存后生效' : result.error;
     } catch { $('hotkeyStatus').textContent = '无法检测快捷键，请重试'; }
   });
-  $('modelsClose').addEventListener('click', () => window.busy.settingsClose());
-  $('modelsPrev').addEventListener('click', () => { modelPage = Math.max(0, modelPage - 1); renderModelUsage(); });
-  $('modelsNext').addEventListener('click', () => { modelPage++; renderModelUsage(); });
+
   window.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && open) {
       event.preventDefault();

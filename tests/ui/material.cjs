@@ -64,9 +64,15 @@ async function run() {
   assert.deepEqual(bounds,{w:600,h:400,x:16,y:16});
   assert.equal(await js('getComputedStyle(document.querySelector(".card")).borderRadius'),'22px');
   record('native background preserves the content canvas and hit coordinates');
-  const stored=JSON.parse(fs.readFileSync(path.join(profile,'settings.json'),'utf8')).opacity||1;
+  const stored=JSON.parse(fs.readFileSync(path.join(profile,'settings.json'),'utf8')).opacity??1;
   const before=await js('getComputedStyle(document.documentElement).getPropertyValue("--surface-alpha")');
   await openMenu();
+  assert.equal(await js('document.querySelector("[data-menu-action=history]")'),null);
+  assert.equal(await js('document.getElementById("historyView")'),null);
+  assert.equal(await js('document.getElementById("lanesMore")'),null);
+  assert.equal(await js('document.querySelector("[data-menu-action=models]")'),null);
+  assert.equal(await js('document.getElementById("modelsView")'),null);
+  assert.equal(await js('Boolean(document.querySelector(".story"))'),true);
   const menuColor=await js('getComputedStyle(document.getElementById("quickMenu")).backgroundColor');
   assert.ok(Number(menuColor.match(/[\d.]+/g).at(-1))>=0.9,menuColor);
   record('the menu covers underlying card text while retaining its own clear labels');
@@ -74,26 +80,27 @@ async function run() {
   assert.equal(iconColor,'rgb(241, 240, 245)');
   record('monochrome agent artwork keeps its own color instead of taking the route color');
   await menuAction('settings');
-  await js('document.getElementById("settingsOpacity").value="40";document.getElementById("settingsOpacity").dispatchEvent(new Event("input"))');await sleep(100);
+  await js('document.getElementById("settingsOpacity").value="0";document.getElementById("settingsOpacity").dispatchEvent(new Event("input"))');await sleep(100);
   const after=await js('getComputedStyle(document.documentElement).getPropertyValue("--surface-alpha")');
-  assert.ok(Number(after)<Number(before));assert.equal(win.getOpacity(),1);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(profile,'settings.json'),'utf8')).opacity||1,stored);
-  record('density preview changes only the background and never fades text or writes settings');
+  assert.equal(Number(after),0);assert.equal(win.getOpacity(),1);
+  assert.equal(await js('getComputedStyle(document.documentElement).getPropertyValue("--content-alpha")'),'0');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(profile,'settings.json'),'utf8')).opacity??1,stored);
+  record('zero background opacity clears every main tint layer without fading text or writing settings');
   await js('window.busy.settingsClose()');await sleep(450);
   assert.equal(await js('getComputedStyle(document.documentElement).getPropertyValue("--surface-alpha")'),before);
-  record('closing settings restores the saved background density');
-  await js('(async()=>{const c=await window.busy.settingsGet();return window.busy.settingsSave({...c.settings,opacity:0.6});})()');await sleep(100);
-  assert.equal(win.getOpacity(),1);assert.equal(JSON.parse(fs.readFileSync(path.join(profile,'settings.json'),'utf8')).opacity,0.6);
-  record('saving density persists it while keeping native window opacity at one');
-  for (const mode of ['settings', 'about', 'models', 'history']) {
+  record('closing settings restores the saved background opacity');
+  await js('(async()=>{const c=await window.busy.settingsGet();return window.busy.settingsSave({...c.settings,opacity:0});})()');await sleep(100);
+  assert.equal(win.getOpacity(),1);assert.equal(JSON.parse(fs.readFileSync(path.join(profile,'settings.json'),'utf8')).opacity,0);
+  record('saving zero persists it while keeping native window opacity at one');
+  for (const mode of ['settings', 'about']) {
     win.webContents.send('magpie:settings-panel', {open:true,mode});await sleep(100);
     const panel=await js(`(()=>{const p=document.getElementById('settingsPane'),s=getComputedStyle(p);return {background:s.backgroundColor,content:getComputedStyle(document.querySelector('.content')).visibility,opacity:s.opacity};})()`);
     const alpha=Number(panel.background.match(/[\d.]+/g).at(-1));
-    assert.ok(alpha>=0.6&&alpha<0.8,JSON.stringify(panel));
+    assert.ok(alpha>=0.8&&alpha<1,JSON.stringify(panel));
     assert.equal(panel.content,'hidden');
     fs.writeFileSync(path.join(output,mode+'.png'),(await win.webContents.capturePage()).toPNG());
   }
-  record('settings about usage and history share translucent backgrounds without underlying page text');
+  record('settings and about stay readable even when the main background is fully transparent');
   const refreshed=materialRefreshes;win.emit('blur');await sleep(80);
   assert.ok(materialRefreshes>refreshed);
   record('losing focus refreshes the native background without focusing the widget');

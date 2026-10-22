@@ -542,33 +542,8 @@ body.compact .stage-area, body.compact .resize-handle { display: none; }
 .compact-actions button { width: 26px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 15px; cursor: pointer; }
 .compact-actions button:hover { background: rgba(161,139,255,0.12); color: var(--accent); }
 
-.panel-view[hidden], .models-paging[hidden] { display: none; }
-.model-track-base, .model-track-value { fill: none; stroke: var(--model-color); stroke-width: 1.4; }
-.model-track-base { opacity: 0.15; }
-.model-track-value { stroke-linecap: round; transition: stroke-dasharray 0.45s ease; opacity: 0.9; }
-.model-track-dot { fill: var(--model-color); }
 .settings-pane[data-panel]:not([data-panel="settings"]) .settings-head,
 .settings-pane[data-panel]:not([data-panel="settings"]) .settings-form { display: none; }
-.panel-view { display: flex; flex-direction: column; min-height: 0; flex: 1; }
-.panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 4px 0 10px; }
-.panel-head b { display: block; font-size: 14px; }
-.panel-head small { color: var(--faint); font-size: 9px; }
-.panel-note { margin: 8px 0; color: var(--muted); font-size: 9px; }
-.model-chart { position: relative; height: 104px; flex: none; }
-.model-chart > svg { display: block; width: 300px; max-width: 100%; height: 104px; margin: auto; }
-.model-chart-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
-.model-chart-center b { font-size: 18px; color: var(--ink); }
-.model-chart-center span { font-size: 9px; color: var(--muted); }
-.models-list { overflow: auto; min-height: 0; }
-.model-usage-row { display: grid; grid-template-columns: 5px minmax(0, 1fr) 65px 48px; align-items: center; gap: 9px; padding: 6px 8px; border-top: 1px solid rgba(255,255,255,0.06); font-size: 10px; }
-.model-usage-row .mono { text-align: right; }
-.model-swatch { width: 5px; height: 5px; border-radius: 50%; }
-.model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.models-paging { display: flex; justify-content: center; align-items: center; gap: 14px; margin-top: 8px; font-size: 10px; }
-.models-paging button { padding: 5px 8px; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; background: transparent; color: var(--ink); cursor: pointer; }
-.models-paging button:disabled { opacity: 0.35; cursor: default; }
-
-
 
 .usage-status.stale {
   color: var(--warn);
@@ -673,30 +648,6 @@ body.layout .token-pill {
   display: block;
   height: 21px;
   line-height: 21px;
-}
-
-.token-model-bar {
-  position: absolute;
-  display: flex;
-  right: 11px;
-  bottom: 3px;
-  left: 11px;
-  height: 2px;
-  overflow: hidden;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.14);
-  opacity: 0.8;
-  pointer-events: none;
-}
-
-.token-model-bar[hidden] {
-  display: none;
-}
-
-.token-model-segment {
-  display: block;
-  flex: none;
-  height: 100%;
 }
 
 .live-dot {
