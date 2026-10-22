@@ -996,6 +996,8 @@ body.menu-open .stage-canvas {
   fill: currentColor;
 }
 
+.agent-icon .brand-mark { color: #f1f0f5; }
+
 .stage .agent-line .status-dot {
   background: var(--route, var(--accent));
   box-shadow: 0 0 6px color-mix(in srgb, var(--route, var(--accent)) 55%, transparent);
