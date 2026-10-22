@@ -80,6 +80,15 @@ async function run() {
   assert.equal(iconColor,'rgb(241, 240, 245)');
   record('monochrome agent artwork keeps its own color instead of taking the route color');
   await menuAction('settings');
+  const settingsText = await js(`(() => {
+    const label=document.querySelector('.settings-opacity b'),range=document.createRange();
+    range.selectNodeContents(label);
+    return {opacityLabel:label.textContent,lines:new Set([...range.getClientRects()].map(r=>Math.round(r.top))).size,
+      helperCount:document.querySelectorAll('#settingsForm small').length};
+  })()`);
+  assert.equal(settingsText.lines,1,JSON.stringify(settingsText));
+  assert.equal(settingsText.helperCount,0,JSON.stringify(settingsText));
+  record('settings labels fit one line and contain no secondary helper text');
   assert.equal(await js('document.querySelector("#settingsHotkey, #settingsHotkeyOn, #hotkeyRecord, #hotkeyStatus")'),null);
   assert.equal(await js('document.getElementById("settingsTab-connection").textContent'),'连接');
   assert.equal(await js('document.getElementById("settingsPane").textContent.includes("快捷键")'),false);

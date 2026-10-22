@@ -682,7 +682,6 @@ function setupSettingsPanel() {
   const opacity = $('settingsOpacity');
   const opacityOut = $('settingsOpacityOut');
   const gateway = $('settingsGateway');
-  const gatewayHint = $('settingsGatewayHint');
   const periodChips = [...document.querySelectorAll('#settingsPeriods .settings-chip')];
   const metricChips = [...document.querySelectorAll('#settingsMetrics .settings-chip')];
   const effectChips = [...document.querySelectorAll('#settingsEffects .settings-chip')];
@@ -801,8 +800,6 @@ function setupSettingsPanel() {
     }
     gateway.value = s.gateway || '';
     gateway.placeholder = '留空自动检测';
-    gatewayHint.textContent = data.gatewayError || `当前 ${data.resolvedGateway || '—'} · ${data.gatewaySource || '自动检测'}`;
-    gatewayHint.title = gatewayHint.textContent;
     gatewayReport = `Busy Magpie v${data.version}\n网关：${data.resolvedGateway || '未解析'}\n来源：${data.gatewaySource || '自动检测'}\n路由：${connection.online ? '可读取' : connection.detail}\n用量：${usageStatus.error || (usageData ? '可读取' : '尚未读取')}`;
     $('gatewayResult').textContent = '';
     if (pathText) pathText.textContent = data.path || '';

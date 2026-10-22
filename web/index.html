@@ -228,11 +228,11 @@
                   <section class="settings-group">
                     <div class="settings-duo">
                       <label class="settings-switch">
-                        <span><b>总在最前</b><small>盖在其他窗口上方</small></span>
+                        <span><b>总在最前</b></span>
                         <input type="checkbox" id="settingsTopmost">
                       </label>
                       <label class="settings-switch">
-                        <span><b>隐藏账号名称</b><small>邮箱和 Key 打码</small></span>
+                        <span><b>隐藏账号名称</b></span>
                         <input type="checkbox" id="settingsMask">
                       </label>
                     </div>
@@ -241,8 +241,8 @@
                       <input type="range" id="settingsOpacity" min="0" max="100" step="1" value="100">
                       <output id="settingsOpacityOut">100%</output>
                     </div>
-                    <label class="settings-switch"><span><b>紧凑模式</b><small>只显示连接、活动请求和用量</small></span><input type="checkbox" id="settingsCompact"></label>
-                    <label class="settings-switch"><span><b>安静模式</b><small>停止飞鸟、流光和数字动画</small></span><input type="checkbox" id="settingsQuiet"></label>
+                    <label class="settings-switch"><span><b>紧凑模式</b></span><input type="checkbox" id="settingsCompact"></label>
+                    <label class="settings-switch"><span><b>安静模式</b></span><input type="checkbox" id="settingsQuiet"></label>
                     <div class="gateway-actions"><button type="button" id="settingsResetPosition">恢复默认位置和大小</button></div>
                   </section>
 
@@ -262,7 +262,7 @@
                 <div class="settings-page" id="settingsPage-usage" role="tabpanel" aria-labelledby="settingsTab-usage" hidden>
                   <section class="settings-group">
                     <div class="settings-field">
-                      <div class="settings-caption"><b>时间窗</b><small>单击胶囊只在这些之间循环</small></div>
+                      <div class="settings-caption"><b>时间窗</b></div>
                       <div class="settings-chips" id="settingsPeriods" role="group" aria-label="时间窗">
                         <button type="button" class="settings-chip" data-period="today" aria-pressed="true">今日</button>
                         <button type="button" class="settings-chip" data-period="7d" aria-pressed="true">7 天</button>
@@ -271,7 +271,7 @@
                       </div>
                     </div>
                     <div class="settings-field">
-                      <div class="settings-caption"><b>数值</b><small>滚动的数字代表什么</small></div>
+                      <div class="settings-caption"><b>数值</b></div>
                       <div class="settings-chips" id="settingsMetrics" role="group" aria-label="胶囊数值">
                         <button type="button" class="settings-chip" data-metric="total" aria-pressed="true">总 token</button>
                         <button type="button" class="settings-chip" data-metric="input" aria-pressed="false">输入</button>
@@ -280,7 +280,7 @@
                       </div>
                     </div>
                     <label class="settings-switch">
-                      <span><b>数字滚动</b><small>关闭后直接替换</small></span>
+                      <span><b>数字滚动</b></span>
                       <input type="checkbox" id="settingsRoll">
                     </label>
                   </section>
@@ -288,11 +288,11 @@
                   <section class="settings-group">
                     <div class="settings-duo">
                       <label class="settings-switch">
-                        <span><b>额度条</b><small>剩余额度与续期</small></span>
+                        <span><b>额度条</b></span>
                         <input type="checkbox" id="settingsQuota">
                       </label>
                       <label class="settings-switch">
-                        <span><b>耗时拆解</b><small>首字延迟写进明细</small></span>
+                        <span><b>耗时拆解</b></span>
                         <input type="checkbox" id="settingsTiming">
                       </label>
                     </div>
@@ -306,7 +306,7 @@
                         </div>
                       </div>
                       <label class="settings-switch">
-                        <span><b>保活</b><small>请求时自动拉起</small></span>
+                        <span><b>保活</b></span>
                         <input type="checkbox" id="settingsKeepAlive">
                       </label>
                     </div>
@@ -315,7 +315,7 @@
                 <div class="settings-page" id="settingsPage-connection" role="tabpanel" aria-labelledby="settingsTab-connection" hidden>
                   <section class="settings-group">
                     <div class="settings-row">
-                      <span><b>网关</b><small id="settingsGatewayHint">留空自动读取 magpie 的端口</small></span>
+                      <span><b>网关</b></span>
                       <input type="text" id="settingsGateway" class="settings-input" placeholder="留空自动检测">
                     </div>
                     <div class="gateway-actions"><button type="button" id="gatewayTest">测试连接</button><button type="button" id="gatewayCopy">复制诊断</button></div>

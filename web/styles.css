@@ -2635,15 +2635,7 @@ body.settings-open .stage-canvas > :not(.settings-pane):not(.first-run-mask) { v
   font-weight: 600;
 }
 
-.settings-row small {
-  display: block;
-  margin-top: 1px;
-  color: var(--faint);
-  font-size: 9px;
-}
-
 .settings-row > span { min-width: 0; }
-#settingsGatewayHint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .settings-row .settings-input {
   flex: none;
@@ -2666,13 +2658,6 @@ body.settings-open .stage-canvas > :not(.settings-pane):not(.first-run-mask) { v
   display: block;
   font-size: 11px;
   font-weight: 600;
-}
-
-.settings-caption small {
-  display: block;
-  margin-top: 1px;
-  color: var(--faint);
-  font-size: 9px;
 }
 
 .settings-chips {
@@ -2727,13 +2712,6 @@ body.settings-open .stage-canvas > :not(.settings-pane):not(.first-run-mask) { v
   font-weight: 600;
 }
 
-.settings-switch small {
-  display: block;
-  margin-top: 1px;
-  color: var(--faint);
-  font-size: 9px;
-}
-
 .settings-switch input {
   width: 15px;
   height: 15px;
@@ -2751,7 +2729,7 @@ body.settings-open .stage-canvas > :not(.settings-pane):not(.first-run-mask) { v
 
 .settings-opacity span {
   flex: none;
-  width: 58px;
+  white-space: nowrap;
 }
 
 .settings-opacity b {
@@ -2761,6 +2739,7 @@ body.settings-open .stage-canvas > :not(.settings-pane):not(.first-run-mask) { v
 
 .settings-opacity input {
   flex: 1;
+  min-width: 0;
   accent-color: var(--accent);
 }
 
