@@ -285,7 +285,7 @@ Codex            ┈┘              OpenAI
 {
   "topmost": true,
   "maskAccounts": true,
-  "opacity": 1,
+  "opacity": 0.5,
   "left": 1900,
   "top": 700,
   "width": 632,
@@ -310,7 +310,7 @@ Codex            ┈┘              OpenAI
 | --- | --- |
 | `topmost` | 是否永远盖在其他窗口上方 |
 | `maskAccounts` | 是否隐藏邮箱 / Key |
-| `opacity` | 背景不透明度，`0` – `1`，数值越低越透明；文字、按钮和设置页面保持清晰。Windows 11 22H2 及以上使用原生背景模糊，macOS 使用 Vibrancy，其余系统使用半透明背景 |
+| `opacity` | 背景不透明度，`0` – `1`，新用户默认 `0.5`；数值越低越透明，文字、按钮和设置页面保持清晰。Windows 11 22H2 及以上使用原生背景模糊，macOS 使用 Vibrancy，其余系统使用半透明背景 |
 | `left` / `top` | 窗口位置 |
 | `width` / `height` | 窗口尺寸 |
 | `gateway` | 固定网关；`null` 表示自动检测 |

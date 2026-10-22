@@ -2,6 +2,14 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {mainHarness} = require('./main-harness.cjs');
 
+test('new profiles and files without an opacity setting default to fifty percent',()=>{
+  const h=mainHarness();
+  assert.equal(h.api.settings().opacity,0.5);
+  assert.equal(h.api.reloadSettings().opacity,0.5);
+  h.files.set('/test/settings.json',JSON.stringify({topmost:false}));
+  assert.equal(h.api.reloadSettings().opacity,0.5);
+});
+
 test('a failed write reports failure and leaves live settings unchanged', () => {
   const h=mainHarness({writeError:true});
   const before=JSON.stringify(h.api.settings());

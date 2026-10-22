@@ -80,6 +80,7 @@ async function run() {
   assert.equal(iconColor,'rgb(241, 240, 245)');
   record('monochrome agent artwork keeps its own color instead of taking the route color');
   await menuAction('settings');
+  assert.equal(await js('document.getElementById("settingsOpacity").value'),'50');
   const settingsText = await js(`(() => {
     const label=document.querySelector('.settings-opacity b'),range=document.createRange();
     range.selectNodeContents(label);

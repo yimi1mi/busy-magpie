@@ -24,6 +24,7 @@ if (IS_PREVIEW) {
 
 const WIDTH = 632;
 const HEIGHT = 432;
+const DEFAULT_OPACITY = 0.5;
 const COMPACT_WIDTH = 360;
 const COMPACT_HEIGHT = 112;
 // The card is drawn on a 600×400 canvas inside 16px of padding. Keeping the
@@ -133,7 +134,7 @@ function defaults() {
   return {
     topmost: true,
     maskAccounts: true,
-    opacity: 1.0,
+    opacity: DEFAULT_OPACITY,
     left: null,
     top: null,
     width: WIDTH,
@@ -202,8 +203,8 @@ function normalizeUpdateMode(value) {
 }
 
 function normalizeOpacity(value) {
-  const opacity = Number(value ?? 1);
-  return Number.isFinite(opacity) ? Math.min(1, Math.max(0, opacity)) : 1;
+  const opacity = Number(value ?? DEFAULT_OPACITY);
+  return Number.isFinite(opacity) ? Math.min(1, Math.max(0, opacity)) : DEFAULT_OPACITY;
 }
 // A stored size is snapped back to the card's shape, within the allowed
 // range, so a window saved before the shape was enforced still fits.
