@@ -2,12 +2,12 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {mainHarness} = require('./main-harness.cjs');
 
-test('new profiles and files without an opacity setting default to fifty percent',()=>{
+test('new profiles and files without an opacity setting default to thirty percent',()=>{
   const h=mainHarness();
-  assert.equal(h.api.settings().opacity,0.5);
-  assert.equal(h.api.reloadSettings().opacity,0.5);
+  assert.equal(h.api.settings().opacity,0.3);
+  assert.equal(h.api.reloadSettings().opacity,0.3);
   h.files.set('/test/settings.json',JSON.stringify({topmost:false}));
-  assert.equal(h.api.reloadSettings().opacity,0.5);
+  assert.equal(h.api.reloadSettings().opacity,0.3);
 });
 
 test('a failed write reports failure and leaves live settings unchanged', () => {
@@ -37,7 +37,7 @@ test('zero background opacity survives saving and reloading', () => {
 
 test('existing background opacity values retain their stored value', () => {
   const h=mainHarness();
-  for (const opacity of [0.4,1]) {
+  for (const opacity of [0,0.3,0.4,0.5,1]) {
     h.files.set('/test/settings.json',JSON.stringify({...h.api.settings(),opacity}));
     assert.equal(h.api.reloadSettings().opacity,opacity);
   }

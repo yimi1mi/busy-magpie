@@ -69,7 +69,7 @@ const el = {
 };
 
 let settings = {
-  opacity: 0.5,
+  opacity: 0.3,
   maskAccounts: true,
   gateway: '127.0.0.1:3425',
   usagePeriod: '30d',
@@ -793,8 +793,8 @@ function setupSettingsPanel() {
     $('settingsCompact').checked = Boolean(s.compact);
     $('settingsQuiet').checked = Boolean(s.quietMotion);
     if (!preserveOpacity || !opacityEdited) {
-      const storedOpacity = Number(s.opacity ?? 0.5);
-      const value = Number.isFinite(storedOpacity) ? Math.min(1, Math.max(0, storedOpacity)) : 0.5;
+      const storedOpacity = Number(s.opacity ?? 0.3);
+      const value = Number.isFinite(storedOpacity) ? Math.min(1, Math.max(0, storedOpacity)) : 0.3;
       opacity.value = String(Math.round(value * 100));
       opacityOut.textContent = `${opacity.value}%`;
       opacityEdited = false;
@@ -2340,7 +2340,7 @@ function setLayout(on) {
 function applySurface(value = settings.opacity) {
   const native = settings.backgroundMaterial && settings.backgroundMaterial !== 'none';
   const opacity = value !== null && value !== '' && Number.isFinite(Number(value))
-    ? Math.min(1, Math.max(0, Number(value))) : 0.5;
+    ? Math.min(1, Math.max(0, Number(value))) : 0.3;
   document.body.classList.toggle('native-material', Boolean(native));
   const style = document.documentElement.style;
   style.setProperty('--surface-alpha', String(opacity));

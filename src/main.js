@@ -24,7 +24,7 @@ if (IS_PREVIEW) {
 
 const WIDTH = 632;
 const HEIGHT = 432;
-const DEFAULT_OPACITY = 0.5;
+const DEFAULT_OPACITY = 0.3;
 const COMPACT_WIDTH = 360;
 const COMPACT_HEIGHT = 112;
 // The card is drawn on a 600×400 canvas inside 16px of padding. Keeping the
