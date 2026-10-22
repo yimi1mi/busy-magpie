@@ -573,7 +573,7 @@ function setupDragBar() {
       suppressClick = true;
       bar.classList.add('dragging');
       window.busy.dragStart();
-    }, 360);
+    }, 150);
   });
 
   bar.addEventListener('pointermove', (event) => {
