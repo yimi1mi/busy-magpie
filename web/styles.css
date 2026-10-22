@@ -1511,7 +1511,11 @@ body.menu-open .stage-canvas {
 }
 
 .fan .account-token {
-  display: none;
+  margin-top: 0;
+  height: 11px;
+  font-size: 8.5px;
+  line-height: 11px;
+  color: var(--muted);
 }
 
 /* ── several live agents, one magpie ──────────────────────────────────── */
@@ -1801,6 +1805,9 @@ body.menu-open .stage-canvas {
   height: 11px;
   font-size: 8.5px;
 }
+
+.fan.ultra .node.account.has-metrics:not(.failed) .account-state { display: none; }
+.fan.ultra .node.account.failed .account-token { display: none; }
 
 .fan.micro .node.agent {
   justify-content: center;

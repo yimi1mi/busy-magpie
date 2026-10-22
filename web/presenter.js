@@ -151,7 +151,7 @@ function tokenInfo(route) {
       : '',
   ].filter(Boolean).join(' · ');
 
-  return { total, detail: detail.join(' · '), title, contextPct };
+  return { total, output, detail: detail.join(' · '), title, contextPct };
 }
 
 // The account's own allowance, as its order entry carries it: "known" says
@@ -179,8 +179,8 @@ function quotaInfo(picked) {
 // magpie counts output only when the reply ends.
 function speedInfo(route, lastTry) {
   if (!route.done) return null;
-  const out = Number(route.out) || 0;
   const usage = Array.isArray(route.usage) ? route.usage[route.usage.length - 1] : null;
+  const out = Number(route.out ?? usage?.out) || 0;
   const think = Number(route.reasoning) || Number(usage?.reasoning) || 0;
   const ms = Number(route.ms) || 0;
   const ttft = Number(route.ttft) || Number(lastTry?.ttft) || 0;
@@ -284,6 +284,7 @@ export function present(route, totals, maskAccounts) {
     accountState,
     accountPlan: picked?.plan ? picked.plan.toUpperCase() : '',
     tokens: token.total,
+    outputTokens: token.output,
     tokenDetail: token.detail,
     tokenTitle: token.title,
     tokenPct: token.contextPct,

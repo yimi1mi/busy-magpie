@@ -372,29 +372,20 @@ function formatLatency(ms) {
 
 // What the account card says under its state line: this request's tokens
 // and first-byte wait, then how much of the account's allowance is left.
-function renderAccountDetail(view) {
+function accountDetail(view, compact = false) {
   const timing = settings.showTiming !== false ? view.timing : null;
   const parts = [];
-  if (view.tokenDetail) parts.push(view.tokenDetail);
+  if (compact && view.outputTokens > 0) parts.push(`输出 ${formatTokens(view.outputTokens)}`);
+  else if (view.tokenDetail) parts.push(view.tokenDetail);
   if (timing?.speed) parts.push(`${Math.round(timing.speed.rate)} tok/s`);
   // One row only: with a speed to show, the first-token wait moves to the
   // hover tip instead of pushing the line into an ellipsis.
   if (timing && timing.ttft > 0 && !timing.speed) parts.push(`首字 ${formatLatency(timing.ttft)}`);
   const detail = parts.join(' · ');
-  el.accountToken.textContent = detail;
-  el.accountToken.hidden = !detail;
 
   const quota = settings.showQuota !== false ? view.quota : null;
-  el.accountQuota.hidden = !quota;
-  if (quota) {
-    const remaining = Math.max(0, Math.min(100, quota.remaining));
-    el.accountQuotaBar.style.width = `${Math.max(1.5, remaining).toFixed(1)}%`;
-    el.accountQuota.classList.toggle('low', remaining < 15);
-    const eta = formatEta(quota.renewAt);
-    el.accountQuotaText.textContent = `额度 ${Math.round(remaining)}%${eta ? ` · ${eta}` : ''}`;
-  }
 
-  const tip = [];
+  const tip = [view.tokenTitle].filter(Boolean);
   if (quota) {
     const bits = [`剩 ${Math.round(quota.remaining)}%`];
     if (quota.amount && quota.limit) {
@@ -417,7 +408,23 @@ function renderAccountDetail(view) {
     if (timing.own > 0) bits.push(`magpie ${formatDuration(timing.own)}`);
     if (bits.length) tip.push(`耗时：${bits.join(' · ')}`);
   }
-  el.accountNode.title = tip.join('\n');
+  return { detail, title: tip.join('\n'), quota };
+}
+
+function renderAccountDetail(view) {
+  const { detail, title, quota } = accountDetail(view);
+  el.accountToken.textContent = detail;
+  el.accountToken.hidden = !detail;
+  el.accountQuota.hidden = !quota;
+  if (quota) {
+    const remaining = Math.max(0, Math.min(100, quota.remaining));
+    el.accountQuotaBar.style.width = `${Math.max(1.5, remaining).toFixed(1)}%`;
+    el.accountQuota.classList.toggle('low', remaining < 15);
+    const eta = formatEta(quota.renewAt);
+    el.accountQuotaText.textContent = `额度 ${Math.round(remaining)}%${eta ? ` · ${eta}` : ''}`;
+  }
+
+  el.accountNode.title = title;
 }
 
 function staticTokenTrack(char) {
@@ -2148,7 +2155,7 @@ function renderMulti(routes, totals) {
       if (group.modelCount > 1) view.accountModel = `${group.modelCount} 个模型`;
     }
     const color = agentColor(route.agent);
-    const next = buildFanAccount(route, view, fresh, color);
+    const next = buildFanAccount(route, view, fresh, color, group.routes.length);
     next.dataset.layoutKey = `account:${group.key}`;
     const node = reuseRoutingNode(el.fanAccounts, next);
     accountRows.push(node);
@@ -2191,7 +2198,7 @@ function buildFanAgent(route, view, fresh, color) {
   return agent;
 }
 
-function buildFanAccount(route, view, fresh, color) {
+function buildFanAccount(route, view, fresh, color, requestCount = 1) {
   const kind = stateClass(view);
   const account = create('section', `node account${fresh ? ' fresh' : ''}`);
   account.dataset.id = String(route.id);
@@ -2219,7 +2226,14 @@ function buildFanAccount(route, view, fresh, color) {
   setStatusDot(stateDotEl, stateDotClass(kind));
   state.append(stateDotEl, create('span', '', view.accountState));
 
-  account.append(top, mid, state);
+  const metrics = accountDetail(view, true);
+  const detail = create('div', 'account-token', (requestCount > 1 && metrics.detail ? '本条 ' : '') + metrics.detail);
+  detail.hidden = !metrics.detail;
+  account.classList.toggle('has-metrics', Boolean(metrics.detail));
+  account.title = [view.accountModel, view.accountState,
+    requestCount > 1 ? `以下数据属于本条请求 #${route.id}；展开查看全部 ${requestCount} 条请求` : '',
+    metrics.title].filter(Boolean).join('\n');
+  account.append(top, mid, state, detail);
   return account;
 }
 
