@@ -392,8 +392,7 @@ function applyTokenPill({ total = 0, pct = null, title = '', windowLabel = '' } 
   requestAnimationFrame(reportHitAreas);
 }
 
-// The card is click-through: main only lets the pointer in over the pill
-// and the drag strip, so it has to be told where those currently sit.
+// Main lets the pointer in over controls and the drag strip after scaling.
 let lastHitKey = '';
 
 function reportHitAreas() {
@@ -401,19 +400,19 @@ function reportHitAreas() {
   const canvas = el.stageCanvas?.getBoundingClientRect();
   if (!canvas) return;
   const scale = uiScale();
-  const pill = el.tokenPill;
-  let rect = null;
-  if (pill && !pill.hidden && pill.isConnected) {
-    const box = pill.getBoundingClientRect();
-    rect = {
-      x: Math.round(box.left),
-      y: Math.round(box.top),
-      width: Math.round(box.width),
-      height: Math.round(box.height),
-    };
-  }
+  const controls = [el.tokenPill, el.appVersion, $('updateChip'), $('quickMenuToggle')]
+    .filter((node) => node && !node.hidden && node.isConnected)
+    .map((node) => {
+      const box = node.getBoundingClientRect();
+      return {
+        x: Math.round(box.left),
+        y: Math.round(box.top),
+        width: Math.round(box.width),
+        height: Math.round(box.height),
+      };
+    });
   const payload = {
-    pill: rect,
+    controls,
     dragTop: Math.round(canvas.top),
     dragBottom: Math.round(canvas.top + 28 * scale + 6),
     ui: Number(scale.toFixed(4)),
@@ -422,6 +421,57 @@ function reportHitAreas() {
   if (key === lastHitKey) return;
   lastHitKey = key;
   window.busy.setHitAreas(payload);
+}
+
+function setupQuickMenu() {
+  const button = $('quickMenuToggle');
+  const menu = $('quickMenu');
+  const items = [...menu.querySelectorAll('[role="menuitem"]')];
+  let open = false;
+
+  button.addEventListener('click', () => window.busy.toggleMenu());
+  menu.addEventListener('click', (event) => {
+    const item = event.target.closest('[data-menu-action]');
+    if (item) window.busy.menuAction(item.dataset.menuAction);
+  });
+
+  const outside = (event) => open && !menu.contains(event.target) && !button.contains(event.target);
+  // Consume the entire outside click before restoring native click-through.
+  // In particular, pressing the drag bar must only dismiss this menu.
+  document.addEventListener('pointerdown', (event) => {
+    if (!outside(event)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
+  document.addEventListener('click', (event) => {
+    if (!outside(event)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    window.busy.closeMenu();
+  }, true);
+  window.addEventListener('keydown', (event) => {
+    if (!open) return;
+    const current = items.indexOf(document.activeElement);
+    let next;
+    if (event.key === 'ArrowDown') next = (current + 1) % items.length;
+    else if (event.key === 'ArrowUp') next = (current + items.length - 1) % items.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = items.length - 1;
+    else if (event.key === 'Escape' || event.key === 'Tab') window.busy.closeMenu();
+    else return;
+    event.preventDefault();
+    if (next !== undefined) items[next].focus();
+  });
+
+  window.busy.onQuickMenu((value) => {
+    open = Boolean(value);
+    menu.hidden = !open;
+    button.setAttribute('aria-expanded', String(open));
+    document.body.classList.toggle('menu-open', open);
+    if (open) items[0].focus({ preventScroll: true });
+    else if (menu.contains(document.activeElement)) button.focus({ preventScroll: true });
+  });
+  new ResizeObserver(() => requestAnimationFrame(reportHitAreas)).observe(button.parentElement);
 }
 
 function setupTokenPill() {
@@ -2174,6 +2224,7 @@ async function boot() {
   setupAbout();
   setupFirstRun();
   setupTokenPill();
+  setupQuickMenu();
   window.busy.ready?.();
   if (data.update) renderUpdateState?.(data.update);
   if (data.firstRun) firstRunShow?.();

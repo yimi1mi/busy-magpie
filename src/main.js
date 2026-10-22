@@ -42,6 +42,7 @@ let win = null;
 let firstRunOpen = FIRST_INSTALL;
 let settingsOpen = false;
 let settingsClosing = false;
+let quickMenuOpen = false;
 let rendererReady = false;
 let pendingSettings = false;
 let pendingPanelMode = 'settings';
@@ -75,11 +76,9 @@ let layoutMode = false;
 let layoutTimer = null;
 let hoverInteractive = false;
 let hoverKind = null;
-// The renderer measures the token pill and the drag strip, which are the
-// only places inside the card that take a pointer: the card is otherwise
-// click-through, so the pointer has to be let in exactly there. Both move
-// when the window is resized, since the card is scaled to fit it.
-let hitAreas = { pill: null, dragTop: 12, dragBottom: 46 };
+// The renderer measures the controls and drag strip after scaling. Only
+// these regions and the resize border take a pointer while no panel is open.
+let hitAreas = { controls: [], dragTop: 12, dragBottom: 46 };
 let dragState = null;
 let resizeState = null;
 let hoverTimer = null;
@@ -367,13 +366,14 @@ function createWindow() {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   win.webContents.on('before-input-event', (event, input) => {
-    if ((firstRunOpen || settingsOpen || layoutMode || dragState || resizeState)
+    if ((firstRunOpen || settingsOpen || quickMenuOpen || layoutMode || dragState || resizeState)
       && input.type === 'keyDown' && input.key === 'Escape') {
       if (firstRunOpen) {
         firstRunOpen = false;
         applyClickThrough();
         send('magpie:first-run', false);
       } else if (settingsOpen) closeSettingsPanel();
+      else if (quickMenuOpen) setQuickMenuOpen(false);
       else if (resizeState) endResize();
       else if (dragState) endDrag();
       else endLayout();
@@ -395,13 +395,18 @@ function createWindow() {
 
   win.on('show', () => refreshTrayMenu());
   win.on('hide', () => {
+    setQuickMenuOpen(false);
     if (settingsOpen) closeSettingsPanel();
     hoverInteractive = false;
     hoverKind = null;
     refreshTrayMenu();
   });
+  win.on('blur', () => setQuickMenuOpen(false));
 
-  win.webContents.on('did-start-loading', () => { rendererReady = false; });
+  win.webContents.on('did-start-loading', () => {
+    rendererReady = false;
+    setQuickMenuOpen(false);
+  });
   win.webContents.on('did-finish-load', () => {
     win.webContents.send('magpie:settings', publicSettings());
     win.webContents.send('magpie:frame', frame);
@@ -717,7 +722,7 @@ function applyTopmost() {
 
 function applyClickThrough() {
   if (!win || win.isDestroyed()) return;
-  if (firstRunOpen || settingsOpen || settingsClosing || layoutMode || hoverInteractive) {
+  if (firstRunOpen || settingsOpen || settingsClosing || quickMenuOpen || layoutMode || hoverInteractive) {
     win.setIgnoreMouseEvents(false);
     win.setFocusable(true);
   } else {
@@ -734,9 +739,22 @@ function showWindow() {
   refreshTrayMenu();
 }
 
+function setQuickMenuOpen(value) {
+  if (!win || win.isDestroyed()) return;
+  const open = Boolean(value);
+  if (open && (!win.isVisible() || firstRunOpen || settingsOpen || settingsClosing
+    || layoutMode || dragState || resizeState)) return;
+  if (quickMenuOpen === open) return;
+  quickMenuOpen = open;
+  setHoverInteractive(false);
+  applyClickThrough();
+  send('magpie:quick-menu', open);
+  if (open) win.focus();
+}
 
 function openSettingsPanel(mode = 'settings') {
   if (!win || win.isDestroyed()) return;
+  setQuickMenuOpen(false);
   if (!rendererReady) {
     pendingSettings = true;
     pendingPanelMode = mode;
@@ -843,7 +861,7 @@ function setHoverInteractive(value, kind = null) {
 function watchHover() {
   clearInterval(hoverTimer);
   hoverTimer = setInterval(() => {
-    if (!win || win.isDestroyed() || !win.isVisible() || firstRunOpen || settingsOpen || settingsClosing || layoutMode || dragState || resizeState) return;
+    if (!win || win.isDestroyed() || !win.isVisible() || firstRunOpen || settingsOpen || settingsClosing || quickMenuOpen || layoutMode || dragState || resizeState) return;
     const point = screen.getCursorScreenPoint();
     const bounds = win.getBounds();
     const card = {
@@ -864,36 +882,28 @@ function watchHover() {
       && point.x <= bounds.x + bounds.width
       && point.y >= bounds.y + hitAreas.dragTop
       && point.y <= bounds.y + hitAreas.dragBottom;
-    // The token pill sits inside the top strip, but it takes a click rather
-    // than a drag, so it wins the hit test where the two overlap.
-    const onPill = Boolean(hitAreas.pill)
-      && point.x >= bounds.x + hitAreas.pill.x
-      && point.x <= bounds.x + hitAreas.pill.x + hitAreas.pill.width
-      && point.y >= bounds.y + hitAreas.pill.y
-      && point.y <= bounds.y + hitAreas.pill.y + hitAreas.pill.height;
-    const kind = onPill ? 'pill' : onBorder ? 'resize' : onTopBar ? 'drag' : null;
+    // Controls take priority over dragging or resizing where they overlap.
+    const onControl = hitAreas.controls.some((rect) => (
+      point.x >= bounds.x + rect.x && point.x <= bounds.x + rect.x + rect.width
+      && point.y >= bounds.y + rect.y && point.y <= bounds.y + rect.y + rect.height
+    ));
+    const kind = onControl ? 'control' : onBorder ? 'resize' : onTopBar ? 'drag' : null;
     setHoverInteractive(Boolean(kind), kind);
   }, 70);
 }
 
-// The pill is the only control on the card that is not in a panel, and the
-// renderer keeps it in step with the usage summary's width.
 function setHitAreas(raw) {
   const source = raw && typeof raw === 'object' ? raw : {};
-  const rect = source.pill && typeof source.pill === 'object' ? source.pill : null;
-  const numbers = rect
-    ? ['x', 'y', 'width', 'height'].map((key) => Number(rect[key]))
-    : [];
-  const valid = numbers.length === 4
-    && numbers.every(Number.isFinite)
-    && numbers[2] > 0
-    && numbers[3] > 0;
+  const controls = (Array.isArray(source.controls) ? source.controls : []).flatMap((rect) => {
+    if (!rect || typeof rect !== 'object') return [];
+    const numbers = ['x', 'y', 'width', 'height'].map((key) => Number(rect[key]));
+    if (!numbers.every(Number.isFinite) || numbers[2] <= 0 || numbers[3] <= 0) return [];
+    return [{ x: numbers[0], y: numbers[1], width: numbers[2], height: numbers[3] }];
+  });
   const top = Number(source.dragTop);
   const bottom = Number(source.dragBottom);
   hitAreas = {
-    pill: valid
-      ? { x: numbers[0], y: numbers[1], width: numbers[2], height: numbers[3] }
-      : null,
+    controls,
     dragTop: Number.isFinite(top) ? top : 12,
     dragBottom: Number.isFinite(bottom) && Number.isFinite(top) && bottom > top
       ? bottom
@@ -902,7 +912,7 @@ function setHitAreas(raw) {
 }
 
 function startDrag() {
-  if (!win || win.isDestroyed() || firstRunOpen || settingsOpen || settingsClosing || dragState) return;
+  if (!win || win.isDestroyed() || firstRunOpen || settingsOpen || settingsClosing || quickMenuOpen || dragState) return;
   const point = screen.getCursorScreenPoint();
   const [x, y] = win.getPosition();
   hoverInteractive = false;
@@ -951,7 +961,7 @@ function endDrag() {
 }
 
 function startResize(direction = 'se') {
-  if (!win || win.isDestroyed() || firstRunOpen || settingsClosing || resizeState) return;
+  if (!win || win.isDestroyed() || firstRunOpen || settingsClosing || quickMenuOpen || resizeState) return;
   const dir = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].includes(direction)
     ? direction
     : 'se';
@@ -1074,6 +1084,7 @@ function endResize() {
 
 function beginLayout() {
   if (!win || win.isDestroyed() || firstRunOpen || settingsOpen || settingsClosing || layoutMode) return;
+  setQuickMenuOpen(false);
   layoutMode = true;
   if (!win.isVisible()) win.showInactive();
   win.setIgnoreMouseEvents(false);
@@ -1756,6 +1767,21 @@ function openAbout() {
 
 ipcMain.on('busy:about-open', () => {
   openAbout();
+});
+
+ipcMain.on('busy:menu-toggle', () => setQuickMenuOpen(!quickMenuOpen));
+ipcMain.on('busy:menu-close', () => setQuickMenuOpen(false));
+ipcMain.on('busy:menu-action', (_event, action) => {
+  if (!quickMenuOpen) return;
+  switch (action) {
+    case 'settings': openSettingsPanel(); break;
+    case 'layout': beginLayout(); break;
+    case 'hide': win.hide(); break;
+    case 'about':
+      openAbout();
+      checkForUpdates(true);
+      break;
+  }
 });
 
 ipcMain.handle('updates:get', () => updateView());

@@ -28,6 +28,9 @@ contextBridge.exposeInMainWorld('busy', {
   resizeEnd: () => ipcRenderer.send('busy:resize-end'),
   setUsagePeriod: (period) => ipcRenderer.invoke('usage:set-period', period),
   setHitAreas: (areas) => ipcRenderer.send('busy:hit-areas', areas),
+  toggleMenu: () => ipcRenderer.send('busy:menu-toggle'),
+  closeMenu: () => ipcRenderer.send('busy:menu-close'),
+  menuAction: (action) => ipcRenderer.send('busy:menu-action', action),
   settingsGet: () => ipcRenderer.invoke('settings:get'),
   settingsSave: (data) => ipcRenderer.invoke('settings:save', data),
   previewOpacity: (value) => ipcRenderer.send('settings:opacity', value),
@@ -68,6 +71,9 @@ contextBridge.exposeInMainWorld('busy', {
   },
   onSettingsPanel: (callback) => {
     ipcRenderer.on('magpie:settings-panel', (_event, data) => callback(data));
+  },
+  onQuickMenu: (callback) => {
+    ipcRenderer.on('magpie:quick-menu', (_event, open) => callback(open));
   },
   onFirstRun: (callback) => {
     ipcRenderer.on('magpie:first-run', (_event, data) => callback(data));
