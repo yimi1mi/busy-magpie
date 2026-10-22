@@ -100,6 +100,9 @@ npm start
 # Windows：NSIS 安装包（x64）
 npm run dist:win
 
+# 输出到独立目录，保留原来的安装包和解包目录
+npm run dist:win -- -OutputDirectory dist/local-1.3.10
+
 # macOS：dmg + zip（x64 / arm64）
 # 必须在 macOS 上执行
 npm run dist:mac

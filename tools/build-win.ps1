@@ -2,9 +2,34 @@
 # electron-builder's extract-then-rename step can hit EPERM on machines with
 # real-time antivirus; staging the Electron runtime first avoids that.
 
+param([string]$OutputDirectory = '')
+
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$dist = Join-Path $root 'dist'
+$allowedOutput = [IO.Path]::GetFullPath((Join-Path $root 'dist'))
+$dist = if ($OutputDirectory) {
+    [IO.Path]::GetFullPath($(if ([IO.Path]::IsPathRooted($OutputDirectory)) { $OutputDirectory } else { Join-Path $root $OutputDirectory }))
+} else { $allowedOutput }
+if ($dist -ne $allowedOutput -and -not $dist.StartsWith($allowedOutput + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Build output must stay inside this workspace dist directory.'
+}
+
+function Assert-BuildPath([string]$Target) {
+    $resolved = [IO.Path]::GetFullPath($Target)
+    if (-not $resolved.StartsWith($dist + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Build target is outside its output directory: $resolved"
+    }
+    $probe = $resolved
+    while ($probe.Length -ge $allowedOutput.Length) {
+        if (Test-Path -LiteralPath $probe) {
+            $item = Get-Item -LiteralPath $probe -Force
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Build target traverses a link: $probe" }
+        }
+        if ($probe -eq $allowedOutput) { break }
+        $probe = Split-Path -Parent $probe
+    }
+}
+
 $unpacked = Join-Path $dist 'win-unpacked'
 $electron = Join-Path $root 'node_modules\electron\dist'
 
@@ -12,6 +37,7 @@ if (-not (Test-Path (Join-Path $electron 'electron.exe'))) {
     throw 'Electron is not installed. Run npm install first.'
 }
 
+Assert-BuildPath $unpacked
 New-Item -ItemType Directory -Force $dist | Out-Null
 if (Test-Path $unpacked) {
     Remove-Item -LiteralPath $unpacked -Recurse -Force
@@ -32,10 +58,12 @@ if (Test-Path $namedExe) { Remove-Item -LiteralPath $namedExe -Force }
 Rename-Item -LiteralPath $exe -NewName 'Busy Magpie.exe'
 
 $app = Join-Path $unpacked 'resources\app'
+Assert-BuildPath $app
 if (Test-Path $app) { Remove-Item -LiteralPath $app -Recurse -Force }
 New-Item -ItemType Directory -Force $app | Out-Null
 Copy-Item (Join-Path $root 'src') $app -Recurse -Force
 Copy-Item (Join-Path $root 'web') $app -Recurse -Force
+Copy-Item (Join-Path $root 'plugin') $app -Recurse -Force
 Copy-Item (Join-Path $root 'assets') $app -Recurse -Force
 Copy-Item (Join-Path $root 'package.json') $app -Force
 Copy-Item (Join-Path $root 'LICENSE') $app -Force
@@ -50,8 +78,12 @@ $production = & npm ls --omit=dev --all --parseable 2>$null
 Pop-Location
 foreach ($pkg in $production) {
     if (-not $pkg -or $pkg.Trim() -eq $root.Trim()) { continue }
+    if (-not ([IO.Path]::GetFullPath($pkg)).StartsWith((Join-Path $root 'node_modules') + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Runtime dependency is outside node_modules: $pkg"
+    }
     $relative = $pkg.Substring($root.Length).TrimStart('\', '/')
     $target = Join-Path $app $relative
+    Assert-BuildPath $target
     $parent = Split-Path $target -Parent
     New-Item -ItemType Directory -Force $parent | Out-Null
     if (Test-Path $target) { Remove-Item -LiteralPath $target -Recurse -Force }
@@ -104,7 +136,7 @@ if (-not (Test-Path $builder)) {
     throw 'electron-builder is not installed. Run npm install first.'
 }
 
-& $builder --win nsis --x64 --prepackaged $unpacked --publish never
+& $builder --win nsis --x64 --prepackaged $unpacked --publish never "--config.directories.output=$dist"
 if ($LASTEXITCODE -ne 0) { throw "electron-builder failed with code $LASTEXITCODE" }
 
 Get-ChildItem $dist -Filter '*.exe' | ForEach-Object { Write-Host "built $($_.FullName)" }
