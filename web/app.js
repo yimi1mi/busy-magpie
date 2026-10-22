@@ -88,6 +88,7 @@ const seenRoutes = new Set();
 const numberAnimations = new WeakMap();
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const motionReduced = () => Boolean(settings.quietMotion || reducedMotion.matches);
 const flights = new Map();
 
 // The same flying magpie magpie's own Routing page draws: facing right,
@@ -481,7 +482,7 @@ function applyTokenPill({ total = 0, pct = null, title = '', windowLabel = '' } 
   }
   el.tokenPill.hidden = false;
   const text = formatTokens(total);
-  setTokenTotal(text, settings.rollTokens !== false);
+  setTokenTotal(text, settings.rollTokens !== false && !motionReduced());
   if (el.tokenWindow) el.tokenWindow.textContent = windowLabel;
   el.tokenPill.title = title || `${text} token`;
   if (el.tokenMeter) {
@@ -839,6 +840,7 @@ function setupSettingsPanel() {
     timing.checked = s.showTiming !== false;
     keepAlive.checked = s.keepAlive !== false;
     $('settingsCompact').checked = Boolean(s.compact);
+    $('settingsQuiet').checked = Boolean(s.quietMotion);
     opacity.value = String(Math.round((Number(s.opacity) || 1) * 100));
     opacityOut.textContent = `${opacity.value}%`;
     savedOpacity = Math.min(1, Math.max(0.4, Number(s.opacity) || 1));
@@ -937,6 +939,7 @@ function setupSettingsPanel() {
           || effectChips[0]).dataset.effect,
         keepAlive: keepAlive.checked,
         compact: $('settingsCompact').checked,
+        quietMotion: $('settingsQuiet').checked,
       });
       if (!result?.ok) {
         setStatus(result?.error || '保存失败', true);
@@ -1172,7 +1175,7 @@ function refreshFlightLegs() {
   }
 }
 
-function syncFlights(routes, multi) {  if (reducedMotion.matches) {
+function syncFlights(routes, multi) {  if (motionReduced()) {
     stopFlights();
     return;
   }
@@ -1865,6 +1868,13 @@ function stateDot(kind) {
 }
 
 function animateNumber(target, value) {
+  if (motionReduced()) {
+    const animation = numberAnimations.get(target);
+    if (animation) cancelAnimationFrame(animation);
+    target.textContent = Number(value).toLocaleString('zh-CN');
+    target.dataset.rendered = String(value);
+    return;
+  }
   const next = Math.max(0, Number(value) || 0);
   if (target.dataset.value === String(next)) return;
   target.dataset.value = String(next);
@@ -2334,6 +2344,7 @@ function setLayout(on) {
 
 function applySettings(next) {
   settings = { ...settings, ...(next || {}) };
+  document.body.classList.toggle('noanim', Boolean(settings.quietMotion));
   applyGateway();
   render();
 }
@@ -2345,6 +2356,7 @@ async function boot() {
   const data = await window.busy.bootstrap();
   if (data.version) $('appVersionText').textContent = `v${data.version}`;
   if (data.settings) settings = { ...settings, ...data.settings };
+  document.body.classList.toggle('noanim', Boolean(settings.quietMotion));
   if (data.connection) connection = data.connection;
   if (data.trace) lastTrace = data.trace;
   if (data.usage) usageData = data.usage;
@@ -2389,6 +2401,7 @@ async function boot() {
   window.addEventListener('dragover', (event) => event.preventDefault());
   window.addEventListener('drop', (event) => event.preventDefault());
   window.addEventListener('beforeunload', stopFlights);
+  reducedMotion.addEventListener('change', render);
   setupDragBar();
   setupDragBar($('compactDragBar'));
   setupResizeHandles();

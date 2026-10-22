@@ -2340,6 +2340,10 @@ body.noanim *::after {
   transition: none !important;
 }
 
+body.noanim .wire .spark,
+body.noanim .fan-wire-trail,
+body.noanim .fan-wire-path { display: none; }
+
 @media (prefers-reduced-motion: reduce) {
   .wire .spark,
   .fan-wire-trail,

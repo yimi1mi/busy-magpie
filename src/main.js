@@ -139,6 +139,7 @@ function defaults() {
     keepAlive: true,
     pauseUntil: 0,
     compact: false,
+    quietMotion: false,
     hotkey: 'Control+Alt+M',
     hotkeyOn: true,
     autostart: false,
@@ -455,6 +456,7 @@ function publicSettings() {
     showTiming: settings.showTiming !== false,
     hubEffect: settings.hubEffect,
     compact: Boolean(settings.compact),
+    quietMotion: Boolean(settings.quietMotion),
   };
 }
 
@@ -1795,6 +1797,7 @@ ipcMain.handle('settings:save', (_event, input) => {
         ? settings.keepAlive !== false
         : Boolean(data.keepAlive),
       compact: data.compact === undefined ? Boolean(settings.compact) : Boolean(data.compact),
+      quietMotion: data.quietMotion === undefined ? Boolean(settings.quietMotion) : Boolean(data.quietMotion),
       hotkey: nextHotkey,
       hotkeyOn: nextHotkeyOn,
     };
