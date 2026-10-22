@@ -225,12 +225,17 @@ function loadSettings() {
   }
 }
 
-function saveSettings() {
+function saveSettings(next = settings) {
+  const temporary = `${settingsPath}.tmp`;
   try {
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+    fs.writeFileSync(temporary, JSON.stringify(next, null, 2), 'utf8');
+    fs.renameSync(temporary, settingsPath);
+    return { ok: true };
   } catch (error) {
+    try { fs.rmSync(temporary, { force: true }); } catch { /* keep the original settings */ }
     log(`save settings: ${error.message}`);
+    return { ok: false, error: `保存失败：${error.message}` };
   }
 }
 
@@ -1655,7 +1660,7 @@ ipcMain.handle('settings:save', (_event, input) => {
     const hotkeyChanged = nextHotkey !== settings.hotkey
       || nextHotkeyOn !== (settings.hotkeyOn !== false);
 
-    settings = {
+    const nextSettings = {
       ...settings,
       topmost: Boolean(data.topmost),
       maskAccounts: Boolean(data.maskAccounts),
@@ -1684,8 +1689,15 @@ ipcMain.handle('settings:save', (_event, input) => {
       hotkey: nextHotkey,
       hotkeyOn: nextHotkeyOn,
     };
+    if (win && !win.isDestroyed()) {
+      const bounds = win.getBounds();
+      nextSettings.left = bounds.x;
+      nextSettings.top = bounds.y;
+    }
+    const saved = saveSettings(nextSettings);
+    if (!saved.ok) return saved;
+    settings = nextSettings;
     if (hotkeyChanged) registerHotkey();
-    saveSettings();
     applyTopmost();
     if (win && !win.isDestroyed()) {
       win.setOpacity(settings.opacity);
@@ -1719,7 +1731,6 @@ ipcMain.handle('settings:save', (_event, input) => {
       clearInterval(quietTimer);
       quietTimer = null;
     }
-    saveSettings();
     refreshTrayMenu();
     let raw = '';
     try {
