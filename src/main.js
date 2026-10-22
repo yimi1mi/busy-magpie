@@ -8,6 +8,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { autoUpdater } = require('electron-updater');
+const { heartbeat } = require('./launch-policy.cjs');
 
 app.setName('Busy Magpie');
 
@@ -87,6 +88,7 @@ let hoverTimer = null;
 let quitting = false;
 let positionTimer = null;
 let aliveTimer = null;
+let pauseTimer = null;
 let frame = { lanes: 1, cardHeight: 400, windowHeight: 432 };
 
 function log(message) {
@@ -99,14 +101,16 @@ function log(message) {
 
 // The plugin reads this to tell a hidden card from a quit one, and to know
 // whether the user wants it started again.
-function touchAlive() {
+function touchAlive(stopped = false) {
   try {
     fs.writeFileSync(
       path.join(app.getPath('userData'), 'alive'),
-      JSON.stringify({ at: Date.now(), keepAlive: settings.keepAlive !== false }),
+      JSON.stringify(heartbeat(settings, Date.now(), stopped)),
     );
+    return true;
   } catch {
     // A heartbeat is best effort; it never stops the widget.
+    return false;
   }
 }
 function defaults() {
@@ -130,6 +134,7 @@ function defaults() {
     showTiming: true,
     hubEffect: 'ripple',
     keepAlive: true,
+    pauseUntil: 0,
     hotkey: 'Control+Alt+M',
     hotkeyOn: true,
     autostart: false,
@@ -364,6 +369,7 @@ function createWindow() {
   win.loadFile(RENDERER);
 
   win.once('ready-to-show', () => {
+    if (Number(settings.pauseUntil) > Date.now()) return;
     win.showInactive();
     applyClickThrough();
     applyTopmost();
@@ -744,9 +750,36 @@ function applyClickThrough() {
 
 function showWindow() {
   if (!win || win.isDestroyed()) return;
+  if (settings.pauseUntil) {
+    settings.pauseUntil = 0;
+    clearTimeout(pauseTimer);
+    saveSettings();
+    touchAlive();
+  }
   if (!win.isVisible()) win.showInactive();
   applyClickThrough();
   applyTopmost();
+  refreshTrayMenu();
+}
+
+function schedulePauseResume() {
+  clearTimeout(pauseTimer);
+  const remaining = Number(settings.pauseUntil) - Date.now();
+  if (remaining <= 0) return;
+  pauseTimer = setTimeout(() => showWindow(), Math.min(remaining, 2_147_483_647));
+}
+
+function pauseDisplay() {
+  const next = { ...settings, pauseUntil: Date.now() + 60 * 60 * 1000 };
+  const saved = saveSettings(next);
+  if (!saved.ok) {
+    send('magpie:action-error', saved.error);
+    return;
+  }
+  settings = next;
+  touchAlive();
+  win.hide();
+  schedulePauseResume();
   refreshTrayMenu();
 }
 
@@ -1437,7 +1470,8 @@ function buildTrayMenu() {
 
   return Menu.buildFromTemplate([
     {
-      label: visible ? '隐藏桌面插件' : `显示桌面插件（${displayHotkey()}）`,
+      label: visible ? '隐藏桌面插件' : settings.pauseUntil > Date.now()
+        ? '立即恢复显示（暂停中）' : `显示桌面插件（${displayHotkey()}）`,
       click: toggleVisible,
     },
     // The other one-click way in: a release the app already found installs
@@ -1530,7 +1564,11 @@ function buildTrayMenu() {
     },
     { type: 'separator' },
     {
-      label: '退出',
+      label: '暂停显示 1 小时（自动恢复）',
+      click: pauseDisplay,
+    },
+    {
+      label: '退出并停止自动拉起',
       click: quit,
     },
   ]);
@@ -1595,7 +1633,9 @@ function setOpacity(value) {
 }
 
 function quit() {
+  if (!touchAlive(true)) log('quit: could not persist the manual stop marker');
   quitting = true;
+  clearTimeout(pauseTimer);
   clearTimeout(layoutTimer);
   clearInterval(hoverTimer);
   clearInterval(usageTimer);
@@ -1828,6 +1868,8 @@ ipcMain.on('busy:menu-action', (_event, action) => {
     case 'models': openSettingsPanel('models'); break;
     case 'layout': beginLayout(); break;
     case 'hide': win.hide(); break;
+    case 'pause': pauseDisplay(); break;
+    case 'quit': quit(); break;
     case 'about':
       openAbout();
       checkForUpdates(true);
@@ -1878,6 +1920,7 @@ function init() {
     // A version marker is an optimization, never a reason not to start.
   }
   settings = loadSettings();
+  if (!PLUGIN_VERSION || settings.pauseUntil <= Date.now()) settings.pauseUntil = 0;
   // A marker left by an install that did not finish would keep the launcher
   // from starting the card; this process running means it is over.
   clearUpdatingMarker();
@@ -1891,6 +1934,7 @@ function init() {
   registerHotkey();
   applyAutostart();
   touchAlive();
+  schedulePauseResume();
   aliveTimer = setInterval(touchAlive, 10000);
   watchHover();
   rebuildClient();

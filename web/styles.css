@@ -803,7 +803,10 @@ body.layout .token-pill {
   top: 52px;
   right: 20px;
   z-index: 11;
-  width: 166px;
+  width: 186px;
+  max-height: calc(100% - 64px);
+  overflow: auto;
+  scrollbar-width: thin;
   padding: 5px;
   border: 1px solid rgba(161, 139, 255, 0.2);
   border-radius: 11px;
@@ -841,6 +844,9 @@ body.layout .token-pill {
   border: 0;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
+
+.quick-menu-error { margin: 8px; color: var(--bad); font-size: 10px; }
+.quick-menu-error[hidden] { display: none; }
 
 body.menu-open .stage-canvas {
   pointer-events: auto;

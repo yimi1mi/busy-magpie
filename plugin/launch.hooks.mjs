@@ -10,6 +10,7 @@ import { existsSync, promises as fsp, readFileSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import launchPolicy from '../src/launch-policy.cjs';
 
 const RELEASE = 'https://github.com/yimi1mi/busy-magpie/releases/latest';
 const API = 'https://api.github.com/repos/yimi1mi/busy-magpie/releases/latest';
@@ -215,15 +216,13 @@ function appState() {
   const file = heartbeatPath();
   try {
     const stat = statSync(file);
-    let keepAlive = true;
+    let beat = null;
     try {
-      const beat = JSON.parse(readFileSync(file, 'utf8'));
-      if (beat && beat.keepAlive === false) keepAlive = false;
+      beat = JSON.parse(readFileSync(file, 'utf8'));
     } catch {
       // An older heartbeat is a bare timestamp: keep-alive was always on.
     }
-    if (!keepAlive) return 'off';
-    return Date.now() - stat.mtimeMs < ALIVE_MS ? 'alive' : 'dead';
+    return launchPolicy.heartbeatState(beat, stat.mtimeMs, Date.now(), ALIVE_MS);
   } catch (error) {
     return error?.code === 'ENOENT' ? 'unknown' : 'dead';
   }

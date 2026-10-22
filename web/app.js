@@ -515,8 +515,13 @@ function setupQuickMenu() {
     menu.hidden = !open;
     button.setAttribute('aria-expanded', String(open));
     document.body.classList.toggle('menu-open', open);
+    $('quickMenuError').hidden = true;
     if (open) items[0].focus({ preventScroll: true });
     else if (menu.contains(document.activeElement)) button.focus({ preventScroll: true });
+  });
+  window.busy.onActionError((error) => {
+    $('quickMenuError').textContent = error;
+    $('quickMenuError').hidden = false;
   });
   new ResizeObserver(() => requestAnimationFrame(reportHitAreas)).observe(button.parentElement);
 }

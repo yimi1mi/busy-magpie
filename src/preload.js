@@ -78,6 +78,9 @@ contextBridge.exposeInMainWorld('busy', {
   onQuickMenu: (callback) => {
     ipcRenderer.on('magpie:quick-menu', (_event, open) => callback(open));
   },
+  onActionError: (callback) => {
+    ipcRenderer.on('magpie:action-error', (_event, error) => callback(error));
+  },
   onFirstRun: (callback) => {
     ipcRenderer.on('magpie:first-run', (_event, data) => callback(data));
   },
