@@ -422,7 +422,7 @@ body.native-material .aurora { opacity: 0.12; }
 body.native-material .stage-area { position: absolute; inset: 16px; }
 body.native-material .compact-view { position: absolute; inset: 16px; width: auto; height: auto; }
 body.native-material { --muted: #dfdde8; --faint: #c7c3d2; }
-body.native-material .content { background: rgb(8 11 19 / 0.36); border-radius: 18px; }
+body.native-material .content { background: rgb(8 11 19 / var(--content-alpha, 0)); border-radius: 18px; }
 body.native-material .node { background-color: rgb(12 16 25 / 0.32); }
 
 .stage-canvas {

@@ -203,6 +203,11 @@ function normalizeUpdateMode(value) {
   const mode = String(value || '').toLowerCase();
   return UPDATE_MODES.includes(mode) ? mode : 'idle';
 }
+
+function normalizeOpacity(value) {
+  const opacity = Number(value ?? 1);
+  return Number.isFinite(opacity) ? Math.min(1, Math.max(0, opacity)) : 1;
+}
 // A stored size is snapped back to the card's shape, within the allowed
 // range, so a window saved before the shape was enforced still fits.
 function normalizeSize(width) {
@@ -229,7 +234,7 @@ function loadSettings() {
     return {
       ...defaults(),
       ...parsed,
-      opacity: Math.min(1, Math.max(0.4, Number(parsed.opacity) || 1)),
+      opacity: normalizeOpacity(parsed.opacity),
       width: size.width,
       height: size.height,
       usagePeriod: enabledPeriods.includes(usagePeriod) ? usagePeriod : enabledPeriods[0],
@@ -1636,8 +1641,8 @@ function refreshTrayMenu() {
 
 function buildTrayMenu() {
   const visible = Boolean(win && win.isVisible());
-  const opacityItems = [100, 92, 84, 75].map((percent) => ({
-    label: `${percent}%`,
+  const opacityItems = [0, 25, 50, 75, 100].map((percent) => ({
+    label: percent === 0 ? '0%（最透明）' : percent === 100 ? '100%（最不透明）' : `${percent}%`,
     type: 'radio',
     checked: Math.abs(settings.opacity - percent / 100) < 0.01,
     click: () => setOpacity(percent / 100),
@@ -1706,7 +1711,7 @@ function buildTrayMenu() {
       },
     },
     {
-      label: '背景浓度',
+      label: '背景不透明度',
       submenu: opacityItems,
     },
     { type: 'separator' },
@@ -1804,7 +1809,7 @@ function createTray() {
 }
 
 function setOpacity(value) {
-  const next = { ...settings, opacity: Math.min(1, Math.max(0.4, value)) };
+  const next = { ...settings, opacity: normalizeOpacity(value) };
   const saved = saveSettings(next);
   if (!saved.ok) { send('magpie:action-error', saved.error); return; }
   settings = next;
@@ -1922,7 +1927,7 @@ ipcMain.handle('settings:save', (_event, input) => {
       ...settings,
       topmost: Boolean(data.topmost),
       maskAccounts: Boolean(data.maskAccounts),
-      opacity: Math.min(1, Math.max(0.4, Number(data.opacity) || 1)),
+      opacity: normalizeOpacity(data.opacity),
       gateway: nextGateway,
       width,
       height,
@@ -2030,7 +2035,7 @@ ipcMain.handle('window:reset', () => resetPlacement());
 // While the slider is dragged the window follows it at once; nothing is
 // written until Save, and closing the panel puts the stored value back.
 ipcMain.on('settings:opacity', (_event, value) => {
-  send('magpie:surface-opacity', Math.min(1, Math.max(0.4, Number(value) || 1)));
+  send('magpie:surface-opacity', normalizeOpacity(value));
 });
 
 ipcMain.on('busy:ready', () => {

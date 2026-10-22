@@ -51,6 +51,7 @@ function mainHarness({ writeError = false, hotkeyTaken = false, preview = false 
   vm.runInContext(source + `\nsettings=defaults();settingsPath='/test/settings.json';logPath='/test/log';
     globalThis.testApi={
       settings:()=>settings,
+      reloadSettings:()=>{settings=loadSettings();return settings;},
       save:input=>ipcMain,
       usage:()=>refreshUsage(),
       usageData:()=>usageData,

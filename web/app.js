@@ -805,9 +805,8 @@ function setupSettingsPanel() {
   let open = false;
   let busy = false;
   let closeTimer = 0;
-  // The opacity on disk, so a drag the user cancels can be put back.
-  let savedOpacity = 1;
-  let previewingOpacity = false;
+  let loadGeneration = 0;
+  let opacityEdited = false;
   let gatewayReport = '';
   let recordingHotkey = false;
   let recordedHotkey = false;
@@ -822,12 +821,14 @@ function setupSettingsPanel() {
       const key = chip.dataset.period || chip.dataset.metric
         || chip.dataset.update || chip.dataset.effect;
       chip.setAttribute('aria-pressed', active.has(key) ? 'true' : 'false');
+    const generation = loadGeneration;
     }
   };
 
   const selectPage = (tab) => {
     if (recordingHotkey) window.busy.captureHotkey(false);
     for (const item of tabs) {
+      if (!open || generation !== loadGeneration) return;
       const selected = item === tab;
       item.setAttribute('aria-selected', String(selected));
       item.tabIndex = selected ? 0 : -1;
@@ -848,6 +849,8 @@ function setupSettingsPanel() {
       tabs[index].focus();
       selectPage(tabs[index]);
     });
+    loadGeneration++;
+    opacityEdited = false;
   }
 
   for (const chip of periodChips) {
@@ -887,7 +890,7 @@ function setupSettingsPanel() {
     });
   }
 
-  const fill = (data) => {
+  const fill = (data, preserveOpacity = false) => {
     const s = data.settings || {};
     topmost.checked = Boolean(s.topmost);
     mask.checked = Boolean(s.maskAccounts);
@@ -906,10 +909,13 @@ function setupSettingsPanel() {
     $('settingsHotkeyOn').checked = s.hotkeyOn !== false;
     $('settingsHotkey').value = s.hotkey || 'Control+Alt+M';
     $('hotkeyStatus').textContent = s.hotkeyOn === false ? '快捷键已关闭' : data.hotkey?.ok ? '快捷键已注册' : '快捷键尚未注册成功，可重新录入或关闭';
-    opacity.value = String(Math.round((Number(s.opacity) || 1) * 100));
-    opacityOut.textContent = `${opacity.value}%`;
-    savedOpacity = Math.min(1, Math.max(0.4, Number(s.opacity) || 1));
-    previewingOpacity = false;
+    if (!preserveOpacity || !opacityEdited) {
+      const storedOpacity = Number(s.opacity ?? 1);
+      const value = Number.isFinite(storedOpacity) ? Math.min(1, Math.max(0, storedOpacity)) : 1;
+      opacity.value = String(Math.round(value * 100));
+      opacityOut.textContent = `${opacity.value}%`;
+      opacityEdited = false;
+    }
     gateway.value = s.gateway || '';
     gateway.placeholder = '留空自动检测';
     gatewayHint.textContent = data.gatewayError || `当前 ${data.resolvedGateway || '—'} · ${data.gatewaySource || '自动检测'}`;
@@ -923,7 +929,9 @@ function setupSettingsPanel() {
 
   const load = async () => {
     try {
-      fill(await window.busy.settingsGet());
+      const data = await window.busy.settingsGet();
+      if (!open || generation !== loadGeneration) return;
+      fill(data, true);
       setStatus('');
     } catch (error) {
       setStatus(error?.message || '读取设置失败', true);
@@ -933,9 +941,8 @@ function setupSettingsPanel() {
   const close = () => {
     if (!open) return;
     open = false;
-    // A drag that was never saved goes back to what is on disk.
-    if (previewingOpacity) window.busy.previewOpacity?.(savedOpacity);
-    previewingOpacity = false;
+    loadGeneration++;
+    applySurface(settings.opacity);
     document.body.classList.add('settings-closing');
     closeTimer = window.setTimeout(() => {
       pane.hidden = true;
@@ -973,7 +980,7 @@ function setupSettingsPanel() {
   };
 
   opacity.addEventListener('input', () => {
-    previewingOpacity = true;
+    opacityEdited = true;
     opacityOut.textContent = `${opacity.value}%`;
     window.busy.previewOpacity?.(Number(opacity.value) / 100);
   });
@@ -2451,12 +2458,14 @@ function setLayout(on) {
 
 function applySurface(value = settings.opacity) {
   const native = settings.backgroundMaterial && settings.backgroundMaterial !== 'none';
-  const density = (Math.min(1, Math.max(0.4, Number(value) || 1)) - 0.4) / 0.6;
+  const opacity = value !== null && value !== '' && Number.isFinite(Number(value))
+    ? Math.min(1, Math.max(0, Number(value))) : 1;
   document.body.classList.toggle('native-material', Boolean(native));
   const style = document.documentElement.style;
-  style.setProperty('--surface-alpha', String(native ? 0.22 + density * 0.4 : 0.75 + density * 0.22));
-  style.setProperty('--surface-glow', String(native ? 0.04 + density * 0.06 : 0.28));
-  style.setProperty('--panel-alpha', String(native ? 0.60 + density * 0.12 : 0.12));
+  style.setProperty('--surface-alpha', String(opacity));
+  style.setProperty('--content-alpha', String(opacity * 0.24));
+  style.setProperty('--surface-glow', String(opacity * 0.1));
+  style.setProperty('--panel-alpha', '0.86');
   style.setProperty('--popup-alpha', '0.94');
 }
 
