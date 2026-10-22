@@ -860,14 +860,14 @@ body.layout .token-pill {
 .quick-menu button {
   display: block;
   width: 100%;
-  padding: 9px 12px;
+  padding: 6px 12px;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--ink);
   font: inherit;
   font-size: 12px;
-  line-height: 1.4;
+  line-height: 16px;
   text-align: left;
   cursor: pointer;
 }
