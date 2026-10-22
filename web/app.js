@@ -274,10 +274,11 @@ function renderModelUsage() {
   if (highlighted.length && remainder > 0) summary.push(`其余用量 ${(remainder / view.total * 100).toFixed(1)}%`);
   el.tokenPill.title = tokenBaseTitle + (summary.length
     ? `\n\n模型占比 · ${PILL_METRICS[pillMetric()].label}\n${summary.join('\n')}\n完整明细：··· → 模型用量` : '');
-  const pages = Math.max(1, Math.ceil(rows.length / 8));
+  const pageSize = 5;
+  const pages = Math.max(1, Math.ceil(rows.length / pageSize));
   modelPage = Math.min(modelPage, pages - 1);
-  const page = rows.slice(modelPage * 8, modelPage * 8 + 8);
-  paintModelTracks($('modelTracks'), page, 300, 116, 5);
+  const page = rows.slice(modelPage * pageSize, (modelPage + 1) * pageSize);
+  paintModelTracks($('modelTracks'), page, 300, 104, 5);
   $('modelsTotal').textContent = formatTokens(view.total);
   $('modelsPeriod').textContent = `${PERIOD_SHORT[activePeriod()]} · ${PILL_METRICS[pillMetric()].label}`;
   $('modelsPage').textContent = `${modelPage + 1} / ${pages}`;
@@ -900,6 +901,7 @@ function setupSettingsPanel() {
     gateway.value = s.gateway || '';
     gateway.placeholder = '留空自动检测';
     gatewayHint.textContent = data.gatewayError || `当前 ${data.resolvedGateway || '—'} · ${data.gatewaySource || '自动检测'}`;
+    gatewayHint.title = gatewayHint.textContent;
     gatewayReport = `Busy Magpie v${data.version}\n网关：${data.resolvedGateway || '未解析'}\n来源：${data.gatewaySource || '自动检测'}\n路由：${connection.online ? '可读取' : connection.detail}\n用量：${usageStatus.error || (usageData ? '可读取' : '尚未读取')}`;
     $('gatewayResult').textContent = '';
     if (pathText) pathText.textContent = data.path || '';

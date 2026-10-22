@@ -530,8 +530,8 @@ body.compact .stage-area, body.compact .resize-handle { display: none; }
 .panel-head b { display: block; font-size: 14px; }
 .panel-head small { color: var(--faint); font-size: 9px; }
 .panel-note { margin: 8px 0; color: var(--muted); font-size: 9px; }
-.model-chart { position: relative; height: 116px; flex: none; }
-.model-chart > svg { display: block; width: 300px; max-width: 100%; height: 116px; margin: auto; }
+.model-chart { position: relative; height: 104px; flex: none; }
+.model-chart > svg { display: block; width: 300px; max-width: 100%; height: 104px; margin: auto; }
 .model-chart-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
 .model-chart-center b { font-size: 18px; color: var(--ink); }
 .model-chart-center span { font-size: 9px; color: var(--muted); }
@@ -889,7 +889,7 @@ body.layout .token-pill {
 .gateway-actions { display: flex; gap: 8px; padding-top: 8px; }
 .gateway-actions button { border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 5px 9px; background: rgba(255,255,255,0.04); color: var(--ink); font: inherit; font-size: 10px; cursor: pointer; }
 .gateway-actions button:disabled { opacity: 0.45; cursor: default; }
-.gateway-result { margin: 7px 0 0; color: var(--muted); font-size: 9px; line-height: 1.5; white-space: pre-line; overflow-wrap: anywhere; }
+.gateway-result { margin: 4px 0 0; color: var(--muted); font-size: 9px; line-height: 1.5; white-space: pre-line; overflow-wrap: anywhere; }
 .gateway-result.error { color: var(--warn); }
 .hotkey-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
 .hotkey-row input { flex: 1; min-width: 0; }
@@ -2426,7 +2426,7 @@ body.settings-open .content {
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
-  padding: 9px 14px 8px;
+  padding: 18px 20px 16px;
   overflow: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
@@ -2649,6 +2649,9 @@ body.settings-open .content {
   color: var(--faint);
   font-size: 9px;
 }
+
+.settings-row > span { min-width: 0; }
+#settingsGatewayHint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .settings-row .settings-input {
   flex: none;
