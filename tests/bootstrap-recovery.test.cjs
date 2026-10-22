@@ -82,7 +82,7 @@ function context(t, {acceptPrevious = true} = {}) {
     writeJson(path.join(root, 'handoff-' + token + '.json'), {token, pid: markerPid, ready: markerReady, at: Date.now()});
   }
 
-  function run({args = [], singleInstance = true} = {}) {
+  function run({args = [], singleInstance = true, windows = [], onBusinessLoad, onRelease} = {}) {
     const loads = [];
     const exits = [];
     const lifecycle = [];
@@ -97,29 +97,34 @@ function context(t, {acceptPrevious = true} = {}) {
       getVersion() { return '1.4.0'; },
       getAppPath() { return repository; },
       requestSingleInstanceLock() { return singleInstance; },
+      releaseSingleInstanceLock() { onRelease?.(); lifecycle.push(['release-lock']); },
       quit() { lifecycle.push(['quit']); },
       exit(code) { exits.push(code); },
     });
+    const simulatedProcess = Object.assign(new EventEmitter(), {
+      argv: [process.execPath, ...args], env: {}, pid: process.pid, execPath: process.execPath, platform: process.platform,
+    });
     const sandbox = {
-      process: {argv: [process.execPath, ...args], env: {}, pid: process.pid, execPath: process.execPath, platform: process.platform},
+      process: simulatedProcess,
       console, Buffer, clearInterval,
       setInterval() { throw new Error('Health polling starts only after renderer readiness'); },
     };
     sandbox.global = sandbox;
     const localRequire = id => {
-      if (id === 'electron') return {app, ipcMain, BrowserWindow: {fromWebContents() { return null; }}};
+      if (id === 'electron') return {app, ipcMain, BrowserWindow: {fromWebContents() { return null; }, getAllWindows() { return windows; }}};
       if (id === 'electron-updater') return {autoUpdater: hostUpdater};
       if (id === './trusted-keys.json') return trustedKeys;
       if (path.isAbsolute(id) && id.endsWith(path.join('src', 'main.js'))) {
         loads.push({path: id, settings: fs.existsSync(settings) ? fs.readFileSync(settings, 'utf8') : null,
           version: sandbox.__busyShell.businessVersion});
+        onBusinessLoad?.({app, process: simulatedProcess, lifecycle});
         return {};
       }
       return bootstrapRequire(id);
     };
     const module = {exports: {}};
     vm.runInNewContext(wrap(bootstrapSource), sandbox, {filename: bootstrapPath})(module.exports, localRequire, module, bootstrapPath, path.dirname(bootstrapPath));
-    return {loads, exits, lifecycle, shell: sandbox.__busyShell};
+    return {loads, exits, lifecycle, shell: sandbox.__busyShell, app, process: simulatedProcess};
   }
 
   return {base, userData, root, settings, builtin, store, journal, previous, candidate, prepare, worker, run};
@@ -168,6 +173,81 @@ test('an interrupted first business update restores settings before returning to
   assert.equal(c.journal.read().current, null);
   assert.equal(c.journal.read().pending, null);
   assert.equal(fs.readFileSync(path.join(transaction.directory, 'failed-settings.json'), 'utf8'), candidateSettings);
+});
+
+test('a valid quiescent candidate can be recovered while its native process ID is still alive', t => {
+  const c = context(t);
+  const transaction = c.prepare({booting: false});
+  c.journal.select(transaction.token);
+  assert.equal(c.journal.read().pending.bootPid, process.pid);
+  assert.equal(alive(process.pid), true);
+  fs.writeFileSync(c.settings, candidateSettings);
+  writeJson(path.join(c.root, 'shutdown-' + transaction.token + '-' + process.pid + '.json'), {
+    token: transaction.token, pid: process.pid, phase: 'quiescent', at: Date.now(),
+  });
+  const result = c.run();
+  assert.deepEqual(result.exits, []);
+  assert.deepEqual(result.loads, [{path: path.join(c.store.verify(c.previous).root, 'src/main.js'), settings: originalSettings, version: '1.4.1'}]);
+  assert.equal(c.journal.read().pending, null);
+  assert.deepEqual(c.journal.read().current, c.previous);
+  assert.equal(c.journal.read().failures.at(-1).reason, 'interrupted-candidate-boot');
+  assert.equal(fs.readFileSync(path.join(transaction.directory, 'failed-settings.json'), 'utf8'), candidateSettings);
+  assert.equal(alive(process.pid), true, 'Recovery must not terminate a process merely because its native cleanup is still running');
+});
+
+test('a live candidate without a shutdown marker cannot have its settings restored by another bootstrap', t => {
+  const c = context(t);
+  const transaction = c.prepare({booting: false});
+  c.journal.select(transaction.token);
+  fs.writeFileSync(c.settings, candidateSettings);
+  const before = fs.readFileSync(path.join(c.root, 'journal.json'));
+  const result = c.run();
+  assert.deepEqual(result.exits, [1]);
+  assert.deepEqual(result.loads, []);
+  assert.equal(fs.readFileSync(c.settings, 'utf8'), candidateSettings);
+  assert.deepEqual(fs.readFileSync(path.join(c.root, 'journal.json')), before);
+  assert.equal(fs.existsSync(path.join(transaction.directory, 'failed-settings.json')), false);
+});
+
+test('stale or mismatched shutdown markers cannot declare a live candidate quiescent', t => {
+  for (const invalid of ['token', 'pid', 'phase', 'stale', 'future']) {
+    const c = context(t);
+    const transaction = c.prepare({booting: false});
+    c.journal.select(transaction.token);
+    fs.writeFileSync(c.settings, candidateSettings);
+    const marker = {token: transaction.token, pid: process.pid, phase: 'quiescent', at: Date.now()};
+    if (invalid === 'token') marker.token = 'e'.repeat(48);
+    if (invalid === 'pid') marker.pid = deadPid;
+    if (invalid === 'phase') marker.phase = 'windows-closed';
+    if (invalid === 'stale') marker.at = c.journal.read().pending.bootStartedAt - 1;
+    if (invalid === 'future') marker.at = Date.now() + 60000;
+    writeJson(path.join(c.root, 'shutdown-' + transaction.token + '-' + process.pid + '.json'), marker);
+    const before = fs.readFileSync(path.join(c.root, 'journal.json'));
+    const result = c.run();
+    assert.deepEqual(result.exits, [1], invalid);
+    assert.deepEqual(result.loads, [], invalid);
+    assert.equal(fs.readFileSync(c.settings, 'utf8'), candidateSettings, invalid);
+    assert.deepEqual(fs.readFileSync(path.join(c.root, 'journal.json')), before, invalid);
+    assert.equal(fs.existsSync(path.join(transaction.directory, 'failed-settings.json')), false, invalid);
+  }
+});
+
+test('a live supervisor still owns recovery even when its candidate has already reported quiescence', t => {
+  const c = context(t);
+  const transaction = c.prepare({booting: false});
+  c.journal.select(transaction.token);
+  c.worker(transaction.token);
+  fs.writeFileSync(c.settings, candidateSettings);
+  writeJson(path.join(c.root, 'shutdown-' + transaction.token + '-' + process.pid + '.json'), {
+    token: transaction.token, pid: process.pid, phase: 'quiescent', at: Date.now(),
+  });
+  const before = fs.readFileSync(path.join(c.root, 'journal.json'));
+  const result = c.run();
+  assert.deepEqual(result.exits, [0]);
+  assert.deepEqual(result.loads, []);
+  assert.equal(fs.readFileSync(c.settings, 'utf8'), candidateSettings);
+  assert.deepEqual(fs.readFileSync(path.join(c.root, 'journal.json')), before);
+  assert.equal(fs.existsSync(path.join(transaction.directory, 'failed-settings.json')), false);
 });
 
 test('a live supervisor defers an ordinary duplicate startup without recovering or loading anything', t => {
@@ -328,4 +408,103 @@ test('an already-owned application instance exits before touching the update jou
   assert.deepEqual(result.loads, []);
   assert.deepEqual(fs.readFileSync(path.join(c.root, 'journal.json')), before);
   assert.equal(fs.readFileSync(c.settings, 'utf8'), candidateSettings);
+});
+
+test('before-quit never reports quiescence even after the Node exit event', t => {
+  const c = context(t);
+  const transaction = c.prepare({booting: false});
+  const result = c.run({args: ['--business-update-token=' + transaction.token]});
+  const marker = path.join(c.root, 'shutdown-' + transaction.token + '-' + process.pid + '.json');
+  result.app.emit('before-quit');
+  result.process.emit('exit', 0);
+  result.app.emit('before-quit');
+  assert.equal(fs.existsSync(marker), false);
+  assert.equal(result.lifecycle.some(event => event[0] === 'release-lock'), false);
+});
+
+test('app quit cannot release the lock or write a marker before Node has exited', t => {
+  const c = context(t);
+  const transaction = c.prepare({booting: false});
+  const result = c.run({args: ['--business-update-token=' + transaction.token]});
+  const marker = path.join(c.root, 'shutdown-' + transaction.token + '-' + process.pid + '.json');
+  result.app.emit('quit');
+  assert.equal(fs.existsSync(marker), false);
+  assert.equal(result.lifecycle.some(event => event[0] === 'release-lock'), false);
+  result.process.emit('exit', 0);
+  assert.equal(fs.existsSync(marker), false, 'The Node exit signal alone cannot substitute for the app quit event');
+});
+
+test('remaining BrowserWindows prevent a quiescent marker even after Node exit and app quit', t => {
+  const c = context(t);
+  const transaction = c.prepare({booting: false});
+  const result = c.run({args: ['--business-update-token=' + transaction.token], windows: [{}]});
+  result.process.emit('exit', 0);
+  result.app.emit('quit');
+  assert.equal(fs.existsSync(path.join(c.root, 'shutdown-' + transaction.token + '-' + process.pid + '.json')), false);
+  assert.equal(result.lifecycle.some(event => event[0] === 'release-lock'), false);
+});
+
+test('a token-bound closed application releases its lock before atomically reporting quiescence', t => {
+  const c = context(t);
+  const transaction = c.prepare({booting: false});
+  const marker = path.join(c.root, 'shutdown-' + transaction.token + '-' + process.pid + '.json');
+  const result = c.run({
+    args: ['--business-update-token=' + transaction.token],
+    onRelease() { assert.equal(fs.existsSync(marker), false, 'The marker must not precede releasing the old instance lock'); },
+    onBusinessLoad({app, lifecycle}) {
+      app.on('quit', () => {
+        assert.equal(fs.existsSync(marker), false, 'The shell registers its quit callback after business callbacks');
+        lifecycle.push(['business-quit']);
+      });
+    },
+  });
+  const before = fs.readFileSync(path.join(c.root, 'journal.json'));
+  const earliest = Date.now();
+  result.process.emit('exit', 0);
+  result.app.emit('quit');
+  const reported = JSON.parse(fs.readFileSync(marker, 'utf8'));
+  assert.equal(reported.token, transaction.token);
+  assert.equal(reported.pid, process.pid);
+  assert.equal(reported.phase, 'quiescent');
+  assert.ok(Number.isFinite(reported.at) && reported.at >= earliest && reported.at <= Date.now());
+  assert.equal(result.lifecycle.filter(event => event[0] === 'release-lock').length, 1);
+  assert.ok(result.lifecycle.findIndex(event => event[0] === 'business-quit') < result.lifecycle.findIndex(event => event[0] === 'release-lock'));
+  assert.deepEqual(fs.readFileSync(path.join(c.root, 'journal.json')), before);
+  assert.equal(fs.readdirSync(c.root).some(name => name.startsWith('shutdown-') && name.endsWith('.tmp')), false);
+});
+
+test('normal application exit without an update token produces no shutdown marker', t => {
+  const c = context(t);
+  const result = c.run();
+  result.process.emit('exit', 0);
+  result.app.emit('quit');
+  assert.equal(fs.readdirSync(c.root).some(name => name.startsWith('shutdown-')), false);
+  assert.equal(result.lifecycle.some(event => event[0] === 'release-lock'), false);
+});
+
+test('a partially loaded candidate retains the guarded shutdown handshake after startup throws', t => {
+  const c = context(t);
+  const transaction = c.prepare({booting: false});
+  const marker = path.join(c.root, 'shutdown-' + transaction.token + '-' + process.pid + '.json');
+  const result = c.run({args: ['--business-update-token=' + transaction.token], onBusinessLoad() { throw new Error('Candidate startup failed'); }});
+  assert.deepEqual(result.exits, [1]);
+  assert.equal(fs.existsSync(marker), false);
+  result.app.emit('quit');
+  assert.equal(fs.existsSync(marker), false);
+  result.process.emit('exit', 1);
+  result.app.emit('quit');
+  assert.equal(JSON.parse(fs.readFileSync(marker, 'utf8')).phase, 'quiescent');
+  assert.equal(result.lifecycle.filter(event => event[0] === 'release-lock').length, 1);
+  assert.equal(c.journal.read().pending.token, transaction.token);
+});
+
+test('a duplicate that never owned the instance lock cannot publish a shutdown handshake', t => {
+  const c = context(t);
+  const transaction = c.prepare({booting: false});
+  const result = c.run({args: ['--business-update-token=' + transaction.token], singleInstance: false});
+  result.process.emit('exit', 0);
+  result.app.emit('quit');
+  assert.equal(fs.readdirSync(c.root).some(name => name.startsWith('shutdown-')), false);
+  assert.equal(result.lifecycle.some(event => event[0] === 'release-lock'), false);
+  assert.deepEqual(result.loads, []);
 });
