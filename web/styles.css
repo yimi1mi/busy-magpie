@@ -213,6 +213,14 @@ body {
   animation: birdCome 0.3s ease-out;
 }
 
+.flying-bird .flier:not(.carrying) .rt-lift {
+  animation: none;
+}
+
+.flying-bird.failed .packet {
+  stroke: var(--bad);
+}
+
 @keyframes wingFlap {
   0%,
   100% {
