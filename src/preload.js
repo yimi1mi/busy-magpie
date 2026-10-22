@@ -43,7 +43,6 @@ contextBridge.exposeInMainWorld('busy', {
   settingsOpenFile: () => ipcRenderer.send('settings:open-file'),
   settingsClose: () => ipcRenderer.send('settings:close'),
   firstRunDismiss: () => ipcRenderer.send('busy:first-run-dismiss'),
-  openGuide: () => ipcRenderer.send('busy:guide-open'),
   openInstallDir: () => ipcRenderer.send('busy:open-install-dir'),
   aboutOpen: () => ipcRenderer.send('busy:about-open'),
   openGitHub: () => ipcRenderer.send('busy:open-github'),

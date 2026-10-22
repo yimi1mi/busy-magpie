@@ -874,20 +874,6 @@ function resetPlacement() {
   return { ok: true };
 }
 
-function showGuide() {
-  if (!win || win.isDestroyed()) return;
-  if (settingsClosing) {
-    setTimeout(showGuide, 220);
-    return;
-  }
-  setQuickMenuOpen(false);
-  firstRunOpen = true;
-  applyWindowMode();
-  showWindow();
-  send('magpie:first-run', true);
-  win.focus();
-}
-
 function dismissGuide() {
   if (!firstRunOpen) return;
   firstRunOpen = false;
@@ -1653,11 +1639,6 @@ function buildTrayMenu() {
       label: `关于 Busy Magpie…（v${app.getVersion()}）`,
       click: () => openAbout(),
     },
-    { label: '使用指南', click: showGuide },
-    {
-      label: '调整位置…',
-      click: beginLayout,
-    },
     { label: '恢复默认位置和大小', click: resetPlacement },
     {
       label: '重新连接',
@@ -1967,7 +1948,6 @@ ipcMain.on('busy:menu-action', (_event, action) => {
   switch (action) {
     case 'settings': openSettingsPanel(); break;
     case 'compact': toggleCompact(); break;
-    case 'layout': beginLayout(); break;
     case 'hide': win.hide(); break;
     case 'pause': pauseDisplay(); break;
     case 'quit': quit(); break;
@@ -1998,7 +1978,6 @@ ipcMain.on('busy:open-github', () => {
 });
 
 ipcMain.on('busy:first-run-dismiss', dismissGuide);
-ipcMain.on('busy:guide-open', showGuide);
 
 ipcMain.on('busy:open-install-dir', () => {
   shell.openPath(path.dirname(app.getPath('exe')));
