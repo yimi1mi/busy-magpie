@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const Module = require('node:module');
 const root = path.resolve(__dirname, '../..');
 const output = path.join(root, 'artifacts', 'material');
-const profile = path.join(output, 'profile');
+const profile = path.join(output, 'profile-' + process.pid);
 fs.mkdirSync(profile, { recursive: true });
 fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({running:true}));
 app.setPath('userData', profile);
@@ -42,6 +42,7 @@ app.on('browser-window-created', (_event, created) => {
   win.blur = () => win.emit('blur');
   const ignore = win.setIgnoreMouseEvents.bind(win);
   win.setIgnoreMouseEvents = (value, options) => { ignored = value; ignore(value, options); };
+  win.webContents.on('did-fail-load',(_event,code,description)=>errors.push(description));
   win.webContents.on('console-message', (_event, level, message) => { if(level >= 3) errors.push(message); });
 });
 ipcMain.on('busy:hit-areas', (_event, data) => { hitAreas = data; });
@@ -57,14 +58,22 @@ async function openMenu() { cursor={x:-10000,y:-10000}; await click('quickMenuTo
 async function run() {
  try {
   const material=await js('window.busy.bootstrap().then(x=>x.settings.backgroundMaterial)');
-  assert.equal(material,'acrylic');
+  assert.equal(material,'blur');
   assert.equal(await js('document.body.classList.contains("native-material")'),true);
   const bounds=await js('(()=>{const r=document.getElementById("stageArea").getBoundingClientRect();return {w:r.width,h:r.height,x:r.x,y:r.y};})()');
   assert.deepEqual(bounds,{w:600,h:400,x:16,y:16});
+  assert.equal(await js('getComputedStyle(document.querySelector(".card")).borderRadius'),'22px');
   record('native background preserves the content canvas and hit coordinates');
   const stored=JSON.parse(fs.readFileSync(path.join(profile,'settings.json'),'utf8')).opacity||1;
   const before=await js('getComputedStyle(document.documentElement).getPropertyValue("--surface-alpha")');
-  await openMenu();await menuAction('settings');
+  await openMenu();
+  const menuColor=await js('getComputedStyle(document.getElementById("quickMenu")).backgroundColor');
+  assert.ok(Number(menuColor.match(/[\d.]+/g).at(-1))>=0.9,menuColor);
+  record('the menu covers underlying card text while retaining its own clear labels');
+  const iconColor=await js('getComputedStyle(document.querySelector(".agent-icon .brand-mark")).color');
+  assert.equal(iconColor,'rgb(241, 240, 245)');
+  record('monochrome agent artwork keeps its own color instead of taking the route color');
+  await menuAction('settings');
   await js('document.getElementById("settingsOpacity").value="40";document.getElementById("settingsOpacity").dispatchEvent(new Event("input"))');await sleep(100);
   const after=await js('getComputedStyle(document.documentElement).getPropertyValue("--surface-alpha")');
   assert.ok(Number(after)<Number(before));assert.equal(win.getOpacity(),1);
@@ -79,7 +88,8 @@ async function run() {
   for (const mode of ['settings', 'about', 'models', 'history']) {
     win.webContents.send('magpie:settings-panel', {open:true,mode});await sleep(100);
     const panel=await js(`(()=>{const p=document.getElementById('settingsPane'),s=getComputedStyle(p);return {background:s.backgroundColor,content:getComputedStyle(document.querySelector('.content')).visibility,opacity:s.opacity};})()`);
-    assert.ok(Number(panel.background.match(/[\d.]+/g).at(-1))<0.1,JSON.stringify(panel));
+    const alpha=Number(panel.background.match(/[\d.]+/g).at(-1));
+    assert.ok(alpha>=0.6&&alpha<0.8,JSON.stringify(panel));
     assert.equal(panel.content,'hidden');
     fs.writeFileSync(path.join(output,mode+'.png'),(await win.webContents.capturePage()).toPNG());
   }
@@ -102,12 +112,12 @@ server.listen(0,'127.0.0.1',async()=>{
  mainModule.filename=filename;
  mainModule.paths=Module._nodeModulePaths(path.dirname(filename));
  mainModule.require=function(id){
+  if(id==='./windows-blur.cjs') return {attachBlur:()=>({refresh(){materialRefreshes++;}})};
   if(id==='electron') return {...require('electron'),BrowserWindow:class extends BrowserWindow {
-   setBackgroundMaterial() {materialRefreshes++;}
    constructor(options){const {backgroundMaterial,...offscreenOptions}=options;super({...offscreenOptions,transparent:true,roundedCorners:false,hasShadow:false,webPreferences:{...options.webPreferences,offscreen:true}});}
   }};
   return Module.prototype.require.call(this,id);
  };
  mainModule._compile(fs.readFileSync(filename,'utf8'),filename);
 });
-setTimeout(()=>{console.error('UI check timed out');app.exit(2);},30000).unref();
+setTimeout(()=>{fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({ok:false,checks,error:'UI check timed out',rendererErrors:errors,url:win?.webContents.getURL()},null,2));win?.destroy();app.exit(2);},30000).unref();

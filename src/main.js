@@ -13,6 +13,8 @@ const { parseGateway, gatewayProblem } = require('./gateway-config.cjs');
 const { fitWindowBounds } = require('./window-bounds.cjs');
 const { windowMaterial } = require('./window-material.cjs');
 const MATERIAL = windowMaterial(process.platform, os.release());
+let activeMaterial = MATERIAL.kind;
+let windowSurface = null;
 
 const IS_PREVIEW = process.argv.includes('--preview');
 app.setName(IS_PREVIEW ? 'Busy Magpie Preview' : 'Busy Magpie');
@@ -386,6 +388,10 @@ function createWindow() {
     },
   });
   frame = { ...frame, compact, cardHeight: height - 32, windowHeight: height };
+  if (MATERIAL.kind === 'blur') {
+    try { windowSurface = require('./windows-blur.cjs').attachBlur(win); }
+    catch (error) { activeMaterial = 'none'; log(`background blur: ${error.message}`); }
+  }
 
   win.setMenuBarVisibility(false);
   if (IS_MAC) {
@@ -473,10 +479,9 @@ function createWindow() {
 }
 
 function refreshWindowMaterial() {
-  if (MATERIAL.kind !== 'acrylic' || !win || win.isDestroyed() || !win.isVisible()) return;
-  // Electron refreshes the non-client material without activating the window.
-  // Apply after show/blur so this background widget keeps its frosted surface.
-  win.setBackgroundMaterial('acrylic');
+  if (!windowSurface || !win || win.isDestroyed() || !win.isVisible()) return;
+  try { windowSurface.refresh(); }
+  catch (error) { log(`background blur refresh: ${error.message}`); }
 }
 
 function publicSettings() {
@@ -484,7 +489,7 @@ function publicSettings() {
     maskAccounts: settings.maskAccounts,
     topmost: settings.topmost,
     opacity: settings.opacity,
-    backgroundMaterial: MATERIAL.kind,
+    backgroundMaterial: activeMaterial,
     gateway: displayAddress(resolveGateway()),
     keepAlive: settings.keepAlive !== false,
     updateMode: settings.updateMode,
