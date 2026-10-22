@@ -441,8 +441,8 @@ body.native-material .node { background-color: rgb(12 16 25 / 0.32); }
   inset: 0;
   z-index: 1;
   display: grid;
-  grid-template-rows: 30px 10px 156px 8px 44px 10px 1px 10px 1fr;
-  padding: 18px 20px 16px;
+  grid-template-rows: 30px 6px 156px 8px 44px 6px 1px 8px 1fr;
+  padding: 18px 20px 12px;
 }
 
 .topbar { grid-row: 1; }
@@ -1640,6 +1640,7 @@ body.menu-open .stage-canvas {
 .fan .node.account {
   display: flex;
   flex-direction: column;
+  gap: 2px;
   justify-content: center;
   width: 100%;
   height: var(--fan-node-h, 62px);
@@ -1791,6 +1792,16 @@ body.menu-open .stage-canvas {
   display: none;
 }
 
+.fan.tight:not(.crowded) .node.account { padding: 4px 8px; gap: 1px; }
+.fan.tight:not(.crowded) .account-top { height: 14px; }
+.fan.tight:not(.crowded) .account-mid,
+.fan.tight:not(.crowded) .account-state,
+.fan.tight:not(.crowded) .account-token { height: 12px; line-height: 12px; }
+.fan.tight:not(.crowded) .node.account > * { flex-shrink: 0; }
+.fan.crowded:not(.ultra) .node.account { padding: 1.5px 8px; gap: 1px; }
+.fan.crowded:not(.ultra) .account-top { height: 14px; }
+.fan.crowded:not(.ultra) .account-state { height: 12px; line-height: 12px; }
+
 .fan.ultra .node {
   padding: 3px 8px;
   border-radius: 11px;
@@ -1821,8 +1832,10 @@ body.menu-open .stage-canvas {
 }
 
 .fan.ultra .account-top {
-  height: 13px;
+  height: 14px;
 }
+
+.fan.ultra .node.account { padding: 2.5px 8px; gap: 2px; }
 
 .fan.ultra .account-name {
   font-size: 10px;
@@ -1946,7 +1959,7 @@ body.menu-open .stage-canvas {
 }
 
 body.multi .content {
-  grid-template-rows: 30px 10px 156px 8px 44px 10px 1px 10px 1fr;
+  grid-template-rows: 30px 6px 156px 8px 44px 6px 1px 8px 1fr;
 }
 
 body.multi .topbar {
@@ -2115,8 +2128,8 @@ body.multi .caption {
 .story {
   display: flex;
   flex-direction: column;
-  gap: 0;
-  margin: 6px 0 0;
+  gap: 4px;
+  margin: 8px 0 0;
   padding: 0;
   list-style: none;
 }
@@ -2224,7 +2237,7 @@ body.multi .caption {
   align-items: center;
   gap: 7px;
   margin-top: auto;
-  padding-top: 3px;
+  padding-top: 7px;
   color: #504e5b;
   font-size: 8.5px;
   letter-spacing: 0.15px;
