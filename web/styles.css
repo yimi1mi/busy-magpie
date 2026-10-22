@@ -2901,6 +2901,14 @@ body.settings-closing .settings-pane:not([hidden]) {
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
+.first-run-card { max-height: calc(100% - 24px); overflow: auto; }
+.guide-steps { display: grid; gap: 10px; margin: 12px 0; padding: 0; list-style: none; }
+.guide-steps li { display: grid; grid-template-columns: 75px 1fr; gap: 12px; font-size: 11px; line-height: 1.5; }
+.guide-steps b { color: var(--ink); }
+.guide-steps span { color: var(--muted); }
+.guide-uninstall { margin-top: 8px; color: var(--faint); font-size: 10px; }
+.guide-uninstall summary { cursor: pointer; }
+
 .first-run-eyebrow {
   color: var(--accent);
   font-size: 9px;

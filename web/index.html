@@ -217,6 +217,7 @@
                 <b>设置 <em class="settings-version mono" id="settingsVersion">v1.3.10</em></b>
               </div>
               <div class="settings-head-actions">
+                <button type="button" class="settings-link" id="settingsHelp">使用指南</button>
                 <button type="button" class="settings-link" id="settingsOpenFile">打开文件夹</button>
                 <button class="settings-x" id="settingsClose" type="button" aria-label="关闭设置">×</button>
               </div>
@@ -405,17 +406,21 @@
       <div class="resize-handle resize-se" data-resize="se"></div>
 
 
-      <div class="first-run-mask" id="firstRunMask" hidden>
+      <div class="first-run-mask" id="firstRunMask" role="dialog" aria-modal="true" aria-labelledby="firstRunTitle" hidden>
         <section class="first-run-card">
-          <span class="first-run-eyebrow">首次安装</span>
-          <h2>Busy Magpie 已安装</h2>
-          <p>这个应用由 magpie 插件自动安装。</p>
-          <p>由于 magpie 插件没有卸载回调，<b>删除插件不会删除 Busy Magpie 的可执行文件和安装目录</b>。如果不再使用，请手动卸载。</p>
-          <code>%LOCALAPPDATA%\Programs\Busy Magpie\Uninstall Busy Magpie.exe</code>
-          <p class="first-run-note">也可以在 Windows「设置 → 应用」里卸载 Busy Magpie。</p>
+          <span class="first-run-eyebrow" id="guideVersion">使用指南 · v1.3.10</span>
+          <h2 id="firstRunTitle">把实时路由放在桌面上</h2>
+          <ul class="guide-steps">
+            <li><b>移动和缩放</b><span>按住顶部小圆点约 0.15 秒拖动，拖边框调整大小。</span></li>
+            <li><b>找到功能</b><span>右上角 ··· 可查看最近请求、模型用量、设置和紧凑模式。</span></li>
+            <li><b>读懂用量</b><span>单击 token 切换时间窗；跑道弧长表示各模型用量占比。</span></li>
+            <li><b>召回挂件</b><span id="guideHotkey">点击托盘图标，或按 Ctrl+Alt+M 显示 / 隐藏。</span></li>
+          </ul>
+          <p class="first-run-note">普通内容区域点击穿透；菜单和面板展开时临时接收操作。</p>
+          <details class="guide-uninstall"><summary>卸载说明</summary><p>删除 magpie 插件不会删除桌面应用。停止使用时，还需通过系统应用管理或安装目录中的卸载程序移除 Busy Magpie。</p></details>
           <div class="first-run-actions">
-            <button type="button" class="first-run-ghost" id="firstRunOpenDir">打开安装目录</button>
-            <button type="button" class="first-run-primary" id="firstRunDismiss">我知道了</button>
+            <button type="button" class="first-run-ghost" id="firstRunOpenDir">打开程序目录</button>
+            <button type="button" class="first-run-primary" id="firstRunDismiss">开始使用</button>
           </div>
         </section>
       </div>

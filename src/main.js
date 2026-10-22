@@ -146,6 +146,7 @@ function defaults() {
     pauseUntil: 0,
     compact: false,
     quietMotion: false,
+    guideVersion: 0,
     hotkey: 'Control+Alt+M',
     hotkeyOn: true,
     autostart: false,
@@ -415,9 +416,7 @@ function createWindow() {
     if ((firstRunOpen || settingsOpen || quickMenuOpen || layoutMode || dragState || resizeState)
       && input.type === 'keyDown' && input.key === 'Escape') {
       if (firstRunOpen) {
-        firstRunOpen = false;
-        applyClickThrough();
-        send('magpie:first-run', false);
+        dismissGuide();
       } else if (settingsOpen) closeSettingsPanel();
       else if (quickMenuOpen) setQuickMenuOpen(false);
       else if (resizeState) endResize();
@@ -857,6 +856,34 @@ function resetPlacement() {
   applyWindowMode();
   recoverWindow();
   return { ok: true };
+}
+
+function showGuide() {
+  if (!win || win.isDestroyed()) return;
+  if (settingsClosing) {
+    setTimeout(showGuide, 220);
+    return;
+  }
+  setShortcutCapture(false);
+  setQuickMenuOpen(false);
+  firstRunOpen = true;
+  applyWindowMode();
+  showWindow();
+  send('magpie:first-run', true);
+  win.focus();
+}
+
+function dismissGuide() {
+  if (!firstRunOpen) return;
+  firstRunOpen = false;
+  settings.guideVersion = 1;
+  saveSettings();
+  hoverInteractive = false;
+  applyWindowMode();
+  applyClickThrough();
+  send('magpie:first-run', false);
+  if (settingsOpen) win.focus();
+  else win.blur();
 }
 
 function schedulePauseResume() {
@@ -1671,6 +1698,7 @@ function buildTrayMenu() {
       label: `关于 Busy Magpie…（v${app.getVersion()}）`,
       click: () => openAbout(),
     },
+    { label: '使用指南', click: showGuide },
     {
       label: '调整位置…',
       click: beginLayout,
@@ -2035,16 +2063,8 @@ ipcMain.on('updates:open-release', () => {
   if (updateState.releaseUrl) shell.openExternal(updateState.releaseUrl);
 });
 
-ipcMain.on('busy:first-run-dismiss', () => {
-  if (!firstRunOpen) return;
-  firstRunOpen = false;
-  applyClickThrough();
-  send('magpie:first-run', false);
-  if (win && !win.isDestroyed()) {
-    win.setFocusable(false);
-    win.blur();
-  }
-});
+ipcMain.on('busy:first-run-dismiss', dismissGuide);
+ipcMain.on('busy:guide-open', showGuide);
 
 ipcMain.on('busy:open-install-dir', () => {
   shell.openPath(path.dirname(app.getPath('exe')));
@@ -2069,6 +2089,7 @@ function init() {
     // A version marker is an optimization, never a reason not to start.
   }
   settings = loadSettings();
+  firstRunOpen = FIRST_INSTALL || Number(settings.guideVersion) < 1;
   if (!PLUGIN_VERSION || settings.pauseUntil <= Date.now()) settings.pauseUntil = 0;
   // A marker left by an install that did not finish would keep the launcher
   // from starting the card; this process running means it is over.

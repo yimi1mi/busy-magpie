@@ -971,6 +971,7 @@ function setupSettingsPanel() {
   $('settingsClose').addEventListener('click', () => window.busy.settingsClose());
   $('settingsCancel').addEventListener('click', () => window.busy.settingsClose());
   $('settingsOpenFile').addEventListener('click', () => window.busy.settingsOpenFile());
+  $('settingsHelp').addEventListener('click', () => window.busy.openGuide());
   gateway.addEventListener('input', () => { $('gatewayResult').textContent = '当前输入尚未测试'; });
   $('gatewayTest').addEventListener('click', async () => {
     const button = $('gatewayTest'); button.disabled = true;
@@ -1207,6 +1208,15 @@ function setupFirstRun() {
   });
   $('firstRunOpenDir')?.addEventListener('click', () => {
     window.busy.openInstallDir();
+  });
+  mask.addEventListener('keydown', (event) => {
+    if (event.key !== 'Tab' || mask.hidden) return;
+    const controls = [...mask.querySelectorAll('button, summary')];
+    const index = controls.indexOf(document.activeElement);
+    if ((event.shiftKey && index <= 0) || (!event.shiftKey && index === controls.length - 1)) {
+      event.preventDefault();
+      controls[event.shiftKey ? controls.length - 1 : 0].focus();
+    }
   });
 
   window.busy.onFirstRun?.((open) => {
@@ -2417,6 +2427,10 @@ async function boot() {
 
   const data = await window.busy.bootstrap();
   if (data.version) $('appVersionText').textContent = `v${data.version}`;
+  $('guideVersion').textContent = `使用指南 · v${data.version || '1.3.10'}`;
+  $('guideHotkey').textContent = data.hotkey?.on && data.hotkey?.ok
+    ? `点击托盘图标，或按 ${data.hotkey.accelerator} 显示 / 隐藏。`
+    : '点击托盘图标召回；可在设置中启用或重新录制快捷键。';
   if (data.settings) settings = { ...settings, ...data.settings };
   document.body.classList.toggle('noanim', Boolean(settings.quietMotion));
   if (data.connection) connection = data.connection;
