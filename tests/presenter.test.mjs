@@ -19,3 +19,14 @@ test('one compaction candidate does not imply one enabled account',()=>{
   const view=present({done:true,status:200,compaction:'a',order:[{id:'a',who:'Test',kind:'account'}],tries:[]},{},true);
   assert.doesNotMatch(text(view.caption),/唯一启用/);
 });
+
+test('the story distinguishes requested effort from the current attempts sent setting',()=>{
+  const route={agent:'codex',model:'test',effort:'ultra',order:[{id:'a'}],tries:[{id:'a',effort:'high'}]};
+  const sent=text(present(route,{},true).story.at(-1).parts);
+  assert.match(sent,/以 high 推理强度/);
+  assert.doesNotMatch(sent,/ultra/);
+  route.tries=[{id:'a'}];
+  const requested=text(present(route,{},true).story.at(-1).parts);
+  assert.match(requested,/请求强度 ultra/);
+  assert.doesNotMatch(requested,/以 ultra/);
+});

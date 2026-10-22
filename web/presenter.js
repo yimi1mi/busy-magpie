@@ -442,10 +442,15 @@ function story(route, agent, model, provider, who, accountModel, kind, state, in
     { text: who, role: ROLE.strong },
     { text: ` (${accountModel})`, role: ROLE.muted },
   ];
-  if (route.effort) {
+  const sentEffort = route.tries?.at(-1)?.effort;
+  if (sentEffort) {
     parts.push({ text: ' 以 ', role: ROLE.muted });
-    parts.push({ text: route.effort, role: ROLE.accent });
+    parts.push({ text: sentEffort, role: ROLE.accent });
     parts.push({ text: ' 推理强度 ', role: ROLE.muted });
+  } else if (route.effort) {
+    parts.push({ text: '（请求强度 ', role: ROLE.muted });
+    parts.push({ text: route.effort, role: ROLE.accent });
+    parts.push({ text: '）', role: ROLE.muted });
   } else {
     parts.push({ text: ' ', role: ROLE.muted });
   }

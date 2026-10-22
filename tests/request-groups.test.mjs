@@ -12,5 +12,12 @@ test('incoming order does not move existing groups or their representative',()=>
 });
 test('unknown sessions and accounts are described as unknown',()=>{
   const groups=groupRequests([row(1,'',null),row(2,'',null)]);
-  assert.equal(groups.length,1);assert.equal(groups[0].context,'未提供会话');assert.equal(groups[0].accountCount,0);assert.equal(groups[0].pendingAccounts,2);
+  assert.equal(groups.length,2);
+  assert.notEqual(groups[0].key,groups[1].key);
+  for(const group of groups){assert.equal(group.context,'未提供会话');assert.equal(group.accountCount,0);assert.equal(group.pendingAccounts,1);}
+});
+
+test('explicit conversation identity still groups parallel requests without a session header',()=>{
+  const groups=groupRequests([row(1,'',null),row(2,'',null)].map(route=>({...route,conv:'conversation'})));
+  assert.equal(groups.length,1);assert.equal(groups[0].routes.length,2);assert.equal(groups[0].session,'conversation');
 });

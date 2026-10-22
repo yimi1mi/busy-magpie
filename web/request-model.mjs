@@ -1,5 +1,7 @@
+import { latestModeRoute, projectRequestModes } from './request-modes.mjs';
+
 export const requestActive = route => Boolean(route) && (!route.done || (route.tries || []).some(item => !item.done));
-export const requestGroupKey = route => `${route.agent || 'unknown'}|${route.session || route.conv || ''}`;
+export const requestGroupKey = route => `${route.agent || 'unknown'}|${route.session || route.conv || `request:${route.id}`}`;
 
 export function groupRequests(routes, { includeCompleted = false } = {}) {
   const groups = new Map();
@@ -16,6 +18,8 @@ export function groupRequests(routes, { includeCompleted = false } = {}) {
   return [...groups.values()].sort((a, b) => a.key.localeCompare(b.key)).map(group => {
     group.routes.sort((a, b) => (Date.parse(a.time) || 0) - (Date.parse(b.time) || 0) || String(a.id).localeCompare(String(b.id)));
     group.route = group.routes[0];
+    group.modeRoute = latestModeRoute(group.routes);
+    group.modes = projectRequestModes(group.modeRoute);
     group.context = group.route.folder || (group.session ? `会话 ${group.session.slice(-6)}` : '未提供会话');
     const accounts = group.routes.map(route => {
       const id = route.tries?.at(-1)?.id || route.order?.[0]?.id;

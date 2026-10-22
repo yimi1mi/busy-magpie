@@ -14,6 +14,7 @@ import { FlightBook } from './flight-playback.mjs';
 import { wireCurve, hubCurve, glideProgress } from './flight-path.mjs';
 import { stagedRoutes, wireState, nextRestExpiry } from './routing-state.mjs';
 import { requestActive, requestGroupKey, redactDiagnostic, groupRequests } from './request-model.mjs';
+import { projectRequestModes } from './request-modes.mjs';
 
 const $ = (id) => document.getElementById(id);
 
@@ -29,6 +30,7 @@ const el = {
   agentGlyph: $('agentGlyph'),
   agentName: $('agentName'),
   agentModel: $('agentModel'),
+  agentModes: $('agentModes'),
   agentDot: $('agentDot'),
   hub: $('hub'),
   accountNode: $('accountNode'),
@@ -716,14 +718,12 @@ function setupSettingsPanel() {
       const key = chip.dataset.period || chip.dataset.metric
         || chip.dataset.update || chip.dataset.effect;
       chip.setAttribute('aria-pressed', active.has(key) ? 'true' : 'false');
-    const generation = loadGeneration;
     }
   };
 
   const selectPage = (tab) => {
     if (recordingHotkey) window.busy.captureHotkey(false);
     for (const item of tabs) {
-      if (!open || generation !== loadGeneration) return;
       const selected = item === tab;
       item.setAttribute('aria-selected', String(selected));
       item.tabIndex = selected ? 0 : -1;
@@ -744,8 +744,6 @@ function setupSettingsPanel() {
       tabs[index].focus();
       selectPage(tabs[index]);
     });
-    loadGeneration++;
-    opacityEdited = false;
   }
 
   for (const chip of periodChips) {
@@ -823,12 +821,14 @@ function setupSettingsPanel() {
   };
 
   const load = async () => {
+    const generation = loadGeneration;
     try {
       const data = await window.busy.settingsGet();
       if (!open || generation !== loadGeneration) return;
       fill(data, true);
       setStatus('');
     } catch (error) {
+      if (!open || generation !== loadGeneration) return;
       setStatus(error?.message || '读取设置失败', true);
     }
   };
@@ -849,6 +849,8 @@ function setupSettingsPanel() {
 
   const show = (data) => {
     window.clearTimeout(closeTimer);
+    loadGeneration++;
+    opacityEdited = false;
     open = true;
     document.body.classList.remove('settings-closing');
     pane.hidden = false;
@@ -1824,6 +1826,7 @@ function renderView(view, color = '#a18bff') {
   el.agentName.textContent = view.agentName;
   el.agentGlyph.replaceChildren(agentMark(view.agentId, view.agentGlyph));
   el.agentModel.textContent = view.agentModel;
+  renderRequestModes(el.agentModes, view.modes, view.hasRoute);
   el.agentNode.style.opacity = view.hasRoute ? '1' : '0.72';
   setStatusDot(el.agentDot, view.failed ? 'bad' : view.hasRoute ? 'good' : 'warn');
 
@@ -1935,12 +1938,58 @@ function visibleFlightGroups(routes) {
   return { groups, visible: [...groups.slice(0, 3), overflow] };
 }
 
+function sessionGroups() {
+  return new Map(groupRequests(lastTrace?.routes || [], { includeCompleted: true })
+    .map(group => [group.key, group]));
+}
+
+function modeSvg(paths) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 16');
+  svg.setAttribute('aria-hidden', 'true');
+  for (const [tag, attributes] of paths) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, String(value));
+    svg.append(node);
+  }
+  return svg;
+}
+
+function renderRequestModes(target, modes, visible = true) {
+  target.replaceChildren();
+  target.hidden = !visible;
+  if (!visible) return;
+  const value = modes || projectRequestModes(null);
+  const speed = create('span', 'mode-icon mode-speed');
+  speed.dataset.mode = value.requestSpeedKind || 'unknown';
+  speed.setAttribute('role', 'img');
+  speed.setAttribute('aria-label', value.requestSpeedValue
+    ? `${value.requestSource.speed === 'sent' ? '发送' : '请求'}速度：${value.requestSpeedKind === 'fast' ? 'Fast' : value.requestSpeedValue}`
+    : '速度模式未提供');
+  speed.append(modeSvg([['path', { d: 'M13.5 1 6 9h5l-1 6 8-9h-5z', class: 'speed-bolt' }]]));
+  const effort = create('span', 'mode-icon mode-effort');
+  const level = { none: 0, minimal: 1, low: 2, medium: 3, high: 4, xhigh: 5, max: 6, ultra: 6 }[value.requestEffortValue];
+  effort.dataset.effort = value.requestEffortValue || 'unknown';
+  effort.setAttribute('role', 'img');
+  effort.setAttribute('aria-label', value.requestEffortValue
+    ? `${value.requestSource.effort === 'sent' ? '发送' : '请求'}思考强度：${value.requestEffortValue}`
+    : '思考强度未提供');
+  effort.append(modeSvg(Array.from({ length: 6 }, (_, index) => ['rect', {
+    x: 1 + index * 4, y: 12 - index * 1.8, width: 2.5, height: 3 + index * 1.8, rx: .7,
+    class: index < level ? 'effort-step on' : 'effort-step',
+  }])));
+  if (value.requestSpeedKind) target.append(speed);
+  if (level !== undefined) target.append(effort);
+  target.hidden = target.childElementCount === 0;
+}
+
 function renderMulti(routes, totals) {
   setMulti(true);
   const activeCount = (lastTrace?.routes || []).filter(isInFlight).length;
   setLiveChrome({ inFlight: activeCount > 0 || requestsOnWire().size > 0 });
 
   const { groups, visible } = visibleFlightGroups(routes);
+  const sessions = sessionGroups();
   const count = visible.length;
   // The card and the lower half are fixed. The fan gets 134px, so more
   // agents means shorter rows, not a taller window.
@@ -1984,6 +2033,8 @@ function renderMulti(routes, totals) {
     const view = present(route, totals, Boolean(settings.maskAccounts));
     view.agentName = group.overflow ? `其余 ${group.overflow} 组` : view.agentName + (group.routes.length > 1 ? ` · ${group.routes.length}` : '');
     view.agentModel = group.context;
+    view.modes = group.overflow ? null : sessions.get(group.key)?.modes || group.modes;
+    view.hideModes = Boolean(group.overflow);
     const color = agentColor(route.agent);
     const next = buildFanAgent(route, view, fresh, color);
     next.dataset.layoutKey = `agent:${group.key}`;
@@ -2045,6 +2096,10 @@ function buildFanAgent(route, view, fresh, color) {
   line.append(create('i', 'status-dot'));
   line.append(create('b', '', view.agentName));
   copy.append(line, create('div', 'mono model', view.agentModel));
+  const modes = create('div', 'request-modes');
+  renderRequestModes(modes, view.modes, !view.hideModes);
+  copy.append(modes);
+  agent.classList.toggle('has-modes', !modes.hidden);
   agent.append(copy);
   return agent;
 }
@@ -2278,7 +2333,11 @@ function renderRoutingContent() {
     const key = route ? requestGroupKey(route) : 'empty';
     el.agentNode.dataset.layoutKey = `agent:${key}`;
     el.accountNode.dataset.layoutKey = `account:${key}`;
-    renderView(present(route, lastTrace.totals, Boolean(settings.maskAccounts)),
+    const view = present(route, lastTrace.totals, Boolean(settings.maskAccounts));
+    const group = sessionGroups().get(key);
+    view.modes = group?.modes;
+    if (group) view.agentModel = group.context;
+    renderView(view,
       route ? agentColor(route.agent) : '#a18bff');
     applyRoutingState(el.agentNode, el.accountNode, route ? [route] : []);
     if (route) flightAnchors.set(String(route.id), {
