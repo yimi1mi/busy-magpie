@@ -2,7 +2,7 @@
 
 const {
   app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, screen, shell, Notification,
-  globalShortcut, clipboard, nativeTheme,
+  clipboard, nativeTheme,
 } = require('electron');
 const fs = require('fs');
 const os = require('os');
@@ -104,7 +104,6 @@ let positionTimer = null;
 let aliveTimer = null;
 let pauseTimer = null;
 let compactPosition = null;
-let shortcutRecording = false;
 let screenChangeTimer = null;
 let frame = { lanes: 1, cardHeight: 400, windowHeight: 432 };
 
@@ -155,8 +154,6 @@ function defaults() {
     compact: false,
     quietMotion: false,
     guideVersion: 0,
-    hotkey: 'Control+Alt+M',
-    hotkeyOn: true,
     autostart: false,
   };
 }
@@ -245,8 +242,6 @@ function loadSettings() {
       showTiming: parsed.showTiming !== false,
       hubEffect: normalizeHubEffect(parsed.hubEffect),
       keepAlive: parsed.keepAlive !== false,
-      hotkey: String(parsed.hotkey || DEFAULT_HOTKEY).trim(),
-      hotkeyOn: parsed.hotkeyOn !== false,
       autostart: parsed.autostart === true,
       // An old install only had the on/off check: it means `never'' now.
       updateMode: normalizeUpdateMode(parsed.updateMode ?? (parsed.checkUpdates === false ? 'never' : 'idle')),
@@ -423,11 +418,6 @@ function createWindow() {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   win.webContents.on('before-input-event', (event, input) => {
-    if (shortcutRecording && input.type === 'keyDown' && input.key === 'Escape') {
-      setShortcutCapture(false);
-      event.preventDefault();
-      return;
-    }
     if ((firstRunOpen || settingsOpen || quickMenuOpen || layoutMode || dragState || resizeState)
       && input.type === 'keyDown' && input.key === 'Escape') {
       if (firstRunOpen) {
@@ -463,7 +453,6 @@ function createWindow() {
   });
   win.on('blur', () => {
     setQuickMenuOpen(false);
-    setShortcutCapture(false);
     setImmediate(refreshWindowMaterial);
   });
 
@@ -891,7 +880,6 @@ function showGuide() {
     setTimeout(showGuide, 220);
     return;
   }
-  setShortcutCapture(false);
   setQuickMenuOpen(false);
   firstRunOpen = true;
   applyWindowMode();
@@ -950,7 +938,6 @@ function setQuickMenuOpen(value) {
 
 function openSettingsPanel(mode = 'settings') {
   if (!win || win.isDestroyed()) return;
-  setShortcutCapture(false);
   setQuickMenuOpen(false);
   if (!rendererReady) {
     pendingSettings = true;
@@ -983,7 +970,6 @@ function openSettingsPanel(mode = 'settings') {
 
 function closeSettingsPanel() {
   if (!settingsOpen || settingsClosing) return;
-  setShortcutCapture(false);
   settingsClosing = true;
   settingsOpen = false;
   currentPanelMode = 'settings';
@@ -1007,53 +993,6 @@ function closeSettingsPanel() {
     hoverKind = null;
     refreshTrayMenu();
   }, 180);
-}
-
-// Closing the card only hides it, and on Windows the tray icon often sits in
-// the overflow flyout, so there has to be one way back that is always there:
-// a global shortcut that shows or hides the card from anywhere.
-const DEFAULT_HOTKEY = 'Control+Alt+M';
-let hotkeyOk = false;
-
-function displayHotkey() {
-  return String(settings.hotkey || DEFAULT_HOTKEY)
-    .replace(/CommandOrControl/g, IS_MAC ? 'Cmd' : 'Ctrl')
-    .replace(/Control/g, 'Ctrl')
-    .replace(/\+/g, '+');
-}
-
-function registerHotkey() {
-  globalShortcut.unregisterAll();
-  hotkeyOk = false;
-  const accelerator = String(settings.hotkey || DEFAULT_HOTKEY).trim();
-  if (shortcutRecording || settings.hotkeyOn === false || !accelerator) return;
-  try {
-    hotkeyOk = globalShortcut.register(accelerator, () => toggleVisible());
-  } catch (error) {
-    hotkeyOk = false;
-    log(`hotkey ${accelerator} not registered: ${error.message}`);
-  }
-  if (!hotkeyOk) log(`hotkey ${accelerator} is taken or invalid`);
-}
-
-function setShortcutCapture(on) {
-  const next = Boolean(on && settingsOpen && currentPanelMode === 'settings');
-  if (shortcutRecording === next) return;
-  shortcutRecording = next;
-  win?.webContents.setIgnoreMenuShortcuts(next);
-  registerHotkey();
-  send('magpie:hotkey-capture', next);
-}
-
-function testHotkey(value) {
-  const accelerator = String(value || '').trim();
-  if (!accelerator) return { ok: false, error: '请先录入快捷键' };
-  if (accelerator === settings.hotkey && hotkeyOk) return { ok: true };
-  try {
-    if (!globalShortcut.register(accelerator, toggleVisible)) return { ok: false, error: '这个快捷键已被系统或其他程序占用' };
-    globalShortcut.unregister(accelerator);
-    return { ok: true };
-  } catch { return { ok: false, error: '快捷键格式无效，请重新录入' }; }
 }
 
 function toggleVisible() {
@@ -1651,7 +1590,7 @@ function buildTrayMenu() {
   return Menu.buildFromTemplate([
     {
       label: visible ? '隐藏桌面插件' : settings.pauseUntil > Date.now()
-        ? '立即恢复显示（暂停中）' : `显示桌面插件（${displayHotkey()}）`,
+        ? '立即恢复显示（暂停中）' : '显示桌面插件',
       click: toggleVisible,
     },
     // The other one-click way in: a release the app already found installs
@@ -1665,17 +1604,6 @@ function buildTrayMenu() {
         click: () => { installUpdate(); },
       }]
       : []),
-    {
-      label: `全局快捷键 ${displayHotkey()}`,
-      type: 'checkbox',
-      checked: settings.hotkeyOn !== false && hotkeyOk,
-      click: (item) => {
-        settings.hotkeyOn = item.checked;
-        saveSettings();
-        registerHotkey();
-        refreshTrayMenu();
-      },
-    },
     {
       label: IS_PREVIEW ? '开机自动启动（本地预览不可用）' : app.isPackaged ? '开机自动启动' : '开机自动启动（需要安装版）',
       type: 'checkbox',
@@ -1757,10 +1685,7 @@ function buildTrayMenu() {
   ]);
 }
 
-// A quit is final: the card's own shortcuts are gone with the process, so
-// the only way back is something outside it — a shortcut, the plugin
-// relaunching it (it does that on load and on every request), or starting
-// with the login session.
+// Login startup is optional and applies only to the installed app.
 function setAutostart(on) {
   if (IS_PREVIEW) return;
   settings.autostart = Boolean(on);
@@ -1796,7 +1721,7 @@ function applyAutostart() {
 
 function createTray() {
   tray = new Tray(trayImage());
-  tray.setToolTip(IS_PREVIEW ? `Busy Magpie ${app.getVersion()} · 本地预览` : `Busy Magpie · ${displayHotkey()} 显示 / 隐藏`);
+  tray.setToolTip(IS_PREVIEW ? `Busy Magpie ${app.getVersion()} · 本地预览` : 'Busy Magpie');
   refreshTrayMenu();
   if (IS_WIN) {
     // A single click brings the card back; double-click still toggles it.
@@ -1827,7 +1752,6 @@ function quit() {
   clearInterval(updateTimer);
   clearInterval(quietTimer);
   quietTimer = null;
-  globalShortcut.unregisterAll();
   clearInterval(aliveTimer);
   clearInterval(watchdogTimer);
   watchdogTimer = null;
@@ -1858,7 +1782,6 @@ ipcMain.handle('busy:bootstrap', () => ({
   update: updateView(),
   firstRun: firstRunOpen,
   settings: publicSettings(),
-  hotkey: { accelerator: displayHotkey(), on: settings.hotkeyOn !== false, ok: hotkeyOk },
   connection,
   trace: lastTrace,
   usage: usageData,
@@ -1883,7 +1806,6 @@ ipcMain.handle('settings:get', () => {
     resolvedGateway: displayAddress(resolveGateway()),
     gatewaySource: gatewayInfo().source,
     gatewayError: gatewayInfo().error,
-    hotkey: { ok: hotkeyOk, on: settings.hotkeyOn !== false },
     path: settingsPath,
     raw,
   };
@@ -1911,17 +1833,6 @@ ipcMain.handle('settings:save', (_event, input) => {
     const requestedPeriod = normalizePeriod(data.usagePeriod ?? settings.usagePeriod);
     const nextPeriod = nextPeriods.includes(requestedPeriod) ? requestedPeriod : nextPeriods[0];
     const periodChanged = nextPeriod !== settings.usagePeriod;
-    const nextHotkey = String(data.hotkey ?? settings.hotkey ?? DEFAULT_HOTKEY).trim();
-    const nextHotkeyOn = data.hotkeyOn === undefined
-      ? settings.hotkeyOn !== false
-      : Boolean(data.hotkeyOn);
-    const hotkeyChanged = nextHotkey !== settings.hotkey
-      || nextHotkeyOn !== (settings.hotkeyOn !== false);
-    setShortcutCapture(false);
-    if (hotkeyChanged && nextHotkeyOn) {
-      const checked = testHotkey(nextHotkey);
-      if (!checked.ok) return checked;
-    }
 
     const nextSettings = {
       ...settings,
@@ -1951,8 +1862,6 @@ ipcMain.handle('settings:save', (_event, input) => {
         : Boolean(data.keepAlive),
       compact: data.compact === undefined ? Boolean(settings.compact) : Boolean(data.compact),
       quietMotion: data.quietMotion === undefined ? Boolean(settings.quietMotion) : Boolean(data.quietMotion),
-      hotkey: nextHotkey,
-      hotkeyOn: nextHotkeyOn,
     };
     if (win && !win.isDestroyed()) {
       const bounds = win.getBounds();
@@ -1962,7 +1871,6 @@ ipcMain.handle('settings:save', (_event, input) => {
     const saved = saveSettings(nextSettings);
     if (!saved.ok) return saved;
     settings = nextSettings;
-    if (hotkeyChanged) registerHotkey();
     applyTopmost();
     if (win && !win.isDestroyed()) {
       // While the settings drawer is open the window is deliberately
@@ -2013,7 +1921,6 @@ ipcMain.handle('settings:save', (_event, input) => {
       resolvedGateway: displayAddress(resolveGateway()),
       gatewaySource: gatewayInfo().source,
       gatewayError: gatewayInfo().error,
-      hotkey: { ok: hotkeyOk, on: settings.hotkeyOn !== false },
     };
   } catch (error) {
     log(`save settings: ${error.message}`);
@@ -2028,8 +1935,6 @@ ipcMain.on('settings:open-file', () => {
 
 ipcMain.on('settings:close', () => closeSettingsPanel());
 ipcMain.handle('gateway:test', (_event, raw) => testGateway(raw));
-ipcMain.on('hotkey:capture', (_event, on) => setShortcutCapture(on));
-ipcMain.handle('hotkey:test', (_event, value) => testHotkey(value));
 ipcMain.handle('window:reset', () => resetPlacement());
 
 // While the slider is dragged the window follows it at once; nothing is
@@ -2136,7 +2041,6 @@ function init() {
   screen.on('display-removed', screenChanged);
   screen.on('display-metrics-changed', screenChanged);
   createTray();
-  registerHotkey();
   applyAutostart();
   touchAlive();
   schedulePauseResume();

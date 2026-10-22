@@ -3,7 +3,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 
-function mainHarness({ writeError = false, hotkeyTaken = false, preview = false } = {}) {
+function mainHarness({ writeError = false, preview = false } = {}) {
   const root = path.resolve(__dirname, '..');
   const handlers = new Map();
   const listeners = new Map();
@@ -14,6 +14,7 @@ function mainHarness({ writeError = false, hotkeyTaken = false, preview = false 
   let installed = 0;
   let updateChecks = 0;
   let loginChanges = 0;
+  let globalShortcutReads = 0;
   const paths = new Map();
   const disk = {
     mkdirSync() {},
@@ -34,9 +35,11 @@ function mainHarness({ writeError = false, hotkeyTaken = false, preview = false 
   const electron = {
     app, ipcMain: { handle: (name, fn) => handlers.set(name, fn), on: (name, fn) => listeners.set(name, fn) },
     screen: { getDisplayNearestPoint: () => ({ workArea: {x:0,y:0,width:1920,height:1080} }) },
-    globalShortcut: { unregisterAll() {}, unregister() {}, register: () => !hotkeyTaken },
     Notification: { isSupported: () => false }, shell: {}, Menu: {},
   };
+  Object.defineProperty(electron, 'globalShortcut', {
+    get() { globalShortcutReads++; return {}; },
+  });
   const context = vm.createContext({
     require: id => id === 'electron' ? electron : id === 'electron-updater' ? {autoUpdater}
       : id === 'fs' ? disk : require(id.startsWith('.') ? path.resolve(root,'src',id) : id),
@@ -66,6 +69,7 @@ function mainHarness({ writeError = false, hotkeyTaken = false, preview = false 
     };`, context);
   return {
     api: context.testApi, files, paths,
+    ipcChannels: [...handlers.keys(), ...listeners.keys()],
     save: input => handlers.get('settings:save')({}, input),
     period: value => handlers.get('usage:set-period')({}, value),
     setFetch(fn) { context.fetch = fn; },
@@ -73,6 +77,7 @@ function mainHarness({ writeError = false, hotkeyTaken = false, preview = false 
     get installed() {return installed;},
     get updateChecks() {return updateChecks;},
     get loginChanges() {return loginChanges;},
+    get globalShortcutReads() {return globalShortcutReads;},
   };
 }
 module.exports = {mainHarness};

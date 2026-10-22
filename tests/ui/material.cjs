@@ -80,6 +80,11 @@ async function run() {
   assert.equal(iconColor,'rgb(241, 240, 245)');
   record('monochrome agent artwork keeps its own color instead of taking the route color');
   await menuAction('settings');
+  assert.equal(await js('document.querySelector("#settingsHotkey, #settingsHotkeyOn, #hotkeyRecord, #hotkeyStatus")'),null);
+  assert.equal(await js('document.getElementById("settingsTab-connection").textContent'),'连接');
+  assert.equal(await js('document.getElementById("settingsPane").textContent.includes("快捷键")'),false);
+  assert.equal(await js('Object.keys(window.busy).some(key=>/hotkey/i.test(key))'),false);
+  record('settings and preload expose no global shortcut controls or actions');
   await js('document.getElementById("settingsOpacity").value="0";document.getElementById("settingsOpacity").dispatchEvent(new Event("input"))');await sleep(100);
   const after=await js('getComputedStyle(document.documentElement).getPropertyValue("--surface-alpha")');
   assert.equal(Number(after),0);assert.equal(win.getOpacity(),1);
@@ -111,7 +116,7 @@ async function run() {
 }
 server.listen(0,'127.0.0.1',async()=>{
  const gateway=`http://127.0.0.1:${server.address().port}`;
- fs.writeFileSync(path.join(profile,'settings.json'),JSON.stringify({gateway,topmost:false,hotkeyOn:false,autostart:false,keepAlive:false,updateMode:'never',guideVersion:1,usagePeriod:'30d',left:40,top:40}));
+ fs.writeFileSync(path.join(profile,'settings.json'),JSON.stringify({gateway,topmost:false,autostart:false,keepAlive:false,updateMode:'never',guideVersion:1,usagePeriod:'30d',left:40,top:40}));
  await app.whenReady();
  screen.getCursorScreenPoint=()=>cursor;
  const filename = path.join(root,'src/main.js');

@@ -9,7 +9,6 @@ import {
 } from './presenter.js';
 import { brandKey, brandMark } from './brand-icons.mjs';
 import { downloadSize } from './download-progress.mjs';
-import { acceleratorFromEvent } from './hotkey.mjs';
 import { FlightBook } from './flight-playback.mjs';
 import { wireCurve, hubCurve, glideProgress } from './flight-path.mjs';
 import { stagedRoutes, wireState, nextRestExpiry } from './routing-state.mjs';
@@ -705,8 +704,6 @@ function setupSettingsPanel() {
   let loadGeneration = 0;
   let opacityEdited = false;
   let gatewayReport = '';
-  let recordingHotkey = false;
-  let recordedHotkey = false;
 
   const setStatus = (text, error = false) => {
     status.textContent = text || '';
@@ -722,7 +719,6 @@ function setupSettingsPanel() {
   };
 
   const selectPage = (tab) => {
-    if (recordingHotkey) window.busy.captureHotkey(false);
     for (const item of tabs) {
       const selected = item === tab;
       item.setAttribute('aria-selected', String(selected));
@@ -799,9 +795,6 @@ function setupSettingsPanel() {
     keepAlive.checked = s.keepAlive !== false;
     $('settingsCompact').checked = Boolean(s.compact);
     $('settingsQuiet').checked = Boolean(s.quietMotion);
-    $('settingsHotkeyOn').checked = s.hotkeyOn !== false;
-    $('settingsHotkey').value = s.hotkey || 'Control+Alt+M';
-    $('hotkeyStatus').textContent = s.hotkeyOn === false ? '快捷键已关闭' : data.hotkey?.ok ? '快捷键已注册' : '快捷键尚未注册成功，可重新录入或关闭';
     if (!preserveOpacity || !opacityEdited) {
       const storedOpacity = Number(s.opacity ?? 1);
       const value = Number.isFinite(storedOpacity) ? Math.min(1, Math.max(0, storedOpacity)) : 1;
@@ -902,8 +895,6 @@ function setupSettingsPanel() {
         keepAlive: keepAlive.checked,
         compact: $('settingsCompact').checked,
         quietMotion: $('settingsQuiet').checked,
-        hotkey: $('settingsHotkey').value,
-        hotkeyOn: $('settingsHotkeyOn').checked,
       });
       if (!result?.ok) {
         setStatus(result?.error || '保存失败', true);
@@ -941,30 +932,9 @@ function setupSettingsPanel() {
       $('gatewayResult').textContent = copied ? '已复制诊断信息，不含账号和凭据。' : '复制失败';
     } catch { $('gatewayResult').textContent = '复制失败'; }
   });
-  $('hotkeyRecord').addEventListener('click', () => window.busy.captureHotkey(!recordingHotkey));
   $('settingsResetPosition').addEventListener('click', async () => {
     const result = await window.busy.resetPlacement();
     setStatus(result.ok ? '已恢复默认位置和大小' : result.error, !result.ok);
-  });
-  window.busy.onHotkeyCapture((on) => {
-    recordingHotkey = Boolean(on);
-    $('hotkeyRecord').textContent = on ? '取消录制' : '录制快捷键';
-    if (on) { recordedHotkey = false; $('hotkeyStatus').textContent = '请按组合键，例如 Ctrl+Alt+M；Esc 取消'; $('settingsHotkey').focus(); }
-    else if (!recordedHotkey) $('hotkeyStatus').textContent = '已取消录制';
-  });
-  $('settingsHotkey').addEventListener('keydown', async (event) => {
-    if (!recordingHotkey) return;
-    event.preventDefault(); event.stopPropagation();
-    if (event.key === 'Escape') { window.busy.captureHotkey(false); return; }
-    const value = acceleratorFromEvent(event, window.busy.platform);
-    if (!value) return;
-    recordedHotkey = true;
-    $('settingsHotkey').value = value;
-    window.busy.captureHotkey(false);
-    try {
-      const result = await window.busy.testHotkey(value);
-      $('hotkeyStatus').textContent = result.ok ? '组合键可用，保存后生效' : result.error;
-    } catch { $('hotkeyStatus').textContent = '无法检测快捷键，请重试'; }
   });
 
   window.addEventListener('keydown', (event) => {
@@ -2406,9 +2376,6 @@ async function boot() {
   const data = await window.busy.bootstrap();
   if (data.version) $('appVersionText').textContent = `v${data.version}${data.preview ? ' 预览' : ''}`;
   $('guideVersion').textContent = `使用指南 · v${data.version || '1.3.10'}`;
-  $('guideHotkey').textContent = data.hotkey?.on && data.hotkey?.ok
-    ? `点击托盘图标，或按 ${data.hotkey.accelerator} 显示 / 隐藏。`
-    : '点击托盘图标召回；可在设置中启用或重新录制快捷键。';
   if (data.settings) settings = { ...settings, ...data.settings };
   applySurface();
   document.body.classList.toggle('noanim', Boolean(settings.quietMotion));

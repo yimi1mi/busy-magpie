@@ -222,7 +222,7 @@
               <div class="settings-tabs" role="tablist" aria-label="设置分类">
                 <button type="button" class="settings-tab" id="settingsTab-appearance" role="tab" aria-controls="settingsPage-appearance" aria-selected="true" tabindex="0" data-settings-page="appearance">外观与动效</button>
                 <button type="button" class="settings-tab" id="settingsTab-usage" role="tab" aria-controls="settingsPage-usage" aria-selected="false" tabindex="-1" data-settings-page="usage">用量与更新</button>
-                <button type="button" class="settings-tab" id="settingsTab-connection" role="tab" aria-controls="settingsPage-connection" aria-selected="false" tabindex="-1" data-settings-page="connection">连接与快捷键</button>
+                <button type="button" class="settings-tab" id="settingsTab-connection" role="tab" aria-controls="settingsPage-connection" aria-selected="false" tabindex="-1" data-settings-page="connection">连接</button>
               </div>
               <div class="settings-groups">
                 <div class="settings-page" id="settingsPage-appearance" role="tabpanel" aria-labelledby="settingsTab-appearance">
@@ -323,11 +323,6 @@
                     <p class="gateway-result" id="gatewayResult" role="status"></p>
                   </section>
 
-                  <section class="settings-group">
-                    <label class="settings-switch"><span><b>显示 / 隐藏快捷键</b><small>任何窗口在前面时都可召回</small></span><input type="checkbox" id="settingsHotkeyOn"></label>
-                    <div class="hotkey-row"><input id="settingsHotkey" class="settings-input" type="text" readonly aria-label="显示隐藏快捷键"><button type="button" id="hotkeyRecord">录制快捷键</button></div>
-                    <p class="gateway-result" id="hotkeyStatus" role="status"></p>
-                  </section>
                 </div>
               </div>
 
@@ -412,7 +407,7 @@
             <li><b>移动和缩放</b><span>按住顶部小圆点约 0.15 秒拖动，拖边框调整大小。</span></li>
             <li><b>找到功能</b><span>右上角 ··· 可打开设置、切换紧凑模式或调整位置。</span></li>
             <li><b>读懂用量</b><span>单击 token 切换时间窗；悬停可查看输入、输出和缓存用量。</span></li>
-            <li><b>召回挂件</b><span id="guideHotkey">点击托盘图标，或按 Ctrl+Alt+M 显示 / 隐藏。</span></li>
+            <li><b>召回挂件</b><span>点击托盘图标，或在托盘菜单中选择显示桌面插件。</span></li>
           </ul>
           <p class="first-run-note">普通内容区域点击穿透；菜单和面板展开时临时接收操作。</p>
           <details class="guide-uninstall"><summary>卸载说明</summary><p>删除 magpie 插件不会删除桌面应用。停止使用时，还需通过系统应用管理或安装目录中的卸载程序移除 Busy Magpie。</p></details>

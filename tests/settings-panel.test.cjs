@@ -43,7 +43,6 @@ function panelHarness(savedOpacity = 1) {
       busy: {
         settingsGet: () => new Promise((resolve) => loads.push(resolve)),
         previewOpacity(value) { surface = value; previews.push(value); },
-        onHotkeyCapture() {},
         onSettingsPanel(handler) { onPanel = handler; },
       },
     },
