@@ -442,7 +442,7 @@ function createWindow() {
     refreshTrayMenu();
   });
 
-  win.on('show', () => refreshTrayMenu());
+  win.on('show', () => { refreshTrayMenu(); setImmediate(refreshWindowMaterial); });
   win.on('hide', () => {
     setQuickMenuOpen(false);
     if (settingsOpen) closeSettingsPanel();
@@ -450,7 +450,11 @@ function createWindow() {
     hoverKind = null;
     refreshTrayMenu();
   });
-  win.on('blur', () => { setQuickMenuOpen(false); setShortcutCapture(false); });
+  win.on('blur', () => {
+    setQuickMenuOpen(false);
+    setShortcutCapture(false);
+    setImmediate(refreshWindowMaterial);
+  });
 
   win.webContents.on('did-start-loading', () => {
     rendererReady = false;
@@ -466,6 +470,13 @@ function createWindow() {
       win.webContents.send('magpie:settings-panel', { open: true, mode: currentPanelMode });
     }
   });
+}
+
+function refreshWindowMaterial() {
+  if (MATERIAL.kind !== 'acrylic' || !win || win.isDestroyed() || !win.isVisible()) return;
+  // Electron refreshes the non-client material without activating the window.
+  // Apply after show/blur so this background widget keeps its frosted surface.
+  win.setBackgroundMaterial('acrylic');
 }
 
 function publicSettings() {

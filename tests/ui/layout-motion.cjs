@@ -105,6 +105,7 @@ server.listen(0,'127.0.0.1',async()=>{
  mainModule.paths=Module._nodeModulePaths(path.dirname(filename));
  mainModule.require=function(id){
   if(id==='electron') return {...require('electron'),BrowserWindow:class extends BrowserWindow {
+   setBackgroundMaterial() {}
    constructor(options){const {backgroundMaterial,...offscreenOptions}=options;super({...offscreenOptions,transparent:true,roundedCorners:false,hasShadow:false,webPreferences:{...options.webPreferences,offscreen:true}});}
   }};
   return Module.prototype.require.call(this,id);

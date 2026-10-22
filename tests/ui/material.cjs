@@ -15,6 +15,7 @@ app.getVersion = () => JSON.parse(fs.readFileSync(path.join(root, 'package.json'
 app.disableHardwareAcceleration();
 let win, visible = false, ignored = true, cursor = { x: -10000, y: -10000 };
 let hitAreas, dragStarted = 0, dragCalls = 0, usageSwitches = 0;
+let materialRefreshes = 0;
 const checks = [];
 const errors = [];
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -75,6 +76,17 @@ async function run() {
   await js('(async()=>{const c=await window.busy.settingsGet();return window.busy.settingsSave({...c.settings,opacity:0.6});})()');await sleep(100);
   assert.equal(win.getOpacity(),1);assert.equal(JSON.parse(fs.readFileSync(path.join(profile,'settings.json'),'utf8')).opacity,0.6);
   record('saving density persists it while keeping native window opacity at one');
+  for (const mode of ['settings', 'about', 'models', 'history']) {
+    win.webContents.send('magpie:settings-panel', {open:true,mode});await sleep(100);
+    const panel=await js(`(()=>{const p=document.getElementById('settingsPane'),s=getComputedStyle(p);return {background:s.backgroundColor,content:getComputedStyle(document.querySelector('.content')).visibility,opacity:s.opacity};})()`);
+    assert.ok(Number(panel.background.match(/[\d.]+/g).at(-1))<0.1,JSON.stringify(panel));
+    assert.equal(panel.content,'hidden');
+    fs.writeFileSync(path.join(output,mode+'.png'),(await win.webContents.capturePage()).toPNG());
+  }
+  record('settings about usage and history share translucent backgrounds without underlying page text');
+  const refreshed=materialRefreshes;win.emit('blur');await sleep(80);
+  assert.ok(materialRefreshes>refreshed);
+  record('losing focus refreshes the native background without focusing the widget');
   fs.writeFileSync(path.join(output,'surface.png'),(await win.webContents.capturePage()).toPNG());
   assert.equal(errors.length,0,errors.join('\n'));
   fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({ok:true,checks,rendererErrors:errors},null,2));server.close();win.destroy();app.exit(0);
@@ -91,6 +103,7 @@ server.listen(0,'127.0.0.1',async()=>{
  mainModule.paths=Module._nodeModulePaths(path.dirname(filename));
  mainModule.require=function(id){
   if(id==='electron') return {...require('electron'),BrowserWindow:class extends BrowserWindow {
+   setBackgroundMaterial() {materialRefreshes++;}
    constructor(options){const {backgroundMaterial,...offscreenOptions}=options;super({...offscreenOptions,transparent:true,roundedCorners:false,hasShadow:false,webPreferences:{...options.webPreferences,offscreen:true}});}
   }};
   return Module.prototype.require.call(this,id);

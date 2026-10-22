@@ -2452,7 +2452,11 @@ function applySurface(value = settings.opacity) {
   const native = settings.backgroundMaterial && settings.backgroundMaterial !== 'none';
   const density = (Math.min(1, Math.max(0.4, Number(value) || 1)) - 0.4) / 0.6;
   document.body.classList.toggle('native-material', Boolean(native));
-  document.documentElement.style.setProperty('--surface-alpha', String(native ? 0.12 + density * 0.38 : 0.75 + density * 0.22));
+  const style = document.documentElement.style;
+  style.setProperty('--surface-alpha', String(native ? density * 0.24 : 0.75 + density * 0.22));
+  style.setProperty('--surface-glow', String(native ? 0.04 + density * 0.06 : 0.28));
+  style.setProperty('--panel-alpha', String(native ? 0.02 + density * 0.04 : 0.12));
+  style.setProperty('--popup-alpha', String(native ? 0.14 + density * 0.16 : 0.85));
 }
 
 function applySettings(next) {
