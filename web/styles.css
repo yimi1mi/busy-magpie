@@ -1851,7 +1851,6 @@ body.menu-open .stage-canvas {
 
 .fan-wire-under,
 .fan-wire-track,
-.fan-wire-trail,
 .fan-wire-path {
   fill: none;
   stroke-linecap: round;
@@ -1868,25 +1867,15 @@ body.menu-open .stage-canvas {
   opacity: 0.32;
 }
 
-.fan-wire-trail,
 .fan-wire-path {
-  /* pathLength=100 makes the packet cross a whole link at any window size. */
-  animation: wireFlow 1.8s linear infinite;
+  animation: wireFlow 0.7s linear infinite;
   animation-delay: var(--flow, 0s);
 }
 
-.fan-wire-trail {
-  --packet-lag: 14;
-  stroke-width: 3.5;
-  stroke-dasharray: 18 82;
-  opacity: 0.22;
-}
-
 .fan-wire-path {
-  --packet-lag: 0;
-  stroke: color-mix(in srgb, var(--wire-color, var(--route)) 60%, #fff);
+  stroke: color-mix(in srgb, var(--wire-color, var(--route)) 78%, #fff);
   stroke-width: 1.8;
-  stroke-dasharray: 4 96;
+  stroke-dasharray: 3 5;
   opacity: 0.95;
 }
 
@@ -1903,15 +1892,14 @@ body.menu-open .stage-canvas {
   animation-delay: var(--flow, 0s);
 }
 
-.fan-link.fresh[data-state="live"] .fan-wire-track {
-  animation: wireIn 0.6s ease-out both;
-}
+.fan-link[data-state="live"] .fan-wire-track,
+.fan-link[data-state="live"] .fan-wire-under,
+.single-wires > g[data-state="live"] .fan-wire-track,
+.single-wires > g[data-state="live"] .fan-wire-under { opacity: 0; }
 
 .fan-link[data-state="idle"], .fan-link[data-state="rest"],
 .single-wires > g[data-state="idle"], .single-wires > g[data-state="rest"] { --wire-color: #737080; }
-.fan-link:not([data-state="live"]) .fan-wire-trail,
 .fan-link:not([data-state="live"]) .fan-wire-path,
-.single-wires > g:not([data-state="live"]) .fan-wire-trail,
 .single-wires > g:not([data-state="live"]) .fan-wire-path { display: none; animation: none; }
 .fan-link:not([data-state="live"]) .fan-wire-end { animation: none; }
 .fan-link[data-state="lit"],
@@ -2297,12 +2285,8 @@ body.layout .layout-overlay {
 }
 
 @keyframes wireFlow {
-  from {
-    stroke-dashoffset: var(--packet-lag, 0);
-  }
-  to {
-    stroke-dashoffset: calc(var(--packet-lag, 0) - 100);
-  }
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -8; }
 }
 
 @keyframes portSignal {
@@ -2401,14 +2385,10 @@ body.noanim *::after {
   transition: none !important;
 }
 
-body.noanim .wire .spark,
-body.noanim .fan-wire-trail,
-body.noanim .fan-wire-path { display: none; }
+body.noanim .wire .spark { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
-  .wire .spark,
-  .fan-wire-trail,
-  .fan-wire-path {
+  .wire .spark {
     display: none;
   }
 

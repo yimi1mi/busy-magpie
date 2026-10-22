@@ -2259,7 +2259,7 @@ function drawFanWires() {
   const fragment = document.createDocumentFragment();
 
   // Stable per-request phases survive redraws and changes in lane order.
-  const flowCycle = 1800;
+  const flowCycle = 700;
   const now = performance.now();
   const wire = (d, color, fresh, endX, endY, key, outgoing, state) => {
     let seed = 0;
@@ -2273,11 +2273,10 @@ function drawFanWires() {
     link.style.setProperty('--route', color);
     link.style.setProperty('--flow', `${phase.toFixed(3)}s`);
 
-    for (const className of ['fan-wire-under', 'fan-wire-track', 'fan-wire-trail', 'fan-wire-path']) {
+    for (const className of ['fan-wire-under', 'fan-wire-track', 'fan-wire-path']) {
       const path = document.createElementNS(SVG_NS, 'path');
       path.setAttribute('class', className);
       path.setAttribute('d', d);
-      path.setAttribute('pathLength', '100');
       link.append(path);
     }
 
@@ -2342,9 +2341,9 @@ function drawSingleWires() {
     for (const side of ['in', 'out']) {
       const group = document.createElementNS(SVG_NS, 'g');
       group.dataset.side = side;
-      for (const kind of ['fan-wire-under', 'fan-wire-track', 'fan-wire-trail', 'fan-wire-path']) {
+      for (const kind of ['fan-wire-under', 'fan-wire-track', 'fan-wire-path']) {
         const path = document.createElementNS(SVG_NS, 'path');
-        path.setAttribute('class', kind); path.setAttribute('pathLength', '100'); group.append(path);
+        path.setAttribute('class', kind); group.append(path);
       }
       svg.append(group);
     }

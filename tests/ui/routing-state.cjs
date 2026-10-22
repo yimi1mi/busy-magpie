@@ -93,6 +93,10 @@ async function run() {
   shown.push(row(102,3000));await feed(ended+122000);
   const live=await js(`(()=>{const e=document.querySelector('#singleWires [data-side="out"] .fan-wire-path'),s=getComputedStyle(e);return {state:e.parentElement.dataset.state,animation:s.animationName,display:s.display};})()`);
   assert.equal(live.state,'live');assert.equal(live.animation,'wireFlow');assert.notEqual(live.display,'none');
+  const dash=await js(`(()=>{const e=document.querySelector('#singleWires [data-side="out"] .fan-wire-path');return {dash:getComputedStyle(e).strokeDasharray,offset:getComputedStyle(e).strokeDashoffset,normalized:e.hasAttribute('pathLength')};})()`);
+  await sleep(180);
+  assert.equal(dash.dash,'3px, 5px');assert.equal(dash.normalized,false);
+  assert.notEqual(await js('getComputedStyle(document.querySelector("#singleWires [data-side=out] .fan-wire-path")).strokeDashoffset'),dash.offset);
   record('active request wires resume their flow when motion is enabled');
   assert.equal(errors.length,0,errors.join('\n'));
   fs.writeFileSync(path.join(output,'result.json'),JSON.stringify({ok:true,checks,rendererErrors:errors},null,2));server.close();app.exit(0);

@@ -79,7 +79,7 @@ async function run() {
   record('multi-card count changes animate while wires remain connected');
   await sendRoutes([a]);assert((await motion('pause'))>0,'multi → single must animate');await sleep(50);
   assert.equal(await js('document.body.classList.contains("multi")'),false);
-  assert.equal(await js('document.querySelectorAll("#singleWires path").length'),8);
+  assert.equal(await js('document.querySelectorAll("#singleWires .fan-wire-path").length'),2);
   await motion('finish');await sleep(100);assert.equal(await js('document.querySelectorAll(".routing-ghost").length'),0);
   record('multi to single animates and removes departing-card ghosts');
   await sendRoutes([a,b]);await sendRoutes([a,b,c]);await sendRoutes([a]);await sleep(700);
