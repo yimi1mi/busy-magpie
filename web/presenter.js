@@ -278,7 +278,7 @@ export function present(route, totals, maskAccounts) {
     agentGlyph: agentGlyph(route.agent),
     agentModel,
     providerName: provider,
-    providerIcon: picked?.icon || 'generic',
+    providerIcon: picked?.icon || route.provider || 'generic',
     accountName: visibleWho,
     accountModel,
     accountState,

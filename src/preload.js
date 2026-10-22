@@ -14,6 +14,8 @@ function readAsset(name) {
 
 contextBridge.exposeInMainWorld('busy', {
   platform: process.platform,
+  brandIcons: Object.fromEntries(fs.readdirSync(path.join(__dirname, '..', 'assets', 'brands'))
+    .filter(name => name.endsWith('.svg')).map(name => [name.slice(0, -4), readAsset(`brands/${name}`)])),
   icons: {
     magpie: readAsset('magpie-path.txt'),
     openai: readAsset('openai-path.txt'),

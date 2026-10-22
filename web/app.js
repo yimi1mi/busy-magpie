@@ -8,6 +8,7 @@ import {
   present,
 } from './presenter.js';
 import { modelUsage, paintModelTracks } from './model-usage.mjs';
+import { brandKey, brandMark } from './brand-icons.mjs';
 import { downloadSize } from './download-progress.mjs';
 import { acceleratorFromEvent } from './hotkey.mjs';
 import { FlightBook } from './flight-playback.mjs';
@@ -1715,17 +1716,7 @@ function arcPass(burst, flight, center) {
 }
 
 function agentMark(agent, glyph) {
-  if (String(agent || '').toLowerCase() === 'codex') return providerMark('openai');
-  if (String(agent || '').toLowerCase() === 'dsh') {
-    const svg = document.createElementNS(SVG_NS, 'svg');
-    svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('aria-hidden', 'true');
-    const use = document.createElementNS(SVG_NS, 'use');
-    use.setAttribute('href', '#deepseekMark');
-    svg.append(use);
-    return svg;
-  }
-  return document.createTextNode(glyph || '');
+  return brandMark(brandKey(agent), window.busy.brandIcons) || document.createTextNode(glyph || '');
 }
 
 function cubeMark() {
@@ -1743,19 +1734,7 @@ function cubeMark() {
 }
 
 function providerMark(icon) {
-  if (icon && /openai|codex/i.test(icon)) {
-    const svg = document.createElementNS(SVG_NS, 'svg');
-    svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('aria-hidden', 'true');
-    const use = document.createElementNS(SVG_NS, 'use');
-    use.setAttribute('href', '#openaiMark');
-    svg.append(use);
-    return svg;
-  }
-  if (icon && /anthropic/i.test(icon)) {
-    return create('span', 'generic', 'A');
-  }
-  return cubeMark();
+  return brandMark(brandKey(icon, 'provider'), window.busy.brandIcons) || cubeMark();
 }
 
 function setStatusDot(node, kind) {
