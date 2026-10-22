@@ -991,6 +991,10 @@ function setupSettingsPanel() {
     } catch { $('gatewayResult').textContent = '复制失败'; }
   });
   $('hotkeyRecord').addEventListener('click', () => window.busy.captureHotkey(!recordingHotkey));
+  $('settingsResetPosition').addEventListener('click', async () => {
+    const result = await window.busy.resetPlacement();
+    setStatus(result.ok ? '已恢复默认位置和大小' : result.error, !result.ok);
+  });
   window.busy.onHotkeyCapture((on) => {
     recordingHotkey = Boolean(on);
     $('hotkeyRecord').textContent = on ? '取消录制' : '录制快捷键';

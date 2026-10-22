@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('busy', {
   testGateway: (raw) => ipcRenderer.invoke('gateway:test', raw),
   captureHotkey: (on) => ipcRenderer.send('hotkey:capture', on),
   testHotkey: (value) => ipcRenderer.invoke('hotkey:test', value),
+  resetPlacement: () => ipcRenderer.invoke('window:reset'),
   previewOpacity: (value) => ipcRenderer.send('settings:opacity', value),
   settingsOpenFile: () => ipcRenderer.send('settings:open-file'),
   settingsClose: () => ipcRenderer.send('settings:close'),

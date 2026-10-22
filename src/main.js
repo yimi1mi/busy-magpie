@@ -10,6 +10,7 @@ const path = require('path');
 const { autoUpdater } = require('electron-updater');
 const { heartbeat } = require('./launch-policy.cjs');
 const { parseGateway, gatewayProblem } = require('./gateway-config.cjs');
+const { fitWindowBounds } = require('./window-bounds.cjs');
 
 app.setName('Busy Magpie');
 
@@ -96,6 +97,7 @@ let aliveTimer = null;
 let pauseTimer = null;
 let compactPosition = null;
 let shortcutRecording = false;
+let screenChangeTimer = null;
 let frame = { lanes: 1, cardHeight: 400, windowHeight: 432 };
 
 function log(message) {
@@ -825,6 +827,36 @@ function toggleCompact() {
   applyWindowMode();
   send('magpie:settings', publicSettings());
   refreshTrayMenu();
+}
+
+function recoverWindow() {
+  if (!win || win.isDestroyed()) return;
+  const bounds = win.getBounds();
+  const area = screen.getDisplayMatching(bounds).workArea;
+  const fitted = fitWindowBounds(bounds, area);
+  if (dragState) endDrag();
+  if (resizeState) endResize();
+  win.setBounds(fitted, false);
+  if (!frame.compact) { settings.width = fitted.width; settings.height = fitted.height; }
+  if (compactPosition) compactPosition = fitWindowBounds({ ...compactPosition, width: COMPACT_WIDTH, height: COMPACT_HEIGHT }, area);
+  frame = { ...frame, cardHeight: fitted.height - 32, windowHeight: fitted.height };
+  send('magpie:frame', frame);
+  savePosition();
+}
+
+function resetPlacement() {
+  if (!win || win.isDestroyed()) return { ok: false, error: '窗口尚未准备好' };
+  const point = defaultBounds(settings.compact ? COMPACT_WIDTH : WIDTH, settings.compact ? COMPACT_HEIGHT : HEIGHT);
+  const next = { ...settings, width: WIDTH, height: HEIGHT, left: point.x, top: point.y };
+  const saved = saveSettings(next);
+  if (!saved.ok) return saved;
+  settings = next;
+  if (settings.compact) compactPosition = { x: point.x, y: point.y };
+  const shown = defaultBounds(frame.compact ? COMPACT_WIDTH : WIDTH, frame.compact ? COMPACT_HEIGHT : HEIGHT);
+  win.setPosition(shown.x, shown.y);
+  applyWindowMode();
+  recoverWindow();
+  return { ok: true };
 }
 
 function schedulePauseResume() {
@@ -1643,6 +1675,7 @@ function buildTrayMenu() {
       label: '调整位置…',
       click: beginLayout,
     },
+    { label: '恢复默认位置和大小', click: resetPlacement },
     {
       label: '重新连接',
       click: () => {
@@ -1940,6 +1973,7 @@ ipcMain.on('settings:close', () => closeSettingsPanel());
 ipcMain.handle('gateway:test', (_event, raw) => testGateway(raw));
 ipcMain.on('hotkey:capture', (_event, on) => setShortcutCapture(on));
 ipcMain.handle('hotkey:test', (_event, value) => testHotkey(value));
+ipcMain.handle('window:reset', () => resetPlacement());
 
 // While the slider is dragged the window follows it at once; nothing is
 // written until Save, and closing the panel puts the stored value back.
@@ -2045,6 +2079,12 @@ function init() {
   if (IS_WIN) app.setAppUserModelId('dev.busymagpie.widget');
 
   createWindow();
+  const screenChanged = () => {
+    clearTimeout(screenChangeTimer);
+    screenChangeTimer = setTimeout(recoverWindow, 200);
+  };
+  screen.on('display-removed', screenChanged);
+  screen.on('display-metrics-changed', screenChanged);
   createTray();
   registerHotkey();
   applyAutostart();
