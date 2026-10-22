@@ -1,6 +1,7 @@
 export const requestActive = route => Boolean(route) && (!route.done || (route.tries || []).some(item => !item.done));
 export const requestFailed = route => Boolean(route) && !requestActive(route)
   && (Number(route.status) >= 400 || Boolean(route.error) || Number(route.tries?.at(-1)?.status) >= 400);
+export const requestGroupKey = route => `${route.agent || 'unknown'}|${route.session || route.conv || ''}`;
 
 export function recentRequests(trace, filter = 'all', limit = 20) {
   return (Array.isArray(trace?.routes) ? trace.routes : [])
@@ -13,7 +14,7 @@ export function groupRequests(routes, { includeCompleted = false } = {}) {
   const groups = new Map();
   for (const route of includeCompleted ? routes : routes.filter(requestActive)) {
     const session = String(route.session || route.conv || '');
-    const key = `${route.agent || 'unknown'}|${session}`;
+    const key = requestGroupKey(route);
     let group = groups.get(key);
     if (!group) {
       group = { key, session, agent: route.agent || '', routes: [] };

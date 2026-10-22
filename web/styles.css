@@ -952,8 +952,6 @@ body.menu-open .stage-canvas {
 }
 
 .stage > .wire { opacity: 0; }
-.single-wires:not(.active) .fan-wire-trail,
-.single-wires:not(.active) .fan-wire-path { animation: none; opacity: 0.18; }
 .node[data-layout-key], .hub { transform-origin: top left; }
 
 .routing-ghost {
@@ -1845,7 +1843,7 @@ body.menu-open .stage-canvas {
 .fan-wire-path {
   fill: none;
   stroke-linecap: round;
-  stroke: var(--route);
+  stroke: var(--wire-color, var(--route));
 }
 
 .fan-wire-under {
@@ -1874,7 +1872,7 @@ body.menu-open .stage-canvas {
 
 .fan-wire-path {
   --packet-lag: 0;
-  stroke: color-mix(in srgb, var(--route) 60%, #fff);
+  stroke: color-mix(in srgb, var(--wire-color, var(--route)) 60%, #fff);
   stroke-width: 1.8;
   stroke-dasharray: 4 96;
   opacity: 0.95;
@@ -1882,20 +1880,35 @@ body.menu-open .stage-canvas {
 
 .fan-wire-port {
   fill: #15141c;
-  stroke: var(--route);
+  stroke: var(--wire-color, var(--route));
   stroke-width: 1;
   opacity: 0.6;
 }
 
 .fan-wire-end {
-  fill: var(--route);
+  fill: var(--wire-color, var(--route));
   animation: portSignal 1.8s ease-out infinite;
   animation-delay: var(--flow, 0s);
 }
 
-.fan-link.fresh .fan-wire-track {
+.fan-link.fresh[data-state="live"] .fan-wire-track {
   animation: wireIn 0.6s ease-out both;
 }
+
+.fan-link[data-state="idle"], .fan-link[data-state="rest"],
+.single-wires > g[data-state="idle"], .single-wires > g[data-state="rest"] { --wire-color: #737080; }
+.fan-link:not([data-state="live"]) .fan-wire-trail,
+.fan-link:not([data-state="live"]) .fan-wire-path,
+.single-wires > g:not([data-state="live"]) .fan-wire-trail,
+.single-wires > g:not([data-state="live"]) .fan-wire-path { display: none; animation: none; }
+.fan-link:not([data-state="live"]) .fan-wire-end { animation: none; }
+.fan-link[data-state="lit"] .fan-wire-track,
+.single-wires > g[data-state="lit"] .fan-wire-track { opacity: 0.85; stroke-width: 1.5; }
+.fan-link[data-state="rest"] .fan-wire-track,
+.single-wires > g[data-state="rest"] .fan-wire-track { stroke-dasharray: 2 6; opacity: 0.45; }
+.node.account[data-wire-state="rest"] { border-style: dashed; }
+.node.account[data-wire-state="rest"] > * { opacity: 0.65; }
+.node.account[data-wire-state="lit"] { border-color: color-mix(in srgb, var(--route) 45%, transparent); }
 
 .fan .node.account.inflight {
   border-color: color-mix(in srgb, var(--route, var(--accent)) 34%, transparent);

@@ -12,7 +12,8 @@ import { downloadSize } from './download-progress.mjs';
 import { acceleratorFromEvent } from './hotkey.mjs';
 import { FlightBook } from './flight-playback.mjs';
 import { wireCurve, hubCurve, glideProgress } from './flight-path.mjs';
-import { recentRequests, requestActive, requestFailed, attemptRows, redactDiagnostic, errorAdvice, requestSummary, RequestSelection, groupRequests } from './request-model.mjs';
+import { stagedRoutes, wireState, nextRestExpiry } from './routing-state.mjs';
+import { recentRequests, requestActive, requestFailed, requestGroupKey, attemptRows, redactDiagnostic, errorAdvice, requestSummary, RequestSelection, groupRequests } from './request-model.mjs';
 
 const $ = (id) => document.getElementById(id);
 
@@ -97,6 +98,9 @@ const flights = new Map();
 const flightBook = new FlightBook();
 const flightAnchors = new Map();
 let flightRenderPending = false;
+let stageExpiryTimer = 0;
+let clockTrace = null;
+let gatewayClockOffset = 0;
 
 // The same flying magpie magpie's own Routing page draws: facing right,
 // wings beating from the shoulder, banked into the turn.
@@ -1481,6 +1485,7 @@ async function runFlight(flight) {
       flight.flier.classList.remove('carrying');
       flight.bird.classList.add('held');
       if (buildFlightLegs(flight)) positionHeldFlight(flight);
+      renderAfterFlight();
     });
   } finally {
     disposeFlight(flight);
@@ -2000,29 +2005,20 @@ function renderView(view, color = '#a18bff') {
   animateNumber(el.statErrors, view.errors);
 }
 
-// Each agent wears its own mark's colour. Codex, Cursor and Grok are monochrome
-// brands, so their black/white is lifted just enough to sit on a near-black
-// card; DeepSeek, Claude and Gemini keep their brand hue with more light.
+// The same non-error palette as magpie's Routing page. Red remains an error.
 const ROUTE_COLORS = {
-  codex: '#EFEDF7',
-  dsh: '#7C93FF',
-  claude: '#EC9B7C',
-  'claude-code': '#EC9B7C',
-  cursor: '#9A97AD',
-  gemini: '#7FA9FF',
-  opencode: '#8EDCB9',
-  qoder: '#F2A98B',
-  grok: '#E6E4EE',
-  zcode: '#9BC7FF',
+  claude: '#d97757', 'claude-code': '#d97757', codex: '#6366f1', gemini: '#0ea5e9',
+  copilot: '#a855f7', cursor: '#14b8a6', opencode: '#eab308', crush: '#ec4899',
+  goose: '#84cc16', pi: '#10b981', omp: '#d946ef', omo: '#7c3aed', dsh: '#06b6d4',
+  commandcode: '#f97316', mimocode: '#3b82f6', deveco: '#3c99cc',
 };
-
-const FALLBACK_COLORS = ['#A18BFF', '#61D7E7', '#DDA2FF', '#8EB6FF', '#F1C66B', '#8EDCB9', '#FFA7B8'];
+const FALLBACK_COLORS = ['#8b5cf6', '#22c55e', '#0d9488', '#0891b2', '#ca8a04', '#db2777', '#2563eb', '#65a30d'];
 
 function agentColor(agent) {
   const id = String(agent || '').toLowerCase();
   if (ROUTE_COLORS[id]) return ROUTE_COLORS[id];
   let hash = 0;
-  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) % 9973;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
   return FALLBACK_COLORS[hash % FALLBACK_COLORS.length];
 }
 
@@ -2037,6 +2033,35 @@ function flightDisplayRoute(session) {
   return { ...route, tries: attempts.slice(0, session.attempt + 1),
     done: Boolean(route.done && session.attempt === attempts.length - 1),
     status: attempt.status || 0, error: attempt.error || '', model: attempt.model || route.model };
+}
+
+function routingNow() {
+  if (lastTrace !== clockTrace) {
+    clockTrace = lastTrace;
+    const stamp = Date.parse(lastTrace?.now);
+    gatewayClockOffset = Number.isFinite(stamp) ? stamp - Date.now() : 0;
+  }
+  return Date.now() + gatewayClockOffset;
+}
+
+function scheduleStageExpiry(expiry, now) {
+  clearTimeout(stageExpiryTimer);
+  stageExpiryTimer = 0;
+  if (Number.isFinite(expiry)) stageExpiryTimer = window.setTimeout(() => {
+    stageExpiryTimer = 0;
+    render();
+  }, Math.min(2147483647, Math.max(1, expiry - now + 1)));
+}
+
+function requestsOnWire() {
+  return new Set([...flights.values()].filter(flight => flight.active
+    && flight.playback.attempt >= 0 && flight.holding !== 'hub').map(flight => flight.routeId));
+}
+
+function applyRoutingState(agent, account, routes) {
+  const moving = requestsOnWire(), now = routingNow();
+  agent.dataset.wireState = wireState(routes, 'in', moving, now);
+  account.dataset.wireState = wireState(routes, 'out', moving, now);
 }
 
 function visibleFlightGroups(routes) {
@@ -2054,7 +2079,8 @@ function visibleFlightGroups(routes) {
 
 function renderMulti(routes, totals) {
   setMulti(true);
-  setLiveChrome({ inFlight: true });
+  const activeCount = (lastTrace?.routes || []).filter(isInFlight).length;
+  setLiveChrome({ inFlight: activeCount > 0 || requestsOnWire().size > 0 });
 
   const { groups, visible } = visibleFlightGroups(routes);
   const count = visible.length;
@@ -2075,15 +2101,15 @@ function renderMulti(routes, totals) {
   el.fan.classList.toggle('ultra', count >= 4);
   el.fan.classList.toggle('micro', count >= 5);
 
-  const activeCount = (lastTrace?.routes || []).filter(isInFlight).length;
-  el.lanesTitle.textContent = activeCount ? `${activeCount} 个请求正在执行` : '请求结果返回中';
+  el.lanesTitle.textContent = activeCount ? `${activeCount} 个请求正在执行`
+    : flightBook.sessions.size ? '请求结果返回中' : '最近完成的请求';
   el.lanesSub.textContent = `${groups.length} 组 · 按 Agent / 会话`;
   $('lanesMore').hidden = groups.length <= 4 && routes.length === groups.length;
   $('lanesMore').textContent = `展开 ${routes.length} 个请求`;
   renderStory(present(chooseLatest(routes), totals, Boolean(settings.maskAccounts)));
 
   setParts(el.caption, [
-    { text: `${routes.length} 个请求 · ${groups.length} 组活动`, role: 'strong' },
+    { text: `${routes.length} 条请求 · ${groups.length} 组`, role: 'strong' },
     { text: ' · 按 Agent / 会话合并显示。', role: 'muted' },
   ]);
 
@@ -2128,6 +2154,7 @@ function renderMulti(routes, totals) {
     next.dataset.layoutKey = `account:${group.key}`;
     const node = reuseRoutingNode(el.fanAccounts, next);
     accountRows.push(node);
+    applyRoutingState(agentNodes.get(group.key), node, group.routes);
     for (const member of group.routes) flightAnchors.set(String(member.id), {
       agent: agentNodes.get(group.key), account: node, hub: el.fanHub.querySelector('.hub-card'),
     });
@@ -2222,7 +2249,7 @@ function drawFanWires() {
   // Stable per-request phases survive redraws and changes in lane order.
   const flowCycle = 1800;
   const now = performance.now();
-  const wire = (d, color, fresh, endX, endY, key, outgoing) => {
+  const wire = (d, color, fresh, endX, endY, key, outgoing, state) => {
     let seed = 0;
     for (const char of String(key)) seed = (seed * 31 + char.charCodeAt(0)) >>> 0;
     const phase = -((now + seed % flowCycle + (outgoing ? 600 : 0)) % flowCycle) / 1000;
@@ -2230,6 +2257,7 @@ function drawFanWires() {
     link.setAttribute('class', `fan-link${fresh ? ' fresh' : ''}`);
     link.dataset.route = key;
     link.dataset.side = outgoing ? 'out' : 'in';
+    link.dataset.state = state || 'idle';
     link.style.setProperty('--route', color);
     link.style.setProperty('--flow', `${phase.toFixed(3)}s`);
 
@@ -2267,7 +2295,7 @@ function drawFanWires() {
     const ax = rect.right - fan.left;
     const ay = rect.top - fan.top + rect.height / 2;
     const d = wireCurve({ x: ax, y: ay }, { x: hubLeft, y: hubY });
-    wire(d, color, fresh, ax, ay, agent.dataset.id, false);
+    wire(d, color, fresh, ax, ay, agent.dataset.id, false, agent.dataset.wireState);
   }
 
   for (const account of accounts) {
@@ -2277,7 +2305,7 @@ function drawFanWires() {
     const cx = rect.left - fan.left;
     const cy = rect.top - fan.top + rect.height / 2;
     const d = wireCurve({ x: hubRight, y: hubY }, { x: cx, y: cy });
-    wire(d, color, fresh, cx, cy, account.dataset.id, true);
+    wire(d, color, fresh, cx, cy, account.dataset.id, true, account.dataset.wireState);
   }
 
   el.fanWires.replaceChildren(fragment);
@@ -2309,7 +2337,10 @@ function drawSingleWires() {
       svg.append(group);
     }
   }
-  [...svg.children].forEach((group, index) => { for (const path of group.children) path.setAttribute('d', definitions[index]); });
+  [...svg.children].forEach((group, index) => {
+    group.dataset.state = (index ? el.accountNode : el.agentNode).dataset.wireState || 'idle';
+    for (const path of group.children) path.setAttribute('d', definitions[index]);
+  });
 }
 
 function stateDotClass(kind) {
@@ -2363,25 +2394,32 @@ function renderRoutingContent() {
   if (!$('historyView').hidden) renderRequestHistory();
   if (!connection.online || !lastTrace) {
     stopFlights();
+    scheduleStageExpiry(Infinity, routingNow());
+    el.agentNode.dataset.wireState = 'idle';
+    el.accountNode.dataset.wireState = 'idle';
     const waiting = !connection.detail || connection.detail === '正在连接' || connection.detail === '正在重新连接';
     renderView(!connection.online ? waiting ? connecting(lastTrace?.totals)
       : offline(connection.detail, settings.gateway, lastTrace?.totals) : empty(undefined));
     return;
   }
 
-  const displayed = new Map(active.map(route => [String(route.id), route]));
+  const now = routingNow();
+  const stage = stagedRoutes(routes, new Set(flightBook.sessions.keys()), now);
+  const displayed = new Map(stage.routes.map(route => [String(route.id), route]));
   for (const session of flightBook.sessions.values()) {
     if (session.active) displayed.set(session.id, flightDisplayRoute(session));
   }
   const visible = [...displayed.values()];
+  scheduleStageExpiry(Math.min(stage.nextExpiry, nextRestExpiry(visible, now)), now);
   if (visible.length >= 2) renderMulti(visible, lastTrace.totals);
   else {
     const route = visible[0] || chooseLatest(routes);
-    const key = route ? `${route.agent || 'unknown'}|${route.session || route.conv || ''}` : 'empty';
+    const key = route ? requestGroupKey(route) : 'empty';
     el.agentNode.dataset.layoutKey = `agent:${key}`;
     el.accountNode.dataset.layoutKey = `account:${key}`;
     renderView(present(route, lastTrace.totals, Boolean(settings.maskAccounts)),
       route ? agentColor(route.agent) : '#a18bff');
+    applyRoutingState(el.agentNode, el.accountNode, route ? [route] : []);
     if (route) flightAnchors.set(String(route.id), {
       agent: el.agentNode, account: el.accountNode, hub: el.hub.querySelector('.hub-card'),
     });
@@ -2482,7 +2520,7 @@ async function boot() {
 
   window.addEventListener('dragover', (event) => event.preventDefault());
   window.addEventListener('drop', (event) => event.preventDefault());
-  window.addEventListener('beforeunload', stopFlights);
+  window.addEventListener('beforeunload', () => { clearTimeout(stageExpiryTimer); stopFlights(); });
   reducedMotion.addEventListener('change', render);
   setupDragBar();
   setupDragBar($('compactDragBar'));

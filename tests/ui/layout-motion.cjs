@@ -86,7 +86,7 @@ async function run() {
   assert.equal(await js('document.querySelectorAll(".routing-ghost").length'),0);
   assert.equal(await js('document.body.classList.contains("multi")'),false);
   record('rapid layout changes settle without stale cards');
-  await js('window.busy.settingsSave({quietMotion:true})');await sendRoutes([a,b]);
+  await js('(async()=>{const current=await window.busy.settingsGet();return window.busy.settingsSave({...current.settings,quietMotion:true});})()');await sendRoutes([a,b]);
   assert.equal(await motion('pause'),0);
   assert.equal(await js('document.querySelectorAll(".flying-bird").length'),0);
   record('quiet mode makes layout changes immediate and stops flights');
