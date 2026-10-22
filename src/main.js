@@ -14,6 +14,8 @@ app.setName('Busy Magpie');
 
 const WIDTH = 632;
 const HEIGHT = 432;
+const COMPACT_WIDTH = 360;
+const COMPACT_HEIGHT = 112;
 // The card is drawn on a 600×400 canvas inside 16px of padding. Keeping the
 // window at that shape is what lets the canvas scale up to fill it instead of
 // leaving dark bands above and below.
@@ -89,6 +91,7 @@ let quitting = false;
 let positionTimer = null;
 let aliveTimer = null;
 let pauseTimer = null;
+let compactPosition = null;
 let frame = { lanes: 1, cardHeight: 400, windowHeight: 432 };
 
 function log(message) {
@@ -135,6 +138,7 @@ function defaults() {
     hubEffect: 'ripple',
     keepAlive: true,
     pauseUntil: 0,
+    compact: false,
     hotkey: 'Control+Alt+M',
     hotkeyOn: true,
     autostart: false,
@@ -317,6 +321,8 @@ function createWindow() {
   }
   settings.width = width;
   settings.height = height;
+  const compact = Boolean(settings.compact && !firstRunOpen);
+  if (compact) { width = COMPACT_WIDTH; height = COMPACT_HEIGHT; }
   const fallback = defaultBounds(width, height);
   const x = Number.isFinite(settings.left) ? settings.left : fallback.x;
   const y = Number.isFinite(settings.top) ? settings.top : fallback.y;
@@ -352,6 +358,7 @@ function createWindow() {
       backgroundThrottling: false,
     },
   });
+  frame = { ...frame, compact, cardHeight: height - 32, windowHeight: height };
 
   win.setMenuBarVisibility(false);
   if (IS_MAC) {
@@ -447,6 +454,7 @@ function publicSettings() {
     showQuota: settings.showQuota !== false,
     showTiming: settings.showTiming !== false,
     hubEffect: settings.hubEffect,
+    compact: Boolean(settings.compact),
   };
 }
 
@@ -726,6 +734,7 @@ function setCheckUpdates(value) {
 
 function savePosition() {
   if (!win || win.isDestroyed()) return;
+  if (settings.compact && (settingsOpen || settingsClosing || quickMenuOpen)) return;
   const [x, y] = win.getPosition();
   settings.left = x;
   settings.top = y;
@@ -762,6 +771,32 @@ function showWindow() {
   refreshTrayMenu();
 }
 
+function applyWindowMode() {
+  if (!win || win.isDestroyed()) return;
+  const compact = Boolean(settings.compact && !firstRunOpen && !settingsOpen && !settingsClosing && !quickMenuOpen);
+  const bounds = win.getBounds();
+  if (frame.compact && !compact && settings.compact) compactPosition = { x: bounds.x, y: bounds.y };
+  const width = compact ? COMPACT_WIDTH : settings.width;
+  const height = compact ? COMPACT_HEIGHT : settings.height;
+  const point = compact && compactPosition ? compactPosition : bounds;
+  const position = clampBounds(point.x, point.y, width, height);
+  win.setBounds({ ...position, width, height }, false);
+  if (compact || !settings.compact) compactPosition = null;
+  frame = { ...frame, compact, cardHeight: height - 32, windowHeight: height };
+  send('magpie:frame', frame);
+}
+
+function toggleCompact() {
+  const next = { ...settings, compact: !settings.compact };
+  const saved = saveSettings(next);
+  if (!saved.ok) { send('magpie:action-error', saved.error); return; }
+  settings = next;
+  setQuickMenuOpen(false);
+  applyWindowMode();
+  send('magpie:settings', publicSettings());
+  refreshTrayMenu();
+}
+
 function schedulePauseResume() {
   clearTimeout(pauseTimer);
   const remaining = Number(settings.pauseUntil) - Date.now();
@@ -790,6 +825,7 @@ function setQuickMenuOpen(value) {
     || layoutMode || dragState || resizeState)) return;
   if (quickMenuOpen === open) return;
   quickMenuOpen = open;
+  applyWindowMode();
   setHoverInteractive(false);
   applyClickThrough();
   send('magpie:quick-menu', open);
@@ -818,6 +854,7 @@ function openSettingsPanel(mode = 'settings') {
   settingsOpen = true;
   settingsClosing = false;
   currentPanelMode = mode;
+  applyWindowMode();
   hoverInteractive = false;
   win.setIgnoreMouseEvents(false);
   win.setFocusable(true);
@@ -847,6 +884,7 @@ function closeSettingsPanel() {
       applyTopmost();
     }
     settingsClosing = false;
+    applyWindowMode();
     hoverInteractive = false;
     hoverKind = null;
     refreshTrayMenu();
@@ -921,7 +959,7 @@ function watchHover() {
     const east = point.x >= card.right - edge && point.x <= card.right;
     const within = point.x >= card.left && point.x <= card.right
       && point.y >= card.top && point.y <= card.bottom;
-    const onBorder = within && (north || south || west || east);
+    const onBorder = !frame.compact && within && (north || south || west || east);
     const onTopBar = point.x >= bounds.x
       && point.x <= bounds.x + bounds.width
       && point.y >= bounds.y + hitAreas.dragTop
@@ -1005,7 +1043,7 @@ function endDrag() {
 }
 
 function startResize(direction = 'se') {
-  if (!win || win.isDestroyed() || firstRunOpen || settingsClosing || quickMenuOpen || resizeState) return;
+  if (!win || win.isDestroyed() || firstRunOpen || settingsClosing || quickMenuOpen || frame.compact || resizeState) return;
   const dir = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].includes(direction)
     ? direction
     : 'se';
@@ -1119,7 +1157,7 @@ function endResize() {
     // holds whether or not the drawer is open — and whether it closed in
     // the middle of the drag.
     const cardHeight = Math.max(432, Number(settings.height) || bounds.height);
-    frame = { lanes: frame.lanes, cardHeight: cardHeight - 32, windowHeight: bounds.height };
+    frame = { ...frame, cardHeight: cardHeight - 32, windowHeight: bounds.height };
     send('magpie:frame', frame);
     send('magpie:resize', false);
   }
@@ -1171,7 +1209,7 @@ function fitWindow(lanes) {
   // Agent count never resizes the window. Only the user's resize handle can.
   if (!win || win.isDestroyed()) return;
   const bounds = win.getBounds();
-  frame = { lanes, cardHeight: bounds.height - 32, windowHeight: bounds.height };
+  frame = { ...frame, lanes, cardHeight: bounds.height - 32, windowHeight: bounds.height };
   send('magpie:frame', frame);
 }
 
@@ -1518,6 +1556,7 @@ function buildTrayMenu() {
         refreshTrayMenu();
       },
     },
+    { label: '紧凑模式', type: 'checkbox', checked: Boolean(settings.compact), click: toggleCompact },
     {
       label: '隐藏账号名称',
       type: 'checkbox',
@@ -1755,6 +1794,7 @@ ipcMain.handle('settings:save', (_event, input) => {
       keepAlive: data.keepAlive === undefined
         ? settings.keepAlive !== false
         : Boolean(data.keepAlive),
+      compact: data.compact === undefined ? Boolean(settings.compact) : Boolean(data.compact),
       hotkey: nextHotkey,
       hotkeyOn: nextHotkeyOn,
     };
@@ -1772,7 +1812,7 @@ ipcMain.handle('settings:save', (_event, input) => {
       win.setOpacity(settings.opacity);
       // While the settings drawer is open the window is deliberately
       // taller; do not collapse it from inside the save call.
-      if (!settingsOpen) {
+      if (!settingsOpen && !settings.compact) {
         const bounds = win.getBounds();
         win.setBounds({
           x: bounds.x,
@@ -1783,6 +1823,7 @@ ipcMain.handle('settings:save', (_event, input) => {
         settings.left = bounds.x;
         settings.top = bounds.y;
         frame = {
+          ...frame,
           lanes: frame.lanes,
           cardHeight: settings.height - 32,
           windowHeight: settings.height,
@@ -1791,6 +1832,7 @@ ipcMain.handle('settings:save', (_event, input) => {
       }
     }
     send('magpie:settings', publicSettings());
+    applyWindowMode();
     if (gatewayChanged) rebuildClient();
     else if (periodChanged) refreshUsage();
     if (settings.updateMode === 'idle') {
@@ -1854,12 +1896,14 @@ ipcMain.on('busy:about-open', () => {
 ipcMain.on('busy:menu-toggle', () => setQuickMenuOpen(!quickMenuOpen));
 ipcMain.on('busy:menu-close', () => setQuickMenuOpen(false));
 ipcMain.on('busy:history-open', () => openSettingsPanel('history'));
+ipcMain.on('busy:compact-toggle', toggleCompact);
 ipcMain.on('busy:menu-action', (_event, action) => {
   if (!quickMenuOpen) return;
   switch (action) {
     case 'settings': openSettingsPanel(); break;
     case 'models': openSettingsPanel('models'); break;
     case 'history': openSettingsPanel('history'); break;
+    case 'compact': toggleCompact(); break;
     case 'layout': beginLayout(); break;
     case 'hide': win.hide(); break;
     case 'pause': pauseDisplay(); break;

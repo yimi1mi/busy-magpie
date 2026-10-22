@@ -484,15 +484,31 @@ body.can-grab .drag-grip {
 
 .usage-status {
   position: absolute;
-  top: 58px;
-  left: 50%;
+  bottom: 9px;
+  right: 20px;
   z-index: 2;
-  transform: translateX(-50%);
   color: var(--faint);
   font-size: 8px;
   white-space: nowrap;
   pointer-events: none;
 }
+
+.compact-view { display: none; position: relative; width: 100%; height: 100%; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 13px 9px; }
+body.compact .compact-view { display: flex; }
+body.compact .stage-area, body.compact .resize-handle { display: none; }
+.compact-drag { height: 17px; }
+.compact-drag .drag-grip { top: 3px; }
+.compact-status { min-width: 85px; display: flex; flex-direction: column; gap: 5px; }
+.compact-status b { color: var(--muted); font-size: 9px; letter-spacing: 1px; }
+.compact-status span { color: var(--faint); font-size: 9px; white-space: nowrap; }
+.compact-status i { display: inline-block; width: 5px; height: 5px; margin-left: 4px; border-radius: 50%; background: var(--warn); }
+.compact-status i.online { background: var(--good); }
+.compact-pill { display: flex; flex-direction: column; align-items: center; min-width: 92px; padding: 5px 7px; border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; background: rgba(255,255,255,0.035); color: var(--ink); cursor: pointer; }
+.compact-pill b { font-size: 17px; }
+.compact-pill span { font-size: 8px; color: var(--muted); }
+.compact-actions { display: flex; gap: 3px; }
+.compact-actions button { width: 26px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font-size: 15px; cursor: pointer; }
+.compact-actions button:hover { background: rgba(161,139,255,0.12); color: var(--accent); }
 
 .token-orbits {
   position: absolute;

@@ -121,6 +121,7 @@ function iconSetup() {
 function applyFrame(next) {
   if (!next || !next.windowHeight) return;
   frame = { ...frame, ...next };
+  document.body.classList.toggle('compact', Boolean(frame.compact));
   const root = document.documentElement;
   root.style.setProperty('--window-h', `${frame.windowHeight}px`);
   root.style.setProperty('--card-h', `${frame.cardHeight}px`);
@@ -246,7 +247,7 @@ function renderModelUsage() {
   const orbit = $('tokenOrbits');
   const rows = view.consistent ? view.rows : [];
   orbit.toggleAttribute('hidden', !rows.length);
-  if (rows.length) paintModelTracks(orbit, rows.slice(0, 3), el.tokenPill.offsetWidth + 18, 45);
+  if (rows.length && el.tokenPill.offsetWidth > 0) paintModelTracks(orbit, rows.slice(0, 3), el.tokenPill.offsetWidth + 18, 45);
   const pages = Math.max(1, Math.ceil(rows.length / 8));
   modelPage = Math.min(modelPage, pages - 1);
   const page = rows.slice(modelPage * 8, modelPage * 8 + 8);
@@ -467,6 +468,9 @@ function setTokenTotal(text, animate = true) {
 }
 
 function applyTokenPill({ total = 0, pct = null, title = '', windowLabel = '' } = {}) {
+  $('compactTotal').textContent = usageData ? formatTokens(total) : '—';
+  $('compactPeriod').textContent = windowLabel;
+  $('compactPill').title = title || '单击切换时间窗';
   if (!el.tokenPill) return;
   // A usage summary is shown even at zero, so the pill stays reachable and
   // the next click can walk back out of an empty window.
@@ -497,7 +501,7 @@ function reportHitAreas() {
   const canvas = el.stageCanvas?.getBoundingClientRect();
   if (!canvas) return;
   const scale = uiScale();
-  const controls = [el.tokenPill, el.appVersion, $('updateChip'), $('quickMenuToggle'), $('lanesMore')]
+  const controls = [el.tokenPill, el.appVersion, $('updateChip'), $('quickMenuToggle'), $('lanesMore'), $('compactPill'), $('compactExpand'), $('compactMenu')]
     .filter((node) => node && !node.hidden && node.isConnected)
     .map((node) => {
       const box = node.getBoundingClientRect();
@@ -510,8 +514,8 @@ function reportHitAreas() {
     });
   const payload = {
     controls,
-    dragTop: Math.round(canvas.top),
-    dragBottom: Math.round(canvas.top + 28 * scale + 6),
+    dragTop: Math.round((frame.compact ? $('compactDragBar') : $('dragBar')).getBoundingClientRect().top),
+    dragBottom: Math.round((frame.compact ? $('compactDragBar') : $('dragBar')).getBoundingClientRect().bottom),
     ui: Number(scale.toFixed(4)),
   };
   const key = JSON.stringify(payload);
@@ -527,6 +531,8 @@ function setupQuickMenu() {
   let open = false;
 
   button.addEventListener('click', () => window.busy.toggleMenu());
+  $('compactMenu').addEventListener('click', () => window.busy.toggleMenu());
+  $('compactExpand').addEventListener('click', () => window.busy.toggleCompact());
   menu.addEventListener('click', (event) => {
     const item = event.target.closest('[data-menu-action]');
     if (item) window.busy.menuAction(item.dataset.menuAction);
@@ -564,6 +570,7 @@ function setupQuickMenu() {
     open = Boolean(value);
     menu.hidden = !open;
     button.setAttribute('aria-expanded', String(open));
+    $('compactMenuItem').textContent = settings.compact ? '展开主界面' : '紧凑模式';
     document.body.classList.toggle('menu-open', open);
     $('quickMenuError').hidden = true;
     if (open) items[0].focus({ preventScroll: true });
@@ -582,7 +589,7 @@ function setupTokenPill() {
 
   let switching = false;
 
-  pill.addEventListener('click', async () => {
+  const cycle = async () => {
     if (switching || document.body.classList.contains('settings-open')) return;
     const enabled = cyclePeriods();
     const current = activePeriod();
@@ -601,7 +608,9 @@ function setupTokenPill() {
       switching = false;
       pill.classList.remove('switching');
     }
-  });
+  };
+  pill.addEventListener('click', cycle);
+  $('compactPill').addEventListener('click', cycle);
 
   new ResizeObserver(() => requestAnimationFrame(reportHitAreas)).observe(pill);
   requestAnimationFrame(reportHitAreas);
@@ -628,8 +637,7 @@ function setParts(target, parts) {
 // magpie to the chosen account, then an answer flies back. The bird is
 // flipped when travelling left and banked into the curve.
 
-function setupDragBar() {
-  const bar = $('dragBar');
+function setupDragBar(bar = $('dragBar')) {
   if (!bar || !window.busy?.dragStart) return;
   let press = null;
   let dragging = false;
@@ -830,6 +838,7 @@ function setupSettingsPanel() {
     quota.checked = s.showQuota !== false;
     timing.checked = s.showTiming !== false;
     keepAlive.checked = s.keepAlive !== false;
+    $('settingsCompact').checked = Boolean(s.compact);
     opacity.value = String(Math.round((Number(s.opacity) || 1) * 100));
     opacityOut.textContent = `${opacity.value}%`;
     savedOpacity = Math.min(1, Math.max(0.4, Number(s.opacity) || 1));
@@ -927,6 +936,7 @@ function setupSettingsPanel() {
         hubEffect: (effectChips.find((chip) => chip.getAttribute('aria-pressed') === 'true')
           || effectChips[0]).dataset.effect,
         keepAlive: keepAlive.checked,
+        compact: $('settingsCompact').checked,
       });
       if (!result?.ok) {
         setStatus(result?.error || '保存失败', true);
@@ -2257,6 +2267,9 @@ function renderStory(view) {
 }
 
 function render() {
+  const activeCount = (lastTrace?.routes || []).filter(isInFlight).length;
+  $('compactStatus').textContent = connection.online ? activeCount ? `${activeCount} 个请求进行中` : '已连接 · 空闲' : connection.retry ? '自动重连中' : '未连接';
+  $('compactLiveDot').classList.toggle('online', Boolean(connection.online));
   if (!$('historyView').hidden) renderRequestHistory();
   if (!connection.online) {
     const waiting = !connection.detail || connection.detail === '正在连接' || connection.detail === '正在重新连接';
@@ -2377,6 +2390,7 @@ async function boot() {
   window.addEventListener('drop', (event) => event.preventDefault());
   window.addEventListener('beforeunload', stopFlights);
   setupDragBar();
+  setupDragBar($('compactDragBar'));
   setupResizeHandles();
   setupSettingsPanel();
   setupAbout();

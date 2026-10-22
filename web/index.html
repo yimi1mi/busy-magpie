@@ -14,6 +14,12 @@
     <div class="card" id="card">
       <div class="aurora aurora-a"></div>
       <div class="aurora aurora-b"></div>
+      <div class="compact-view" id="compactView">
+        <div class="drag-bar compact-drag" id="compactDragBar"><span class="drag-grip" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span></div>
+        <div class="compact-status"><b>MAGPIE <i id="compactLiveDot"></i></b><span id="compactStatus">连接中</span></div>
+        <button class="compact-pill" id="compactPill" type="button" title="单击切换时间窗"><b class="mono" id="compactTotal">—</b><span id="compactPeriod"></span></button>
+        <div class="compact-actions"><button id="compactExpand" type="button" aria-label="展开主界面" title="展开主界面">↗</button><button id="compactMenu" type="button" aria-label="操作菜单" title="操作菜单">···</button></div>
+      </div>
       <div class="stage-area" id="stageArea">
         <div class="stage-canvas" id="stageCanvas">
           <svg class="bird-sky" id="birdSky" aria-hidden="true"></svg>
@@ -48,6 +54,7 @@
         <button type="button" role="menuitem" data-menu-action="history">最近请求</button>
         <button type="button" role="menuitem" data-menu-action="settings">设置</button>
         <button type="button" role="menuitem" data-menu-action="models">模型用量</button>
+        <button type="button" role="menuitem" data-menu-action="compact" id="compactMenuItem">紧凑模式</button>
         <button type="button" role="menuitem" data-menu-action="layout">调整位置</button>
         <button type="button" role="menuitem" data-menu-action="hide">隐藏挂件</button>
         <button type="button" role="menuitem" data-menu-action="pause">暂停显示 1 小时</button>
@@ -233,6 +240,7 @@
                     <input type="range" id="settingsOpacity" min="40" max="100" step="1" value="100">
                     <output id="settingsOpacityOut">100%</output>
                   </div>
+                  <label class="settings-switch"><span><b>紧凑模式</b><small>只显示连接、活动请求和用量</small></span><input type="checkbox" id="settingsCompact"></label>
                 </section>
 
                 <section class="settings-group">
