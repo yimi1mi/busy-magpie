@@ -1923,7 +1923,6 @@ function renderMulti(routes, totals) {
   }
   el.fanAgents.replaceChildren(agentFragment);
   el.fanAccounts.replaceChildren(accountFragment);
-  el.fanWires.replaceChildren();
 
   animateNumber(el.statRequests, Number(totals?.requests) || 0);
   animateNumber(el.statRerouted, Number(totals?.rerouted) || 0);
@@ -2009,36 +2008,42 @@ function drawFanWires() {
   const hubY = hubCard.top - fan.top + hubCard.height / 2;
   const fragment = document.createDocumentFragment();
 
-  // The dash phase is seeded from the wall clock: every trace update rebuilds
-  // these paths, and a fresh CSS animation would otherwise snap the marching
-  // dots back to the same spot. Each wire is offset a little so the fan does
-  // not blink in lockstep.
-  const flowCycle = 1600;
-  const phase = -(performance.now() % flowCycle) / 1000;
-  let wireIndex = 0;
+  // Stable per-request phases survive redraws and changes in lane order.
+  const flowCycle = 1800;
+  const now = performance.now();
+  const wire = (d, color, fresh, endX, endY, key, outgoing) => {
+    let seed = 0;
+    for (const char of String(key)) seed = (seed * 31 + char.charCodeAt(0)) >>> 0;
+    const phase = -((now + seed % flowCycle + (outgoing ? 600 : 0)) % flowCycle) / 1000;
+    const link = document.createElementNS(SVG_NS, 'g');
+    link.setAttribute('class', `fan-link${fresh ? ' fresh' : ''}`);
+    link.dataset.route = key;
+    link.dataset.side = outgoing ? 'out' : 'in';
+    link.style.setProperty('--route', color);
+    link.style.setProperty('--flow', `${phase.toFixed(3)}s`);
 
-  const wire = (d, color, fresh, endX, endY) => {
-    const under = document.createElementNS(SVG_NS, 'path');
-    under.setAttribute('class', 'fan-wire-under');
-    under.setAttribute('d', d);
-    under.setAttribute('stroke', color);
-    fragment.append(under);
+    for (const className of ['fan-wire-under', 'fan-wire-track', 'fan-wire-trail', 'fan-wire-path']) {
+      const path = document.createElementNS(SVG_NS, 'path');
+      path.setAttribute('class', className);
+      path.setAttribute('d', d);
+      path.setAttribute('pathLength', '100');
+      link.append(path);
+    }
 
-    const path = document.createElementNS(SVG_NS, 'path');
-    path.setAttribute('class', `fan-wire-path${fresh ? ' fresh' : ''}`);
-    path.setAttribute('d', d);
-    path.setAttribute('stroke', color);
-    path.style.setProperty('--flow', `${(phase - wireIndex * 0.37).toFixed(3)}s`);
-    wireIndex += 1;
-    fragment.append(path);
+    const port = document.createElementNS(SVG_NS, 'circle');
+    port.setAttribute('class', 'fan-wire-port');
+    port.setAttribute('cx', String(endX));
+    port.setAttribute('cy', String(endY));
+    port.setAttribute('r', '3.2');
+    link.append(port);
 
     const end = document.createElementNS(SVG_NS, 'circle');
     end.setAttribute('class', 'fan-wire-end');
     end.setAttribute('cx', String(endX));
     end.setAttribute('cy', String(endY));
-    end.setAttribute('r', '1.7');
-    end.setAttribute('fill', color);
-    fragment.append(end);
+    end.setAttribute('r', '1.3');
+    link.append(end);
+    fragment.append(link);
   };
 
   // Every source joins the same point on magpie; every account leaves the
@@ -2051,7 +2056,7 @@ function drawFanWires() {
     const ax = rect.right - fan.left;
     const ay = rect.top - fan.top + rect.height / 2;
     const d = `M ${ax} ${ay} C ${ax + (hubLeft - ax) * 0.45} ${ay}, ${hubLeft - (hubLeft - ax) * 0.35} ${hubY}, ${hubLeft} ${hubY}`;
-    wire(d, color, fresh, ax, ay);
+    wire(d, color, fresh, ax, ay, agent.dataset.id, false);
   }
 
   for (const account of accounts) {
@@ -2061,7 +2066,7 @@ function drawFanWires() {
     const cx = rect.left - fan.left;
     const cy = rect.top - fan.top + rect.height / 2;
     const d = `M ${hubRight} ${hubY} C ${hubRight + (cx - hubRight) * 0.35} ${hubY}, ${cx - (cx - hubRight) * 0.45} ${cy}, ${cx} ${cy}`;
-    wire(d, color, fresh, cx, cy);
+    wire(d, color, fresh, cx, cy, account.dataset.id, true);
   }
 
   el.fanWires.replaceChildren(fragment);
