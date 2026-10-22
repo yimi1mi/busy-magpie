@@ -136,6 +136,8 @@ export class FlightBook {
   }
 
   finish(session) {
-    if (this.sessions.get(session.id) === session) this.sessions.delete(session.id);
+    if (this.sessions.get(session.id) !== session) return false;
+    this.sessions.delete(session.id);
+    return true;
   }
 }

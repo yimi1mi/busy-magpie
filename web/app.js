@@ -1486,8 +1486,7 @@ async function runFlight(flight) {
     });
   } finally {
     disposeFlight(flight);
-    flightBook.finish(flight.playback);
-    renderAfterFlight();
+    if (flightBook.finish(flight.playback)) renderAfterFlight();
   }
 }
 
@@ -1826,6 +1825,7 @@ function applyGateway() {
 }
 
 const routingAnimations = new Set();
+const routingGhosts = new Map();
 let routingFrame = 0;
 
 function routingTargets() {
@@ -1844,8 +1844,20 @@ function captureRoutingLayout() {
       left: (rect.left - canvas.left) / scale, top: (rect.top - canvas.top) / scale,
       opacity: Number(getComputedStyle(node).opacity), multi: document.body.classList.contains('multi') });
   }
-  for (const animation of [...routingAnimations]) animation.cancel();
-  for (const ghost of el.stageCanvas.querySelectorAll('.routing-ghost')) ghost.remove();
+  for (const [key, ghost] of routingGhosts) {
+    if (before.has(key)) continue;
+    const rect = ghost.getBoundingClientRect();
+    before.set(key, { node: ghost, clone: ghost.firstElementChild.cloneNode(true), rect, scale,
+      left: (rect.left - canvas.left) / scale, top: (rect.top - canvas.top) / scale,
+      opacity: Number(getComputedStyle(ghost).opacity), multi: ghost.classList.contains('fan') });
+  }
+  for (const animation of [...routingAnimations]) {
+    if (!animation.effect.target.classList.contains('routing-ghost') || motionReduced() || frame.compact) animation.cancel();
+  }
+  if (motionReduced() || frame.compact) {
+    for (const ghost of routingGhosts.values()) ghost.remove();
+    routingGhosts.clear();
+  }
   return before;
 }
 
@@ -1876,6 +1888,11 @@ function animateRoutingLayout(before) {
     const to = node.getBoundingClientRect();
     if (!key || !to.width || !to.height) continue;
     const previous = before.get(key);
+    const ghost = routingGhosts.get(key);
+    if (ghost) {
+      for (const animation of ghost.getAnimations()) animation.cancel();
+      ghost.remove(); routingGhosts.delete(key);
+    }
     if (previous) {
       const from = previous.rect;
       const dx = (from.left - to.left) / scale, dy = (from.top - to.top) / scale;
@@ -1890,7 +1907,7 @@ function animateRoutingLayout(before) {
     }
   }
   for (const [key, previous] of before) {
-    if (keys.has(key) || key === 'hub') continue;
+    if (keys.has(key) || key === 'hub' || routingGhosts.has(key)) continue;
     const ghost = document.createElement('div');
     ghost.className = `routing-ghost ${previous.multi ? 'fan' : 'stage'}`;
     ghost.setAttribute('aria-hidden', 'true');
@@ -1900,7 +1917,11 @@ function animateRoutingLayout(before) {
     for (const item of [clone, ...clone.querySelectorAll('[id]')]) item.removeAttribute('id');
     Object.assign(clone.style, { width: `${width}px`, height: `${height}px`, animation: 'none' });
     ghost.append(clone); el.stageCanvas.append(ghost);
-    animateRoutingNode(ghost, [{ opacity: previous.opacity }, { opacity: 0 }], 180, () => ghost.remove());
+    routingGhosts.set(key, ghost);
+    animateRoutingNode(ghost, [{ opacity: previous.opacity }, { opacity: 0 }], 180, () => {
+      ghost.remove();
+      if (routingGhosts.get(key) === ghost) routingGhosts.delete(key);
+    });
   }
   if (routingAnimations.size && !routingFrame) routingFrame = requestAnimationFrame(followRoutingLayout);
   else updateRoutingPaths();
