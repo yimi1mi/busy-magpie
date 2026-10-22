@@ -2396,7 +2396,7 @@ body.settings-open .content {
   pointer-events: none;
 }
 
-body.settings-open .stage-canvas > :not(.settings-pane):not(.first-run-mask) { visibility: hidden; }
+body.settings-open .stage-canvas > :not(.settings-pane) { visibility: hidden; }
 
 /* Settings cover the card instead of growing the window: the same canvas,
    the same scale, nothing to keep in step with the window's bounds. */
@@ -2891,131 +2891,6 @@ body.settings-open .stage-canvas > :not(.settings-pane):not(.first-run-mask) { v
 
 body.settings-closing .settings-pane:not([hidden]) {
   animation: settingsDrawerOut 0.16s ease-in both;
-}
-
-/* ── first install notice ─────────────────────────────────────────────── */
-
-.first-run-mask {
-  position: absolute;
-  inset: 0;
-  z-index: 40;
-  display: grid;
-  place-items: center;
-  padding: 22px;
-  background: rgb(10 10 15 / var(--panel-alpha, 0.12));
-  backdrop-filter: blur(18px);
-}
-
-.first-run-mask[hidden] {
-  display: none;
-}
-
-.first-run-card {
-  width: min(440px, 100%);
-  padding: 21px 22px 18px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 16px;
-  background:
-    radial-gradient(100% 100% at 100% 0%, rgba(82, 65, 140, 0.22), transparent 55%),
-    rgb(23 23 31 / var(--popup-alpha, 0.85));
-  box-shadow:
-    0 24px 60px rgba(0, 0, 0, 0.55),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
-}
-
-.first-run-card { max-height: calc(100% - 24px); overflow: auto; }
-.guide-steps { display: grid; gap: 10px; margin: 12px 0; padding: 0; list-style: none; }
-.guide-steps li { display: grid; grid-template-columns: 75px 1fr; gap: 12px; font-size: 11px; line-height: 1.5; }
-.guide-steps b { color: var(--ink); }
-.guide-steps span { color: var(--muted); }
-.guide-uninstall { margin-top: 8px; color: var(--faint); font-size: 10px; }
-.guide-uninstall summary { cursor: pointer; }
-
-.first-run-eyebrow {
-  color: var(--accent);
-  font-size: 9px;
-  font-weight: 650;
-  letter-spacing: 1.2px;
-  text-transform: uppercase;
-}
-
-.first-run-card h2 {
-  margin: 6px 0 10px;
-  font-size: 17px;
-  font-weight: 650;
-}
-
-.first-run-card p {
-  margin: 0 0 9px;
-  color: var(--muted);
-  font-size: 11.5px;
-  line-height: 18px;
-}
-
-.first-run-card p b {
-  color: var(--ink);
-  font-weight: 600;
-}
-
-.first-run-card code {
-  display: block;
-  margin: 10px 0 8px;
-  padding: 8px 10px;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.25);
-  color: #c5bfdb;
-  font-family: var(--mono);
-  font-size: 9px;
-  line-height: 14px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.first-run-card .first-run-note {
-  margin-top: 2px;
-  color: var(--faint);
-  font-size: 9.5px;
-}
-
-.first-run-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 16px;
-}
-
-.first-run-ghost,
-.first-run-primary {
-  height: 31px;
-  padding: 0 13px;
-  border-radius: 8px;
-  font-family: inherit;
-  font-size: 10.5px;
-  cursor: pointer;
-}
-
-.first-run-ghost {
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.035);
-  color: var(--muted);
-}
-
-.first-run-ghost:hover {
-  color: var(--ink);
-  background: rgba(255, 255, 255, 0.07);
-}
-
-.first-run-primary {
-  border: 1px solid rgba(161, 139, 255, 0.62);
-  background: linear-gradient(180deg, #9c86ff, #7f68e8);
-  color: #fff;
-  font-weight: 600;
-}
-
-.first-run-primary:hover {
-  filter: brightness(1.07);
 }
 
 /* ── about / updates ──────────────────────────────────────────────────── */

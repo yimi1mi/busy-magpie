@@ -1087,46 +1087,6 @@ function setupAbout() {
   });
 }
 
-function setupFirstRun() {
-  const mask = $('firstRunMask');
-  if (!mask) return;
-
-  const show = () => {
-    mask.hidden = false;
-    requestAnimationFrame(() => $('firstRunDismiss')?.focus());
-  };
-
-  const hide = () => {
-    mask.hidden = true;
-  };
-
-  $('firstRunDismiss')?.addEventListener('click', () => {
-    window.busy.firstRunDismiss();
-    hide();
-  });
-  $('firstRunOpenDir')?.addEventListener('click', () => {
-    window.busy.openInstallDir();
-  });
-  mask.addEventListener('keydown', (event) => {
-    if (event.key !== 'Tab' || mask.hidden) return;
-    const controls = [...mask.querySelectorAll('button, summary')];
-    const index = controls.indexOf(document.activeElement);
-    if ((event.shiftKey && index <= 0) || (!event.shiftKey && index === controls.length - 1)) {
-      event.preventDefault();
-      controls[event.shiftKey ? controls.length - 1 : 0].focus();
-    }
-  });
-
-  window.busy.onFirstRun?.((open) => {
-    if (open) show();
-    else hide();
-  });
-
-  firstRunShow = show;
-}
-
-let firstRunShow = null;
-
 function disposeFlight(flight) {
   flight.bird.remove();
   flight.guides.remove();
@@ -2364,7 +2324,6 @@ async function boot() {
 
   const data = await window.busy.bootstrap();
   if (data.version) $('appVersionText').textContent = `v${data.version}${data.preview ? ' 预览' : ''}`;
-  $('guideVersion').textContent = `使用指南 · v${data.version || '1.3.10'}`;
   if (data.settings) settings = { ...settings, ...data.settings };
   applySurface();
   document.body.classList.toggle('noanim', Boolean(settings.quietMotion));
@@ -2419,12 +2378,10 @@ async function boot() {
   setupResizeHandles();
   setupSettingsPanel();
   setupAbout();
-  setupFirstRun();
   setupTokenPill();
   setupQuickMenu();
   window.busy.ready?.();
   if (data.update) renderUpdateState?.(data.update);
-  if (data.firstRun) firstRunShow?.();
 }
 
 boot().catch((error) => {

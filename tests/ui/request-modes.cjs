@@ -287,7 +287,7 @@ server.listen(0, '127.0.0.1', async () => {
   const gateway = `http://127.0.0.1:${server.address().port}`;
   fs.writeFileSync(path.join(profile, 'settings.json'), JSON.stringify({ gateway, topmost: false,
     autostart: false, keepAlive: false, quietMotion: true, updateMode: 'never',
-    guideVersion: 1, usagePeriod: '30d', left: 40, top: 40 }));
+    usagePeriod: '30d', left: 40, top: 40 }));
   await app.whenReady();
   screen.getCursorScreenPoint = () => ({ x: -10000, y: -10000 });
   const filename = path.join(root, 'src/main.js');

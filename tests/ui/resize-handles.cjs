@@ -75,7 +75,7 @@ async function run(){try{
  assert.equal(errors.length,0,errors.join('\n'));finish();
 }catch(error){finish(error);}}
 server.listen(0,'127.0.0.1',async()=>{
- fs.writeFileSync(path.join(profile,'settings.json'),JSON.stringify({gateway:`http://127.0.0.1:${server.address().port}`,topmost:false,autostart:false,keepAlive:false,updateMode:'never',guideVersion:1,quietMotion:true,left:120,top:120}));
+ fs.writeFileSync(path.join(profile,'settings.json'),JSON.stringify({gateway:`http://127.0.0.1:${server.address().port}`,topmost:false,autostart:false,keepAlive:false,updateMode:'never',quietMotion:true,left:120,top:120}));
  await app.whenReady();screen.getCursorScreenPoint=()=>cursor;
  const filename=path.join(root,'src/main.js'),main=new Module(filename,module);main.filename=filename;main.paths=Module._nodeModulePaths(path.dirname(filename));
  main.require=function(id){

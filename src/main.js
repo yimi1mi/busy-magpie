@@ -46,14 +46,12 @@ const IS_MAC = process.platform === 'darwin';
 const IS_WIN = process.platform === 'win32';
 const START_IN_LAYOUT = process.argv.includes('--layout');
 const START_IN_SETTINGS = process.argv.includes('--settings');
-const FIRST_INSTALL = process.env.BUSY_MAGPIE_FIRST_INSTALL === '1';
 const PLUGIN_VERSION = process.env.BUSY_MAGPIE_PLUGIN_VERSION || '';
 // A card that stays open all day should learn about a release the same day,
 // so it looks again every hour.
 const UPDATE_CHECK_MS = 60 * 60 * 1000;
 
 let win = null;
-let firstRunOpen = FIRST_INSTALL;
 let settingsOpen = false;
 let settingsClosing = false;
 let quickMenuOpen = false;
@@ -154,7 +152,6 @@ function defaults() {
     pauseUntil: 0,
     compact: false,
     quietMotion: false,
-    guideVersion: 0,
     autostart: false,
   };
 }
@@ -353,7 +350,7 @@ function createWindow() {
   }
   settings.width = width;
   settings.height = height;
-  const compact = Boolean(settings.compact && !firstRunOpen);
+  const compact = Boolean(settings.compact);
   if (compact) { width = COMPACT_WIDTH; height = COMPACT_HEIGHT; }
   const fallback = defaultBounds(width, height);
   const x = Number.isFinite(settings.left) ? settings.left : fallback.x;
@@ -413,17 +410,14 @@ function createWindow() {
     win.showInactive();
     applyClickThrough();
     applyTopmost();
-    if (firstRunOpen) win.focus();
   });
 
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   win.webContents.on('before-input-event', (event, input) => {
-    if ((firstRunOpen || settingsOpen || quickMenuOpen || layoutMode || dragState || resizeState)
+    if ((settingsOpen || quickMenuOpen || layoutMode || dragState || resizeState)
       && input.type === 'keyDown' && input.key === 'Escape') {
-      if (firstRunOpen) {
-        dismissGuide();
-      } else if (settingsOpen) closeSettingsPanel();
+      if (settingsOpen) closeSettingsPanel();
       else if (quickMenuOpen) setQuickMenuOpen(false);
       else if (resizeState) endResize();
       else if (dragState) endDrag();
@@ -722,7 +716,7 @@ function scheduleQuietInstall() {
     if (!updateState.ready || quitting) return;
     if (normalizeUpdateMode(settings.updateMode) !== 'idle') return;
     if (activeCount(lastTrace?.routes) > 0) return;
-    if (firstRunOpen || settingsOpen || settingsClosing || quickMenuOpen || layoutMode || dragState || resizeState) return;
+    if (settingsOpen || settingsClosing || quickMenuOpen || layoutMode || dragState || resizeState) return;
     if (Date.now() - lastActivity < QUIET_BEFORE_INSTALL_MS) return;
     clearInterval(quietTimer);
     quietTimer = null;
@@ -796,7 +790,7 @@ function applyTopmost() {
 
 function applyClickThrough() {
   if (!win || win.isDestroyed()) return;
-  if (firstRunOpen || settingsOpen || settingsClosing || quickMenuOpen || layoutMode || hoverInteractive) {
+  if (settingsOpen || settingsClosing || quickMenuOpen || layoutMode || hoverInteractive) {
     win.setIgnoreMouseEvents(false);
     win.setFocusable(true);
   } else {
@@ -821,7 +815,7 @@ function showWindow() {
 
 function applyWindowMode() {
   if (!win || win.isDestroyed()) return;
-  const compact = Boolean(settings.compact && !firstRunOpen && !settingsOpen && !settingsClosing && !quickMenuOpen);
+  const compact = Boolean(settings.compact && !settingsOpen && !settingsClosing && !quickMenuOpen);
   const bounds = win.getBounds();
   if (frame.compact && !compact && settings.compact) compactPosition = { x: bounds.x, y: bounds.y };
   const width = compact ? COMPACT_WIDTH : settings.width;
@@ -875,19 +869,6 @@ function resetPlacement() {
   return { ok: true };
 }
 
-function dismissGuide() {
-  if (!firstRunOpen) return;
-  firstRunOpen = false;
-  settings.guideVersion = 1;
-  saveSettings();
-  hoverInteractive = false;
-  applyWindowMode();
-  applyClickThrough();
-  send('magpie:first-run', false);
-  if (settingsOpen) win.focus();
-  else win.blur();
-}
-
 function schedulePauseResume() {
   clearTimeout(pauseTimer);
   const remaining = Number(settings.pauseUntil) - Date.now();
@@ -912,7 +893,7 @@ function pauseDisplay() {
 function setQuickMenuOpen(value) {
   if (!win || win.isDestroyed()) return;
   const open = Boolean(value);
-  if (open && (!win.isVisible() || firstRunOpen || settingsOpen || settingsClosing
+  if (open && (!win.isVisible() || settingsOpen || settingsClosing
     || layoutMode || dragState || resizeState)) return;
   if (quickMenuOpen === open) return;
   quickMenuOpen = open;
@@ -1007,7 +988,7 @@ function setHoverInteractive(value, kind = null) {
 function watchHover() {
   clearInterval(hoverTimer);
   hoverTimer = setInterval(() => {
-    if (!win || win.isDestroyed() || !win.isVisible() || firstRunOpen || settingsOpen || settingsClosing || quickMenuOpen || layoutMode || dragState || resizeState) return;
+    if (!win || win.isDestroyed() || !win.isVisible() || settingsOpen || settingsClosing || quickMenuOpen || layoutMode || dragState || resizeState) return;
     const point = screen.getCursorScreenPoint();
     const bounds = win.getBounds();
     const contains = (rect) => point.x >= bounds.x + rect.x && point.x <= bounds.x + rect.x + rect.width
@@ -1045,7 +1026,7 @@ function setHitAreas(raw) {
 }
 
 function startDrag() {
-  if (!win || win.isDestroyed() || firstRunOpen || settingsOpen || settingsClosing || quickMenuOpen || dragState) return;
+  if (!win || win.isDestroyed() || settingsOpen || settingsClosing || quickMenuOpen || dragState) return;
   const point = screen.getCursorScreenPoint();
   const [x, y] = win.getPosition();
   hoverInteractive = false;
@@ -1094,7 +1075,7 @@ function endDrag() {
 }
 
 function startResize(direction = 'se') {
-  if (!win || win.isDestroyed() || firstRunOpen || settingsClosing || quickMenuOpen || frame.compact || resizeState) return;
+  if (!win || win.isDestroyed() || settingsClosing || quickMenuOpen || frame.compact || resizeState) return;
   const dir = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'].includes(direction)
     ? direction
     : 'se';
@@ -1216,7 +1197,7 @@ function endResize() {
 }
 
 function beginLayout() {
-  if (!win || win.isDestroyed() || firstRunOpen || settingsOpen || settingsClosing || layoutMode) return;
+  if (!win || win.isDestroyed() || settingsOpen || settingsClosing || layoutMode) return;
   setQuickMenuOpen(false);
   layoutMode = true;
   if (!win.isVisible()) win.showInactive();
@@ -1749,7 +1730,6 @@ ipcMain.handle('busy:bootstrap', () => ({
   preview: IS_PREVIEW,
   pluginVersion: PLUGIN_VERSION,
   update: updateView(),
-  firstRun: firstRunOpen,
   settings: publicSettings(),
   connection,
   trace: lastTrace,
@@ -1965,12 +1945,6 @@ ipcMain.on('busy:open-github', () => {
   shell.openExternal('https://github.com/yimi1mi/busy-magpie');
 });
 
-ipcMain.on('busy:first-run-dismiss', dismissGuide);
-
-ipcMain.on('busy:open-install-dir', () => {
-  shell.openPath(path.dirname(app.getPath('exe')));
-});
-
 ipcMain.on('busy:end-layout', () => endLayout());
 ipcMain.on('busy:drag-start', () => startDrag());
 ipcMain.on('busy:drag-end', () => endDrag());
@@ -1990,7 +1964,6 @@ function init() {
     // A version marker is an optimization, never a reason not to start.
   }
   settings = loadSettings();
-  firstRunOpen = FIRST_INSTALL || Number(settings.guideVersion) < 1;
   if (!PLUGIN_VERSION || settings.pauseUntil <= Date.now()) settings.pauseUntil = 0;
   // A marker left by an install that did not finish would keep the launcher
   // from starting the card; this process running means it is over.

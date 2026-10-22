@@ -42,8 +42,6 @@ contextBridge.exposeInMainWorld('busy', {
   previewOpacity: (value) => ipcRenderer.send('settings:opacity', value),
   settingsOpenFile: () => ipcRenderer.send('settings:open-file'),
   settingsClose: () => ipcRenderer.send('settings:close'),
-  firstRunDismiss: () => ipcRenderer.send('busy:first-run-dismiss'),
-  openInstallDir: () => ipcRenderer.send('busy:open-install-dir'),
   aboutOpen: () => ipcRenderer.send('busy:about-open'),
   openGitHub: () => ipcRenderer.send('busy:open-github'),
   updatesGet: () => ipcRenderer.invoke('updates:get'),
@@ -90,9 +88,6 @@ contextBridge.exposeInMainWorld('busy', {
   },
   onActionError: (callback) => {
     ipcRenderer.on('magpie:action-error', (_event, error) => callback(error));
-  },
-  onFirstRun: (callback) => {
-    ipcRenderer.on('magpie:first-run', (_event, data) => callback(data));
   },
   onUpdateState: (callback) => {
     ipcRenderer.on('magpie:update-state', (_event, data) => callback(data));

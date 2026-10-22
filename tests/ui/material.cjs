@@ -57,6 +57,13 @@ async function menuAction(action) {
 async function openMenu() { cursor={x:-10000,y:-10000}; await click('quickMenuToggle'); assert.equal(await js('document.getElementById("quickMenu").hidden'), false); }
 async function run() {
  try {
+  assert.equal(await js('document.querySelector("#firstRunMask, [class*=first-run], .guide-steps, .guide-uninstall")'),null);
+  assert.equal(await js('Object.keys(window.busy).some(key=>/firstRun|openInstallDir/i.test(key))'),false);
+  assert.equal(await js('window.busy.bootstrap().then(x=>Object.hasOwn(x,"firstRun"))'),false);
+  assert.equal(ipcMain.listenerCount('busy:first-run-dismiss'),0);
+  assert.equal(ipcMain.listenerCount('busy:open-install-dir'),0);
+  assert.equal(ignored,true);
+  record('a fresh profile starts directly in pointer pass-through mode with no guide or guide API');
   const material=await js('window.busy.bootstrap().then(x=>x.settings.backgroundMaterial)');
   assert.equal(material,'blur');
   assert.equal(await js('document.body.classList.contains("native-material")'),true);
@@ -64,6 +71,24 @@ async function run() {
   assert.deepEqual(bounds,{w:600,h:400,x:16,y:16});
   assert.equal(await js('getComputedStyle(document.querySelector(".card")).borderRadius'),'22px');
   record('native background preserves the content canvas and hit coordinates');
+  const originalBounds=win.getBounds();
+  cursor={x:originalBounds.x+100,y:originalBounds.y+20};
+  await sleep(100);
+  await js('document.getElementById("dragBar").dispatchEvent(new PointerEvent("pointerdown",{bubbles:true,button:0,buttons:1,pointerId:1,clientX:100,clientY:20}))');
+  await sleep(220);
+  assert.equal(dragCalls,1);
+  cursor={x:cursor.x+40,y:cursor.y+30};
+  await sleep(80);
+  assert.deepEqual(win.getPosition(),[originalBounds.x+40,originalBounds.y+30]);
+  await js('window.dispatchEvent(new PointerEvent("pointerup",{bubbles:true,button:0,buttons:0,pointerId:1}))');
+  await sleep(80);
+  const releasedPosition=win.getPosition();
+  cursor={x:-10000,y:-10000};
+  await sleep(100);
+  assert.deepEqual(win.getPosition(),releasedPosition);
+  assert.equal(ignored,true);
+  win.setBounds(originalBounds);
+  record('a fresh profile allows long-press dragging and stops moving when released');
   const stored=JSON.parse(fs.readFileSync(path.join(profile,'settings.json'),'utf8')).opacity??1;
   const before=await js('getComputedStyle(document.documentElement).getPropertyValue("--surface-alpha")');
   await openMenu();
@@ -126,7 +151,7 @@ async function run() {
 }
 server.listen(0,'127.0.0.1',async()=>{
  const gateway=`http://127.0.0.1:${server.address().port}`;
- fs.writeFileSync(path.join(profile,'settings.json'),JSON.stringify({gateway,topmost:false,autostart:false,keepAlive:false,updateMode:'never',guideVersion:1,usagePeriod:'30d',left:40,top:40}));
+ fs.writeFileSync(path.join(profile,'settings.json'),JSON.stringify({gateway,topmost:false,autostart:false,keepAlive:false,updateMode:'never',usagePeriod:'30d',left:40,top:40}));
  await app.whenReady();
  screen.getCursorScreenPoint=()=>cursor;
  const filename = path.join(root,'src/main.js');
