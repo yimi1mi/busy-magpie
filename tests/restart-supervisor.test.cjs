@@ -12,7 +12,7 @@ const fixture = path.join(__dirname, 'fixtures', 'restart-supervisor');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function context(t, behavior = 'success') {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'busy-supervisor-test-'));
+  const workspace = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'busy-supervisor-test-')));
   const root = path.join(workspace, 'business-updates');
   fs.mkdirSync(root);
   const builtin = { root: path.join(workspace, 'builtin'), version: '1.4.0' };
@@ -72,7 +72,12 @@ function context(t, behavior = 'success') {
     assert.equal(code, 0, stderr);
     return JSON.parse(fs.readFileSync(path.join(root, 'result.json'), 'utf8'));
   }
-  return { root, builtin, journal, store, config, configPath, children, version, accept, prepare, run };
+  function diagnostics() {
+    let log = '';
+    try { log = fs.readFileSync(path.join(root, 'update.log'), 'utf8'); } catch { /* no supervisor log */ }
+    return `fixture events: ${JSON.stringify(events(root))}\nsupervisor: ${log}`;
+  }
+  return { root, builtin, journal, store, config, configPath, children, version, accept, prepare, run, diagnostics };
 }
 
 function events(root) {
@@ -119,8 +124,45 @@ test('real supervisor promotes a ready candidate that stays alive and clears upd
   assert.equal(marker.ready, true);
   assert.equal(marker.token, token);
   assert.equal(events(c.root).filter(event => event.event === 'candidate').length, 1);
-  assert.equal(events(c.root)[0].runAsNode, null);
+  assert.equal(events(c.root).find(event => event.event === 'candidate').runAsNode, null);
   assert.equal(fs.existsSync(c.config.updatingMarker), false);
+});
+
+test('owned child startup does not depend on an immediate PID lookup', { timeout: 10000 }, async t => {
+  const c = context(t);
+  c.prepare();
+  c.config.missFirstCandidateProbe = true;
+  const result = await c.run();
+  assert.equal(result.status, 'confirmed', c.diagnostics());
+  assert.equal(c.journal.read().current.version, '1.4.2');
+  assert.equal(events(c.root).filter(event => event.event === 'candidate').length, 1);
+  assert.equal(events(c.root).filter(event => event.event === 'fallback').length, 0);
+});
+
+test('candidate crash before writing its lock owner does not block recovery', { timeout: 10000 }, async t => {
+  const c = context(t);
+  c.accept(c.version('1.4.1'));
+  c.prepare();
+  c.config.crashBeforeLockOwner = true;
+  const result = await c.run();
+  assert.equal(result.status, 'rolled-back', c.diagnostics());
+  assert.equal(c.journal.read().current.version, '1.4.1');
+  assert.equal(c.journal.read().pending, null);
+  assert.equal(events(c.root).filter(event => event.event === 'lock-owner-crash').length, 1);
+  assert.equal(events(c.root).filter(event => event.event === 'fallback').length, 1);
+});
+
+test('candidate crash during released lock cleanup does not block recovery', { timeout: 10000 }, async t => {
+  const c = context(t);
+  c.accept(c.version('1.4.1'));
+  c.prepare();
+  c.config.crashAfterLockRelease = true;
+  const result = await c.run();
+  assert.equal(result.status, 'rolled-back', c.diagnostics());
+  assert.equal(c.journal.read().current.version, '1.4.1');
+  assert.equal(c.journal.read().pending, null);
+  assert.equal(events(c.root).filter(event => event.event === 'lock-release-crash').length, 1);
+  assert.equal(events(c.root).filter(event => event.event === 'fallback').length, 1);
 });
 
 for (const behavior of ['crash', 'timeout', 'ready-crash', 'bad-health']) {
@@ -136,7 +178,7 @@ for (const behavior of ['crash', 'timeout', 'ready-crash', 'bad-health']) {
     assert.equal(c.journal.read().pending, null);
     assert.equal(c.journal.read().failures.length, 1);
     const recorded = events(c.root);
-    assert.equal(recorded.filter(event => event.event === 'candidate').length, 1);
+    assert.equal(recorded.filter(event => event.event === 'candidate').length, 1, c.diagnostics());
     assert.equal(recorded.filter(event => event.event === 'fallback').length, 1);
     assert.equal(recorded.find(event => event.event === 'fallback').version, '1.4.1');
     assert.equal(alive(recorded.find(event => event.event === 'candidate').pid), false);
@@ -422,6 +464,27 @@ test('supervisor lock excludes a second owner and reclaims only a dead owner', a
   const release = acquireLock(lock);
   assert.equal(JSON.parse(fs.readFileSync(path.join(lock, 'owner.json'))).pid, process.pid);
   release();
+  const legacy = path.join(c.root, 'legacy-empty.lock');
+  fs.mkdirSync(legacy);
+  assert.throws(() => acquireLock(legacy), { code: 'UPDATE_LOCKED' });
+  assert.deepEqual(fs.readdirSync(legacy), []);
+  const old = new Date(Date.now() - 60000);
+  fs.utimesSync(legacy, old, old);
+  acquireLock(legacy)();
+
+  const contested = path.join(c.root, 'contested.lock');
+  const rename = fs.renameSync;
+  fs.renameSync = (source, destination) => {
+    if (destination === contested) {
+      fs.mkdirSync(contested);
+      writeJson(path.join(contested, 'owner.json'), { pid: process.pid, nonce: 'competing-owner', at: Date.now() });
+    }
+    return rename(source, destination);
+  };
+  try { assert.throws(() => acquireLock(contested), { code: 'UPDATE_LOCKED' }); }
+  finally { fs.renameSync = rename; }
+  assert.equal(JSON.parse(fs.readFileSync(path.join(contested, 'owner.json'))).nonce, 'competing-owner');
+  assert.equal(fs.readdirSync(c.root).filter(name => name.startsWith('contested.lock.claim-')).length, 0);
 });
 
 test('launch config rejects another executable or env override and removes stale token arguments', async t => {

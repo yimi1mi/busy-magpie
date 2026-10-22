@@ -119,6 +119,8 @@ function start(config, token, log) {
   const child = spawn(config.executable, args, { cwd: config.cwd || path.dirname(config.executable), env,
     detached: true, windowsHide: false, stdio: 'ignore' });
   child.startedAt = startedAt;
+  child.spawned = false;
+  child.once('spawn', () => { child.spawned = true; });
   // Install the handler immediately; spawn errors otherwise terminate the supervisor.
   child.on('error', cause => { child.spawnError = cause; });
   child.exited = false;
@@ -131,7 +133,8 @@ function start(config, token, log) {
 
 async function spawned(child) {
   if (child.spawnError) throw child.spawnError;
-  if (child.pid) return;
+  // A PID is available before the owned process's spawn event is delivered.
+  if (child.spawned) return;
   await new Promise((resolve, reject) => {
     child.once('spawn', resolve);
     child.once('error', reject);
@@ -139,7 +142,10 @@ async function spawned(child) {
 }
 
 function childAlive(child) {
-  return child && !child.spawnError && child.exitCode === null && child.signalCode === null && alive(child.pid);
+  // The ChildProcess lifecycle owns this observation. A separate PID lookup can
+  // miss a newly created Windows process and incorrectly trigger termination.
+  return child && child.spawned && !child.spawnError && !child.exited
+    && child.exitCode === null && child.signalCode === null;
 }
 
 async function stopCandidate(child, time, log, role = 'candidate', config) {
@@ -250,7 +256,7 @@ async function runSupervisor(input, dependencies = {}) {
     oldStopped = true;
     candidate = start(config, config.token, log);
     await spawned(candidate);
-    log('candidate-started', { pid: candidate.pid, startedAt: candidate.startedAt });
+    log('candidate-started', { pid: candidate.pid, startedAt: candidate.startedAt, spawnObserved: true });
     const healthDeadline = Date.now() + time.healthMs;
     let healthySince = null;
     for (;;) {
@@ -297,7 +303,7 @@ async function runSupervisor(input, dependencies = {}) {
       const startedAt = Date.now();
       fallback = start(config, null, log);
       await spawned(fallback);
-      log('fallback-started', { pid: fallback.pid, startedAt: fallback.startedAt });
+      log('fallback-started', { pid: fallback.pid, startedAt: fallback.startedAt, spawnObserved: true });
       // The fallback is attempted once. Keep observing its real application readiness.
       fallback.unref();
       await waitForFallback(fallback, selected.version, startedAt, config, time, log);

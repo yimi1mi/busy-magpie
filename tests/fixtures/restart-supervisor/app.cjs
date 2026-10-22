@@ -8,9 +8,37 @@ const token = process.argv.find(arg => arg.startsWith('--business-update-token='
 function record(event, details = {}) {
   fs.appendFileSync(path.join(config.root, 'events.jsonl'), `${JSON.stringify({ event, pid: process.pid, ...details })}\n`);
 }
+process.on('uncaughtException', cause => {
+  record('fixture-error', { code: cause.code, reason: cause.stack || cause.message });
+  process.exit(1);
+});
 if (process.argv.includes('--hold-old')) {
   record('old');
 } else {
+  record('fixture-start', { role: token ? 'candidate' : 'fallback' });
+  if (token && config.crashBeforeLockOwner) {
+    const originalOpen = fs.openSync;
+    fs.openSync = (filename, ...args) => {
+      if (typeof filename === 'string' && path.basename(filename).startsWith('owner.json.')
+        && /^\.?journal\.lock/.test(path.basename(path.dirname(filename)))) {
+        record('lock-owner-crash', { directory: path.dirname(filename) });
+        process.exit(23);
+      }
+      return originalOpen(filename, ...args);
+    };
+  }
+  if (token && config.crashAfterLockRelease) {
+    const originalUnlink = fs.unlinkSync;
+    fs.unlinkSync = filename => {
+      const result = originalUnlink(filename);
+      if (typeof filename === 'string' && path.basename(filename) === 'owner.json'
+        && /^\.?journal\.lock/.test(path.basename(path.dirname(filename)))) {
+        record('lock-release-crash', { directory: path.dirname(filename) });
+        process.exit(24);
+      }
+      return result;
+    };
+  }
   const journal = createJournal({ root: config.root, builtin: config.builtin, store: createStore(config) });
   const selected = journal.select(token);
   record(token ? 'candidate' : 'fallback', { version: selected.version, token,

@@ -49,52 +49,76 @@ function acquireLock(directory, { timeoutMs = 0, staleUnownedMs = 30000 } = {}) 
   fs.mkdirSync(path.dirname(directory), { recursive: true });
   const deadline = Date.now() + timeoutMs;
   const owner = { pid: process.pid, nonce: crypto.randomBytes(16).toString('hex'), at: Date.now() };
-  for (;;) {
-    try {
-      fs.mkdirSync(directory);
-      writeJson(path.join(directory, 'owner.json'), owner);
-      return () => {
-        try {
-          const found = JSON.parse(fs.readFileSync(path.join(directory, 'owner.json'), 'utf8'));
-          if (found.nonce !== owner.nonce) return;
-          fs.unlinkSync(path.join(directory, 'owner.json'));
-          fs.rmdirSync(directory);
-        } catch (cause) { if (cause.code !== 'ENOENT') throw cause; }
-      };
-    } catch (cause) {
-      if (cause.code !== 'EEXIST') throw cause;
-    }
-    let previous;
-    let stale = false;
-    try {
-      const stat = fs.lstatSync(directory);
-      if (!stat.isDirectory() || stat.isSymbolicLink()) throw error('INVALID_LOCK', 'Lock path is not a directory');
-      try { previous = JSON.parse(fs.readFileSync(path.join(directory, 'owner.json'), 'utf8')); }
-      catch (cause) { if (cause.code !== 'ENOENT' && !(cause instanceof SyntaxError)) throw cause; }
-      stale = previous ? !alive(previous.pid) : Date.now() - stat.mtimeMs > staleUnownedMs;
-    } catch (cause) { if (cause.code === 'ENOENT') continue; throw cause; }
-    if (stale) {
-      const claim = path.join(directory, 'reclaim');
-      try {
-        fs.mkdirSync(claim);
-        // No new owner can acquire this directory before this rename completes.
-        const latest = (() => {
-          try { return JSON.parse(fs.readFileSync(path.join(directory, 'owner.json'), 'utf8')); }
-          catch { return null; }
-        })();
-        if (latest && alive(latest.pid)) {
-          fs.rmdirSync(claim);
-        } else {
-          const retired = `${directory}.stale-${owner.nonce}`;
-          fs.renameSync(directory, retired);
-          // Preserve the retired lock as diagnostic evidence; it cannot block a new owner.
-          continue;
-        }
-      } catch (cause) { if (cause.code !== 'EEXIST' && cause.code !== 'ENOENT') throw cause; }
-    }
-    if (Date.now() >= deadline) throw error('UPDATE_LOCKED', 'Another update operation holds the lock');
-    pause(Math.min(20, Math.max(1, deadline - Date.now())));
+  const prepared = `${directory}.claim-${process.pid}-${owner.nonce}`;
+  let published = false;
+  function removeOwnDirectory(target) {
+    try { fs.unlinkSync(path.join(target, 'owner.json')); }
+    catch (cause) { if (cause.code !== 'ENOENT') throw cause; }
+    try { fs.rmdirSync(target); }
+    catch (cause) { if (cause.code !== 'ENOENT') throw cause; }
   }
+  fs.mkdirSync(prepared);
+  try {
+    // A crash before publication leaves only a private directory, never an
+    // authoritative lock without its PID. Every published new lock is nonempty.
+    writeJson(path.join(prepared, 'owner.json'), owner);
+    for (;;) {
+      let stat;
+      try { stat = fs.lstatSync(directory); }
+      catch (cause) { if (cause.code !== 'ENOENT') throw cause; }
+      // POSIX rename can replace an empty directory. Leave pre-existing legacy
+      // empty locks to the compatibility checks below instead of replacing them.
+      if (!stat) {
+        try {
+          fs.renameSync(prepared, directory);
+          published = true;
+          return () => {
+            try {
+              const found = JSON.parse(fs.readFileSync(path.join(directory, 'owner.json'), 'utf8'));
+              if (found.nonce !== owner.nonce) return;
+              const retired = `${directory}.released-${owner.nonce}`;
+              // Retire first so a crash during cleanup cannot expose an empty lock.
+              fs.renameSync(directory, retired);
+              removeOwnDirectory(retired);
+            } catch (cause) { if (cause.code !== 'ENOENT') throw cause; }
+          };
+        } catch (cause) {
+          if (!['EEXIST', 'ENOTEMPTY', 'EPERM', 'EACCES'].includes(cause.code)) throw cause;
+          // Windows and POSIX report an existing directory differently. Only a
+          // real competing destination converts a rename failure into contention.
+          try { stat = fs.lstatSync(directory); }
+          catch (inspectError) { if (inspectError.code === 'ENOENT') throw cause; throw inspectError; }
+        }
+      }
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw error('INVALID_LOCK', 'Lock path is not a directory');
+      let previous;
+      try {
+        previous = JSON.parse(fs.readFileSync(path.join(directory, 'owner.json'), 'utf8'));
+      } catch (cause) { if (cause.code !== 'ENOENT' && !(cause instanceof SyntaxError)) throw cause; }
+      const stale = previous ? !alive(previous.pid) : Date.now() - stat.mtimeMs > staleUnownedMs;
+      if (stale) {
+        const claim = path.join(directory, 'reclaim');
+        try {
+          fs.mkdirSync(claim);
+          // No new owner can acquire this directory before this rename completes.
+          const latest = (() => {
+            try { return JSON.parse(fs.readFileSync(path.join(directory, 'owner.json'), 'utf8')); }
+            catch { return null; }
+          })();
+          if (latest && alive(latest.pid)) {
+            fs.rmdirSync(claim);
+          } else {
+            const retired = `${directory}.stale-${owner.nonce}`;
+            fs.renameSync(directory, retired);
+            // Preserve the retired lock as diagnostic evidence; it cannot block a new owner.
+            continue;
+          }
+        } catch (cause) { if (cause.code !== 'EEXIST' && cause.code !== 'ENOENT') throw cause; }
+      }
+      if (Date.now() >= deadline) throw error('UPDATE_LOCKED', 'Another update operation holds the lock');
+      pause(Math.min(20, Math.max(1, deadline - Date.now())));
+    }
+  } finally { if (!published) removeOwnDirectory(prepared); }
 }
 
 function descriptor(value) {
