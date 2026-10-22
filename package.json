@@ -25,6 +25,7 @@
     "icon": "https://raw.githubusercontent.com/yimi1mi/busy-magpie/main/assets/icon.png"
   },
   "scripts": {
+    "test": "node --test tests",
     "start": "electron .",
     "dev": "electron . --dev",
     "pack": "electron-builder --dir",

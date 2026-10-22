@@ -651,6 +651,9 @@ function scheduleQuietInstall() {
   if (normalizeUpdateMode(settings.updateMode) !== 'idle') return;
   quietTimer = setInterval(() => {
     if (!updateState.ready || quitting) return;
+    if (normalizeUpdateMode(settings.updateMode) !== 'idle') return;
+    if (activeCount(lastTrace?.routes) > 0) return;
+    if (firstRunOpen || settingsOpen || settingsClosing || quickMenuOpen || layoutMode || dragState || resizeState) return;
     if (Date.now() - lastActivity < QUIET_BEFORE_INSTALL_MS) return;
     clearInterval(quietTimer);
     quietTimer = null;
@@ -701,6 +704,7 @@ function skipUpdate() {
 
 function setCheckUpdates(value) {
   settings.checkUpdates = Boolean(value);
+  settings.updateMode = settings.checkUpdates ? 'notice' : 'never';
   saveSettings();
   sendUpdateState();
   if (settings.checkUpdates) checkForUpdates(false);
@@ -1154,7 +1158,6 @@ async function refreshUsage() {
     }
     const data = await response.json();
     usageData = data;
-    markActivity();
     send('magpie:usage', data);
     return data;
   } catch (error) {
@@ -1288,7 +1291,7 @@ class TraceClient {
         }
         const snapshot = { ...data, routes: [...this.routes.values()] };
         lastTrace = snapshot;
-        markActivity();
+        if (data.routes?.length || activeCount(snapshot.routes) > 0) markActivity();
         connection = { online: true, detail: this.base, at: Date.now() };
         fitWindow(activeCount(snapshot.routes));
         send('magpie:trace', snapshot);
@@ -1709,6 +1712,13 @@ ipcMain.handle('settings:save', (_event, input) => {
     send('magpie:settings', publicSettings());
     if (gatewayChanged) rebuildClient();
     else if (periodChanged) refreshUsage();
+    if (settings.updateMode === 'idle') {
+      if (updateState.ready) scheduleQuietInstall();
+      else if (updateState.available) downloadUpdate();
+    } else {
+      clearInterval(quietTimer);
+      quietTimer = null;
+    }
     saveSettings();
     refreshTrayMenu();
     let raw = '';
