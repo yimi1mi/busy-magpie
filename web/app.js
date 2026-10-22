@@ -1823,6 +1823,101 @@ function applyGateway() {
   if (el.gateway) el.gateway.textContent = settings.gateway || '127.0.0.1:3425';
 }
 
+const routingAnimations = new Set();
+let routingFrame = 0;
+
+function routingTargets() {
+  const multi = document.body.classList.contains('multi');
+  const nodes = multi ? [...el.fanAgents.children, ...el.fanAccounts.children] : [el.agentNode, el.accountNode];
+  return [...nodes.map(node => ({ key: node.dataset.layoutKey, node })), { key: 'hub', node: multi ? el.fanHub : el.hub }];
+}
+
+function captureRoutingLayout() {
+  const canvas = el.stageCanvas.getBoundingClientRect(), scale = uiScale();
+  const before = new Map();
+  for (const { key, node } of routingTargets()) {
+    const rect = node.getBoundingClientRect();
+    if (!key || !rect.width || !rect.height) continue;
+    before.set(key, { node, clone: node.cloneNode(true), rect, scale,
+      left: (rect.left - canvas.left) / scale, top: (rect.top - canvas.top) / scale,
+      opacity: Number(getComputedStyle(node).opacity), multi: document.body.classList.contains('multi') });
+  }
+  for (const animation of [...routingAnimations]) animation.cancel();
+  for (const ghost of el.stageCanvas.querySelectorAll('.routing-ghost')) ghost.remove();
+  return before;
+}
+
+function animateRoutingNode(node, frames, duration = 500, cleanup) {
+  const animation = node.animate(frames, { duration, easing: 'cubic-bezier(.2,.8,.2,1)' });
+  routingAnimations.add(animation);
+  const finish = () => { routingAnimations.delete(animation); cleanup?.(); };
+  animation.onfinish = finish;
+  animation.oncancel = finish;
+}
+
+function updateRoutingPaths() {
+  drawFanWires();
+  drawSingleWires();
+  refreshFlightLegs();
+}
+
+function followRoutingLayout() {
+  routingFrame = 0;
+  updateRoutingPaths();
+  if (routingAnimations.size) routingFrame = requestAnimationFrame(followRoutingLayout);
+}
+
+function animateRoutingLayout(before) {
+  if (motionReduced() || frame.compact) { updateRoutingPaths(); return; }
+  const scale = uiScale(), targets = routingTargets(), keys = new Set(targets.map(target => target.key));
+  for (const { key, node } of targets) {
+    const to = node.getBoundingClientRect();
+    if (!key || !to.width || !to.height) continue;
+    const previous = before.get(key);
+    if (previous) {
+      const from = previous.rect;
+      const dx = (from.left - to.left) / scale, dy = (from.top - to.top) / scale;
+      const sx = from.width / to.width, sy = from.height / to.height;
+      if (Math.abs(dx) + Math.abs(dy) < 0.2 && Math.abs(sx - 1) + Math.abs(sy - 1) < 0.002 && previous.opacity > 0.99) continue;
+      animateRoutingNode(node, [
+        { translate: `${dx}px ${dy}px`, scale: `${sx} ${sy}`, opacity: previous.opacity },
+        { translate: '0px 0px', scale: '1 1', opacity: 1 },
+      ]);
+    } else if (before.size) {
+      animateRoutingNode(node, [{ opacity: 0, translate: '0px 8px', scale: '0.97' }, { opacity: 1, translate: '0px 0px', scale: '1' }], 300);
+    }
+  }
+  for (const [key, previous] of before) {
+    if (keys.has(key) || key === 'hub') continue;
+    const ghost = document.createElement('div');
+    ghost.className = `routing-ghost ${previous.multi ? 'fan' : 'stage'}`;
+    ghost.setAttribute('aria-hidden', 'true');
+    const width = previous.rect.width / previous.scale, height = previous.rect.height / previous.scale;
+    Object.assign(ghost.style, { left: `${previous.left}px`, top: `${previous.top}px`, width: `${width}px`, height: `${height}px` });
+    const clone = previous.clone;
+    for (const item of [clone, ...clone.querySelectorAll('[id]')]) item.removeAttribute('id');
+    Object.assign(clone.style, { width: `${width}px`, height: `${height}px`, animation: 'none' });
+    ghost.append(clone); el.stageCanvas.append(ghost);
+    animateRoutingNode(ghost, [{ opacity: previous.opacity }, { opacity: 0 }], 180, () => ghost.remove());
+  }
+  if (routingAnimations.size && !routingFrame) routingFrame = requestAnimationFrame(followRoutingLayout);
+  else updateRoutingPaths();
+}
+
+function reuseRoutingNode(container, next) {
+  const existing = [...container.children].find(node => node.dataset.layoutKey === next.dataset.layoutKey);
+  if (!existing) return next;
+  for (const attribute of next.attributes) existing.setAttribute(attribute.name, attribute.value);
+  existing.replaceChildren(...next.childNodes);
+  return existing;
+}
+
+function placeRoutingNodes(container, nodes) {
+  const wanted = new Set(nodes);
+  for (const child of [...container.children]) if (!wanted.has(child)) child.remove();
+  nodes.forEach((node, index) => { if (container.children[index] !== node) container.insertBefore(node, container.children[index] || null); });
+}
+
 function setMulti(on) {
   const current = document.body.classList.contains('multi');
   if (current === on) return;
@@ -1976,8 +2071,7 @@ function renderMulti(routes, totals) {
     if (!ids.has(id)) seenRoutes.delete(id);
   }
 
-  const agentFragment = document.createDocumentFragment();
-  const accountFragment = document.createDocumentFragment();
+  const agentRows = [], accountRows = [];
   const agentNodes = new Map();
   for (const group of visible) {
     const route = group.route;
@@ -1988,10 +2082,11 @@ function renderMulti(routes, totals) {
     view.agentName = group.overflow ? `其余 ${group.overflow} 组` : view.agentName + (group.routes.length > 1 ? ` · ${group.routes.length}` : '');
     view.agentModel = group.context;
     const color = agentColor(route.agent);
-    const node = buildFanAgent(route, view, fresh, color);
-    node.dataset.layoutKey = `agent:${group.key}`;
+    const next = buildFanAgent(route, view, fresh, color);
+    next.dataset.layoutKey = `agent:${group.key}`;
+    const node = reuseRoutingNode(el.fanAgents, next);
     agentNodes.set(group.key, node);
-    agentFragment.append(node);
+    agentRows.push(node);
   }
   // The account column has its own order, as it does in magpie: a request
   // does not sit level with its account, so the wires cross through the hub.
@@ -2008,15 +2103,16 @@ function renderMulti(routes, totals) {
       if (group.modelCount > 1) view.accountModel = `${group.modelCount} 个模型`;
     }
     const color = agentColor(route.agent);
-    const node = buildFanAccount(route, view, fresh, color);
-    node.dataset.layoutKey = `account:${group.key}`;
-    accountFragment.append(node);
+    const next = buildFanAccount(route, view, fresh, color);
+    next.dataset.layoutKey = `account:${group.key}`;
+    const node = reuseRoutingNode(el.fanAccounts, next);
+    accountRows.push(node);
     for (const member of group.routes) flightAnchors.set(String(member.id), {
       agent: agentNodes.get(group.key), account: node, hub: el.fanHub.querySelector('.hub-card'),
     });
   }
-  el.fanAgents.replaceChildren(agentFragment);
-  el.fanAccounts.replaceChildren(accountFragment);
+  placeRoutingNodes(el.fanAgents, agentRows);
+  placeRoutingNodes(el.fanAccounts, accountRows);
 
   animateNumber(el.statRequests, Number(totals?.requests) || 0);
   animateNumber(el.statRerouted, Number(totals?.rerouted) || 0);
@@ -2166,6 +2262,35 @@ function drawFanWires() {
   el.fanWires.replaceChildren(fragment);
 }
 
+function drawSingleWires() {
+  const svg = $('singleWires');
+  if (document.body.classList.contains('multi')) return;
+  const stage = svg.parentElement.getBoundingClientRect();
+  if (!stage.width || !stage.height) return;
+  const hub = el.hub.querySelector('.hub-card').getBoundingClientRect();
+  const agent = el.agentNode.getBoundingClientRect(), account = el.accountNode.getBoundingClientRect();
+  const y = (hub.top + hub.bottom) / 2 - stage.top;
+  const definitions = [
+    wireCurve({ x: agent.right - stage.left, y: (agent.top + agent.bottom) / 2 - stage.top }, { x: hub.left - stage.left, y }),
+    wireCurve({ x: hub.right - stage.left, y }, { x: account.left - stage.left, y: (account.top + account.bottom) / 2 - stage.top }),
+  ];
+  svg.setAttribute('viewBox', `0 0 ${stage.width} ${stage.height}`);
+  svg.style.setProperty('--route', el.agentNode.style.getPropertyValue('--route'));
+  svg.classList.toggle('active', el.wireIn.classList.contains('active'));
+  if (!svg.children.length) {
+    for (const side of ['in', 'out']) {
+      const group = document.createElementNS(SVG_NS, 'g');
+      group.dataset.side = side;
+      for (const kind of ['fan-wire-under', 'fan-wire-track', 'fan-wire-trail', 'fan-wire-path']) {
+        const path = document.createElementNS(SVG_NS, 'path');
+        path.setAttribute('class', kind); path.setAttribute('pathLength', '100'); group.append(path);
+      }
+      svg.append(group);
+    }
+  }
+  [...svg.children].forEach((group, index) => { for (const path of group.children) path.setAttribute('d', definitions[index]); });
+}
+
 function stateDotClass(kind) {
   return kind === 'failed' ? 'bad' : kind === 'done' ? 'good' : 'accent';
 }
@@ -2202,6 +2327,12 @@ function renderStory(view) {
 }
 
 function render() {
+  const before = captureRoutingLayout();
+  renderRoutingContent();
+  animateRoutingLayout(before);
+}
+
+function renderRoutingContent() {
   const routes = Array.isArray(lastTrace?.routes) ? lastTrace.routes : [];
   const active = routes.filter(isInFlight);
   flightBook.update(lastTrace, connection.online && !motionReduced() && !frame.compact);
@@ -2225,6 +2356,9 @@ function render() {
   if (visible.length >= 2) renderMulti(visible, lastTrace.totals);
   else {
     const route = visible[0] || chooseLatest(routes);
+    const key = route ? `${route.agent || 'unknown'}|${route.session || route.conv || ''}` : 'empty';
+    el.agentNode.dataset.layoutKey = `agent:${key}`;
+    el.accountNode.dataset.layoutKey = `account:${key}`;
     renderView(present(route, lastTrace.totals, Boolean(settings.maskAccounts)),
       route ? agentColor(route.agent) : '#a18bff');
     if (route) flightAnchors.set(String(route.id), {

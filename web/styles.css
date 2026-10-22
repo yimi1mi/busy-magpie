@@ -929,6 +929,7 @@ body.menu-open .stage-canvas {
 /* ── stage ────────────────────────────────────────────────────────────── */
 
 .stage {
+  position: relative;
   display: grid;
   grid-template-columns:
     minmax(120px, 1fr)
@@ -939,6 +940,29 @@ body.menu-open .stage-canvas {
   align-items: center;
   width: 100%;
   height: 156px;
+}
+
+.single-wires {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.stage > .wire { opacity: 0; }
+.single-wires:not(.active) .fan-wire-trail,
+.single-wires:not(.active) .fan-wire-path { animation: none; opacity: 0.18; }
+.node[data-layout-key], .hub { transform-origin: top left; }
+
+.routing-ghost {
+  position: absolute;
+  display: block;
+  z-index: 1;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
 }
 
 .stage .node.agent {
