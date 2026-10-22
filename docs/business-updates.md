@@ -69,6 +69,15 @@ node tests/business-update-e2e.cjs
 
 前者覆盖签名、不可变目录、事务和真实子进程监督；后者使用真实 Electron、主进程、preload、页面和本地签名源，验证成功切换与失败回退。端到端测试使用临时密钥和独立 profile，不安装或替换正式版本。
 
+构建 Windows 产物后，还可直接验证原始打包程序：
+
+```powershell
+$unpacked = (Resolve-Path dist/local-1.4.0-shell/win-unpacked).Path
+node tests/business-update-e2e.cjs --original-immutable $unpacked
+```
+
+此模式保留产物的入口、公钥和全部文件，使用独立 profile 及本机调试接口驱动真实更新；测试包用本机已有签名私钥生成，只保存在忽略目录，不能发布。测试会核对运行依赖来自打包目录，以及升级和回退前后原产物文件完全一致。
+
 诊断文件在 `%APPDATA%\Busy Magpie\business-updates\`：`update.log` 记录接管、PID、退出与回退阶段；`journal.json` 记录版本状态；`transactions/<token>/` 保留设置备份和失败配置。启动器用的 `updating` 标记仍在用户配置目录，避免交接期间把应用提前拉起。
 
 这条更新链路的运行验证以 Windows 为准。macOS 构建继续保留，但未签名应用的安装、升级和系统安全检查需要单独验证。
