@@ -8,6 +8,7 @@ import {
   present,
 } from './presenter.js';
 import { modelUsage, paintModelTracks } from './model-usage.mjs';
+import { recentRequests, requestActive, requestFailed, attemptRows, redactDiagnostic, errorAdvice, requestSummary, RequestSelection } from './request-model.mjs';
 
 const $ = (id) => document.getElementById(id);
 
@@ -77,6 +78,8 @@ let lastTrace = null;
 let usageData = null;
 let usageStatus = { loading: false, stale: false, at: 0, error: '' };
 let modelPage = 0;
+let historyFilter = 'all';
+const requestSelection = new RequestSelection();
 let connection = { online: false, detail: '正在连接' };
 let layout = false;
 let frame = { lanes: 1, cardHeight: 400, windowHeight: 432 };
@@ -277,6 +280,52 @@ function renderUsageStatus() {
       : at ? `更新于 ${at}` : '等待用量数据';
   label.title = usageStatus.error || '上方为所选时间窗的用量；下方请求数为网关本次启动以来累计';
   renderModelUsage();
+}
+
+function renderRequestHistory() {
+  const listTop = $('historyList').scrollTop;
+  const detailTop = $('historyDetail').scrollTop;
+  const rows = recentRequests(lastTrace, historyFilter);
+  const selected = requestSelection.update(lastTrace);
+  $('historyState').textContent = !connection.online ? '网关离线 · 显示上次快照'
+    : requestSelection.previousGateway ? '固定的是上次网关会话的请求' : requestSelection.following ? '跟随最新请求' : '已固定查看';
+  $('historyFollow').disabled = requestSelection.following;
+  const list = document.createDocumentFragment();
+  for (const route of rows) {
+    const view = present(route, {}, Boolean(settings.maskAccounts));
+    const button = create('button', 'history-row'); button.type = 'button';
+    button.classList.toggle('selected', String(selected?.id) === String(route.id) && !requestSelection.previousGateway);
+    button.dataset.requestId = String(route.id);
+    button.append(create('b', '', view.agentName), create('span', '', view.accountModel),
+      create('small', requestFailed(route) ? 'error' : '', `${view.timeText} · ${requestActive(route) ? '进行中' : requestFailed(route) ? '失败' : '完成'} · #${route.id}`));
+    list.append(button);
+  }
+  if (!rows.length) list.append(create('p', 'panel-note', '没有符合条件的请求。'));
+  $('historyList').replaceChildren(list);
+  $('historyList').scrollTop = listTop;
+  const detail = $('historyDetail'); detail.replaceChildren();
+  $('historyCopy').disabled = !selected;
+  if (!selected) { detail.append(create('p', 'panel-note', '请求经过网关后会出现在这里。')); return; }
+  const view = present(selected, {}, Boolean(settings.maskAccounts));
+  detail.append(create('b', 'request-title', `${view.agentName} · ${view.accountModel}`));
+  detail.append(create('p', 'request-state', `${view.accountState} · #${selected.id}`));
+  const metrics = create('div', 'request-metrics');
+  for (const [label, value] of [['首字', selected.ttft], ['总耗时', selected.ms], ['排队', selected.queued]]) {
+    metrics.append(create('span', '', `${label} ${Number(value) > 0 ? formatDuration(value) : '—'}`));
+  }
+  detail.append(metrics);
+  const attempts = attemptRows(selected, Boolean(settings.maskAccounts));
+  for (const item of attempts) {
+    const row = create('div', `request-attempt${item.failed ? ' failed' : ''}`);
+    row.append(create('b', '', `${item.index}. ${item.name} · ${item.state}`),
+      create('small', '', `${item.model}${item.status ? ` · HTTP ${item.status}` : ''}${item.ms ? ` · ${formatDuration(item.ms)}` : ''}`));
+    if (item.error) row.append(create('pre', 'request-error', item.error));
+    detail.append(row);
+  }
+  if (!attempts.length) detail.append(create('p', 'panel-note', selected.done ? '未记录上游尝试。' : '尚未开始上游尝试。'));
+  if (selected.error) detail.append(create('pre', 'request-error', redactDiagnostic(selected.error)));
+  if (requestFailed(selected)) detail.append(create('p', 'panel-note', errorAdvice(Number(selected.status))));
+  detail.scrollTop = detailTop;
 }
 
 let tokenText = '';
@@ -815,6 +864,7 @@ function setupSettingsPanel() {
       pane.classList.remove('about');
       $('aboutView').hidden = true;
       $('modelsView').hidden = true;
+      $('historyView').hidden = true;
       document.body.classList.remove('settings-open', 'settings-closing');
     }, 200);
   };
@@ -831,13 +881,16 @@ function setupSettingsPanel() {
     document.body.classList.add('settings-open');
     const about = data?.mode === 'about';
     const models = data?.mode === 'models';
+    const history = data?.mode === 'history';
     pane.dataset.panel = data?.mode || 'settings';
     pane.classList.toggle('about', about);
     $('aboutView').hidden = !about;
     $('modelsView').hidden = !models;
+    $('historyView').hidden = !history;
     pane.scrollTop = 0;
     if (about) aboutRefresh?.();
     else if (models) renderModelUsage();
+    else if (history) renderRequestHistory();
     else load();
   };
 
@@ -895,6 +948,24 @@ function setupSettingsPanel() {
   $('modelsClose').addEventListener('click', () => window.busy.settingsClose());
   $('modelsPrev').addEventListener('click', () => { modelPage = Math.max(0, modelPage - 1); renderModelUsage(); });
   $('modelsNext').addEventListener('click', () => { modelPage++; renderModelUsage(); });
+  $('historyClose').addEventListener('click', () => window.busy.settingsClose());
+  $('historyFilter').addEventListener('change', (event) => { historyFilter = event.target.value; $('historyList').scrollTop = 0; renderRequestHistory(); });
+  $('historyFollow').addEventListener('click', () => { requestSelection.follow(lastTrace); renderRequestHistory(); });
+  $('historyList').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-request-id]');
+    if (!button) return;
+    const route = (lastTrace?.routes || []).find(row => String(row.id) === button.dataset.requestId);
+    if (route) { requestSelection.select(route, lastTrace); $('historyDetail').scrollTop = 0; renderRequestHistory(); }
+  });
+  $('historyCopy').addEventListener('click', async () => {
+    const route = requestSelection.snapshot;
+    if (!route) return;
+    const view = present(route, {}, true);
+    try {
+      const copied = await window.busy.copySummary(requestSummary(route, view.agentName));
+      $('historyCopyStatus').textContent = copied ? '已复制脱敏摘要' : '摘要过长，未复制';
+    } catch { $('historyCopyStatus').textContent = '复制失败'; }
+  });
 
   window.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && open) {
@@ -2172,6 +2243,7 @@ function renderStory(view) {
 }
 
 function render() {
+  if (!$('historyView').hidden) renderRequestHistory();
   if (!connection.online) {
     const waiting = !connection.detail || connection.detail === '正在连接' || connection.detail === '正在重新连接';
     stopFlights();
@@ -2203,10 +2275,7 @@ function render() {
 }
 
 function isInFlight(route) {
-  return Boolean(route) && (
-    !route.done ||
-    (Array.isArray(route.tries) && route.tries.some((tryItem) => !tryItem.done))
-  );
+  return requestActive(route);
 }
 
 function stamp(route) {

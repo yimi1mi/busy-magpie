@@ -2,7 +2,7 @@
 
 const {
   app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, screen, shell, Notification,
-  globalShortcut,
+  globalShortcut, clipboard,
 } = require('electron');
 const fs = require('fs');
 const os = require('os');
@@ -1844,14 +1844,6 @@ ipcMain.on('busy:ready', () => {
 });
 
 function openAbout() {
-  if (!win || win.isDestroyed()) return;
-  if (settingsOpen) {
-    currentPanelMode = 'about';
-    win.showInactive();
-    win.focus();
-    send('magpie:about');
-    return;
-  }
   openSettingsPanel('about');
 }
 
@@ -1866,6 +1858,7 @@ ipcMain.on('busy:menu-action', (_event, action) => {
   switch (action) {
     case 'settings': openSettingsPanel(); break;
     case 'models': openSettingsPanel('models'); break;
+    case 'history': openSettingsPanel('history'); break;
     case 'layout': beginLayout(); break;
     case 'hide': win.hide(); break;
     case 'pause': pauseDisplay(); break;
@@ -1875,6 +1868,12 @@ ipcMain.on('busy:menu-action', (_event, action) => {
       checkForUpdates(true);
       break;
   }
+});
+
+ipcMain.handle('busy:copy-summary', (_event, text) => {
+  if (typeof text !== 'string' || text.length > 12000) return false;
+  clipboard.writeText(text);
+  return true;
 });
 
 ipcMain.handle('updates:get', () => updateView());

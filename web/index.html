@@ -45,6 +45,7 @@
       </div>
 
       <div class="quick-menu" id="quickMenu" role="menu" aria-label="挂件操作" hidden>
+        <button type="button" role="menuitem" data-menu-action="history">最近请求</button>
         <button type="button" role="menuitem" data-menu-action="settings">设置</button>
         <button type="button" role="menuitem" data-menu-action="models">模型用量</button>
         <button type="button" role="menuitem" data-menu-action="layout">调整位置</button>
@@ -312,6 +313,12 @@
                 </div>
               </footer>
             </form>
+            <section class="panel-view history-view" id="historyView" hidden>
+              <header class="panel-head"><div><b>最近请求</b><small>最多 20 条 · 本次网关会话</small></div><button class="settings-x" id="historyClose" type="button" aria-label="关闭最近请求">×</button></header>
+              <div class="history-toolbar"><label>筛选 <select id="historyFilter"><option value="all">全部</option><option value="active">进行中</option><option value="failed">失败</option></select></label><button type="button" id="historyFollow">跟随最新</button><span id="historyState"></span></div>
+              <div class="history-columns"><div class="history-list" id="historyList"></div><div class="history-detail" id="historyDetail"></div></div>
+              <footer class="history-foot"><span id="historyCopyStatus" role="status"></span><button type="button" id="historyCopy">复制脱敏摘要</button></footer>
+            </section>
             <section class="panel-view models-view" id="modelsView" hidden>
               <header class="panel-head"><div><b>模型用量</b><small>同一时间窗 · 同一统计口径</small></div><button class="settings-x" id="modelsClose" type="button" aria-label="关闭模型用量">×</button></header>
               <div class="model-chart">

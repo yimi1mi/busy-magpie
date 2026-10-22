@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('busy', {
   toggleMenu: () => ipcRenderer.send('busy:menu-toggle'),
   closeMenu: () => ipcRenderer.send('busy:menu-close'),
   menuAction: (action) => ipcRenderer.send('busy:menu-action', action),
+  copySummary: (text) => ipcRenderer.invoke('busy:copy-summary', text),
   settingsGet: () => ipcRenderer.invoke('settings:get'),
   settingsSave: (data) => ipcRenderer.invoke('settings:save', data),
   previewOpacity: (value) => ipcRenderer.send('settings:opacity', value),
