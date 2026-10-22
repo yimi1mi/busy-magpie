@@ -10,6 +10,7 @@ import {
 import { modelUsage, paintModelTracks } from './model-usage.mjs';
 import { downloadSize } from './download-progress.mjs';
 import { acceleratorFromEvent } from './hotkey.mjs';
+import { FlightBook } from './flight-playback.mjs';
 import { recentRequests, requestActive, requestFailed, attemptRows, redactDiagnostic, errorAdvice, requestSummary, RequestSelection, groupRequests } from './request-model.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -92,6 +93,9 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const motionReduced = () => Boolean(settings.quietMotion || reducedMotion.matches);
 const flights = new Map();
+const flightBook = new FlightBook();
+const flightAnchors = new Map();
+let flightRenderPending = false;
 
 // The same flying magpie magpie's own Routing page draws: facing right,
 // wings beating from the shoulder, banked into the turn.
@@ -123,6 +127,7 @@ function iconSetup() {
 
 function applyFrame(next) {
   if (!next || !next.windowHeight) return;
+  const compactChanged = Boolean(frame.compact) !== Boolean(next.compact);
   frame = { ...frame, ...next };
   document.body.classList.toggle('compact', Boolean(frame.compact));
   const root = document.documentElement;
@@ -130,6 +135,7 @@ function applyFrame(next) {
   root.style.setProperty('--card-h', `${frame.cardHeight}px`);
   requestAnimationFrame(() => {
     applyUiScale();
+    if (compactChanged) render();
     drawFanWires();
     refreshFlightLegs();
   });
@@ -1268,74 +1274,49 @@ function setupFirstRun() {
 
 let firstRunShow = null;
 
-function stopFlights() {
-  for (const flight of flights.values()) {
-    flight.active = false;
-    flight.bird.remove();
-    flight.guides.remove();
-    flight.fx.remove();
-  }
-  flights.clear();
+function disposeFlight(flight) {
+  flight.bird.remove();
+  flight.guides.remove();
+  flight.fx.remove();
+  if (flights.get(flight.key) === flight) flights.delete(flight.key);
 }
 
-// A resize moves every anchor, so the flights already in the air have to be
-// told where the wires are now.
+function stopFlights() {
+  flightBook.stop();
+  for (const flight of flights.values()) disposeFlight(flight);
+}
+
+function renderAfterFlight() {
+  if (flightRenderPending) return;
+  flightRenderPending = true;
+  requestAnimationFrame(() => { flightRenderPending = false; render(); });
+}
+
 function refreshFlightLegs() {
   for (const flight of flights.values()) {
-    if (flight.active) buildFlightLegs(flight);
+    if (!flight.active || !buildFlightLegs(flight)) continue;
+    if (flight.holding) positionHeldFlight(flight);
   }
 }
 
-function syncFlights(routes, multi) {  if (motionReduced()) {
-    stopFlights();
-    return;
+function syncFlights() {
+  for (const flight of flights.values()) {
+    if (!flight.active || flightBook.sessions.get(flight.key) !== flight.playback) disposeFlight(flight);
   }
-
-  const wanted = new Map();
-  if (multi) {
-    for (const route of routes) wanted.set(String(route.id), route);
-  } else if (routes.length === 1) {
-    wanted.set('single', routes[0]);
+  for (const session of flightBook.sessions.values()) {
+    if (!flights.has(session.id)) startFlight(session);
   }
-
-  for (const [key, flight] of [...flights]) {
-    if (wanted.has(key)) continue;
-    // The route finished, not the layout: let the bird land where it is
-    // going, then go. Removing it on the spot made the answer look like it
-    // vanished halfway through the return.
-    if (flight.single === !multi) {
-      flight.finishing = true;
-      continue;
-    }
-    flight.active = false;
-    flight.bird.remove();
-    flight.guides.remove();
-    flight.fx.remove();
-    flights.delete(key);
-  }
-
-  for (const [key, route] of wanted) {
-    const color = agentColor(route.agent);
-    const existing = flights.get(key);
-    if (existing) {
-      if (existing.color !== color) {
-        existing.color = color;
-        existing.bird.style.setProperty('--agent', color);
-      }
-      continue;
-    }
-    startFlight(key, route, multi, color);
-  }
+  refreshFlightLegs();
 }
 
-function startFlight(key, route, multi, color) {
+function startFlight(playback) {
+  const color = agentColor(playback.route.agent);
   const bird = document.createElementNS(SVG_NS, 'g');
   bird.setAttribute('class', 'flying-bird');
+  bird.dataset.requestId = playback.id;
+  bird.dataset.phase = 'queued';
   bird.style.setProperty('--agent', color);
   bird.style.opacity = '0';
-  // The flier and the packet are separate on purpose: magpie's own routing
-  // page drops the bird at the account and leaves the request's dot waiting
-  // there, so the wait belongs to the dot, not to the courier.
   const flier = document.createElementNS(SVG_NS, 'g');
   flier.setAttribute('class', 'flier');
   flier.innerHTML = FLIER;
@@ -1345,62 +1326,30 @@ function startFlight(key, route, multi, color) {
   packet.setAttribute('cx', '0');
   packet.setAttribute('cy', '0');
   bird.append(flier, packet);
-
   const guides = document.createElementNS(SVG_NS, 'g');
   guides.setAttribute('aria-hidden', 'true');
-  // One-shot sparks and shockwaves from a hub pass live here, under the bird.
   const fx = document.createElementNS(SVG_NS, 'g');
   fx.setAttribute('aria-hidden', 'true');
   el.birdSky.append(guides, fx, bird);
-
   const flight = {
-    key,
-    routeId: String(route.id),
-    single: !multi,
-    color,
-    bird,
-    flier,
-    guides,
-    fx,
-    hubCenter: null,
-    hubHalf: null,
-    // A crossing effect may squeeze or dissolve the bird for a moment.
-    fxScale: 1,
-    fxAlpha: 1,
-    // Where the last frame left the bird, and the clock that drives its drift.
-    pose: null,
-    born: performance.now(),
-    wobPhase: Math.random() * Math.PI * 2,
-    pace: 1,
-    // The bank angle eases towards the path's tangent, the way it does on
-    // magpie's own stage, instead of snapping on every corner.
-    aim: null,
-    aimFlip: false,
-    active: true,
-    leg1: null,
-    leg2: null,
-    phase: 160 + Math.random() * 900,
-    rest: 820 + Math.random() * 500,
-    legPause: 110 + Math.random() * 90,
+    key: playback.id, routeId: playback.id, playback,
+    get active() { return playback.active; },
+    single: !document.body.classList.contains('multi'),
+    color, bird, flier, packet, guides, fx,
+    hubCenter: null, hubHalf: null, hubSide: 'left',
+    fxScale: 1, fxAlpha: 1, pose: null,
+    born: performance.now(), wobPhase: Math.random() * Math.PI * 2, pace: 1,
+    aim: null, aimFlip: false, holding: null, trip: null,
   };
-  flights.set(key, flight);
-  runFlight(flight);
+  flights.set(flight.key, flight);
+  queueMicrotask(() => runFlight(flight));
 }
 
 function buildFlightLegs(flight) {
-  let agent;
-  let account;
-  if (flight.single) {
-    agent = el.agentNode;
-    account = el.accountNode;
-  } else {
-    const id = CSS.escape(flight.routeId);
-    agent = el.fanAgents.querySelector(`[data-id="${id}"]`);
-    account = el.fanAccounts.querySelector(`[data-id="${id}"]`);
-  }
-  const hub = flight.single
-    ? document.querySelector('#hub .hub-card')
-    : el.fanHub.querySelector('.hub-card');
+  const anchor = flightAnchors.get(flight.routeId);
+  if (!anchor) return false;
+  const { agent, account, hub } = anchor;
+  flight.single = !document.body.classList.contains('multi');
   if (!agent || !account || !hub || !agent.isConnected || !account.isConnected) return false;
 
   const sky = el.birdSky.getBoundingClientRect();
@@ -1450,7 +1399,12 @@ function buildFlightLegs(flight) {
   leg1.setAttribute('d', d1);
   legHub.setAttribute('d', dHub);
   leg2.setAttribute('d', d2);
-  legAll.setAttribute('d', `${d1} ${dHub} ${d2}`);
+  const trip = flight.trip || { from: 'agent', to: 'account' };
+  const parts = trip.from === 'agent' && trip.to === 'hub' ? d1
+    : trip.from === 'account' && trip.to === 'hub' ? d2
+      : trip.from === 'hub' && trip.to === 'account' ? `${flight.hubSide === 'left' ? dHub : ''} ${d2}`
+        : `${d1} ${dHub} ${d2}`;
+  legAll.setAttribute('d', parts);
   for (const path of [leg1, legHub, leg2, legAll]) {
     path.setAttribute('fill', 'none');
     path.setAttribute('stroke', 'none');
@@ -1511,7 +1465,8 @@ function tripProgress(raw) {
   return a + (b - a) * rest;
 }
 
-function flyTrip(flight, reverse) {
+function flyTrip(flight, trip) {
+  const reverse = trip.from === 'account' || trip.to === 'agent';
   const path = flight.legAll;
   const len = path.getTotalLength();
   return new Promise((resolve) => {
@@ -1521,7 +1476,7 @@ function flyTrip(flight, reverse) {
     }
     // One continuous profile across agent → magpie → account, so the bird
     // carries speed through the hub instead of stopping at its edges.
-    const duration = Math.max(1200, Math.min(2600, len * 6)) * (flight.pace || 1);
+    const duration = trip.ms;
     const t0 = performance.now();
     let fired = false;
     const step = (now) => {
@@ -1588,122 +1543,42 @@ function flyTrip(flight, reverse) {
   });
 }
 
-// Arriving is part of the trip: the bird reaches the account, sits there for a
-// beat, and then lets go — the request's dot stays at the account while the
-// answer is on its way, which is exactly what magpie's own stage does with it.
-const PERCH_MS = 160;
-const PERCH_FADE_MS = 200;
-
-function arrive(flight) {
-  return new Promise((resolve) => {
-    const t0 = performance.now();
-    const hold = (now) => {
-      if (!flight.active) {
-        resolve();
-        return;
-      }
-      flight.bird.style.opacity = '1';
-      // A short settle where it landed: the bird dips and comes to rest
-      // instead of freezing the instant the path ends.
-      const pose = flight.pose;
-      const dt = now - t0;
-      if (pose) {
-        const bob = Math.sin(dt / 130) * 1.6 * Math.exp(-dt / 320);
-        flight.bird.setAttribute(
-          'transform',
-          `translate(${pose.x.toFixed(1)} ${(pose.y + bob).toFixed(1)}) scale(${(pose.flip * pose.scale).toFixed(3)} ${pose.scale.toFixed(3)}) rotate(${pose.bank.toFixed(1)})`,
-        );
-      }
-      if (dt < PERCH_MS) {
-        requestAnimationFrame(hold);
-        return;
-      }
-      // The courier dissolves; the dot it was carrying stays behind, held.
-      flight.flier.style.opacity = '0';
-      flight.bird.classList.add('held');
-      window.setTimeout(resolve, PERCH_FADE_MS);
-    };
-    requestAnimationFrame(hold);
-  });
-}
-
-// The answer is ready: a bird takes the dot back on.
-function depart(flight) {
-  flight.bird.classList.remove('held');
-  flight.flier.style.opacity = '1';
-}
-
-// The dot waits at the account for as long as the answer takes, which is what
-// magpie's own stage does with it. A floor keeps a very fast answer readable
-// and a cap keeps a stale trace from parking a dot there forever.
-const ANSWER_MIN_MS = 650;
-const ANSWER_MAX_MS = 8000;
-
-function waitForAnswer(flight) {
-  return new Promise((resolve) => {
-    const t0 = performance.now();
-    const check = () => {
-      const waited = performance.now() - t0;
-      if (!flight.active || waited >= ANSWER_MAX_MS
-        || (flight.finishing && waited >= ANSWER_MIN_MS)) {
-        resolve();
-        return;
-      }
-      window.setTimeout(check, 120);
-    };
-    check();
-  });
-}
-
-// The reply has landed; nothing of the flight stays.
-function land(flight) {
-  return new Promise((resolve) => {
-    flight.bird.style.transition = `opacity ${PERCH_FADE_MS}ms ease-out`;
-    requestAnimationFrame(() => { flight.bird.style.opacity = '0'; });
-    window.setTimeout(() => {
-      flight.bird.style.transition = '';
-      resolve();
-    }, PERCH_FADE_MS + 20);
-  });
+function positionHeldFlight(flight) {
+  const path = flight.holding === 'account' ? flight.leg2
+    : flight.hubSide === 'left' ? flight.leg1 : flight.leg2;
+  const distance = flight.holding === 'account' || flight.hubSide === 'left' ? path.getTotalLength() : 0;
+  const p = path.getPointAtLength(distance);
+  flight.bird.setAttribute('transform', `translate(${p.x} ${p.y}) scale(0.68)`);
 }
 
 async function runFlight(flight) {
-  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  await pause(flight.phase);
-  while (flight.active) {
-    if (!buildFlightLegs(flight)) {
-      await pause(400);
-      continue;
-    }
-
-    flight.bird.classList.remove('back');
-    await flyTrip(flight, false);
-    if (!flight.active) break;
-    await arrive(flight);
-    if (!flight.active) break;
-    // A route that finished while its answer was owed still gets its reply
-    // flown home; only the idle wait between rounds is skipped.
-    if (flight.finishing) {
-      depart(flight);
-      await flyTrip(flight, true);
-      if (!flight.active) break;
-      await land(flight);
-      break;
-    }
-    await waitForAnswer(flight);
-
-    flight.bird.classList.add('back');
-    depart(flight);
-    await flyTrip(flight, true);
-    if (!flight.active) break;
-    await land(flight);
-    if (!flight.active || flight.finishing) break;
-    await pause(flight.rest);
+  try {
+    await flight.playback.play(async trip => {
+      flight.trip = trip;
+      flight.holding = null;
+      flight.bird.dataset.phase = `${trip.from}-${trip.to}`;
+      flight.bird.dataset.attempt = String(trip.attempt);
+      flight.bird.classList.remove('held');
+      flight.bird.classList.toggle('back', trip.from === 'account');
+      flight.bird.classList.toggle('failed', trip.error);
+      flight.flier.style.opacity = '1';
+      flight.bird.style.opacity = '1';
+      render();
+      if (!flight.active || !buildFlightLegs(flight)) return;
+      await flyTrip(flight, trip);
+      if (trip.to === 'hub') flight.hubSide = trip.from === 'account' ? 'right' : 'left';
+    }, anchor => {
+      flight.holding = anchor;
+      flight.bird.dataset.phase = `waiting-${anchor}`;
+      flight.flier.style.opacity = '0';
+      flight.bird.classList.add('held');
+      if (buildFlightLegs(flight)) positionHeldFlight(flight);
+    });
+  } finally {
+    disposeFlight(flight);
+    flightBook.finish(flight.playback);
+    renderAfterFlight();
   }
-  flight.bird.remove();
-  flight.guides.remove();
-  flight.fx.remove();
-  flights.delete(flight.key);
 }
 
 // ── the hub a request flies through ────────────────────────────────────
@@ -2129,13 +2004,35 @@ function agentColor(agent) {
 
 
 
+function flightDisplayRoute(session) {
+  const route = session.route;
+  if (session.attempt < 0) return route;
+  const attempts = route.tries || [];
+  const attempt = attempts[session.attempt];
+  if (!attempt) return route;
+  return { ...route, tries: attempts.slice(0, session.attempt + 1),
+    done: Boolean(route.done && session.attempt === attempts.length - 1),
+    status: attempt.status || 0, error: attempt.error || '', model: attempt.model || route.model };
+}
+
+function visibleFlightGroups(routes) {
+  const groups = groupRequests(routes, { includeCompleted: true });
+  if (groups.length <= 4) return { groups, visible: groups };
+  const rest = groups.slice(3);
+  const mergedRoutes = rest.flatMap(group => group.routes);
+  const accounts = new Set(mergedRoutes.map(route => `${route.provider || ''}/${route.tries?.at(-1)?.id || route.order?.[0]?.id || ''}`));
+  const overflow = { ...rest[0], key: 'overflow', routes: mergedRoutes, overflow: rest.length,
+    context: `${mergedRoutes.length} 条请求 · 展开查看`, accountCount: accounts.size,
+    modelCount: new Set(mergedRoutes.map(route => route.model)).size,
+    pendingAccounts: rest.reduce((sum, group) => sum + group.pendingAccounts, 0) };
+  return { groups, visible: [...groups.slice(0, 3), overflow] };
+}
+
 function renderMulti(routes, totals) {
   setMulti(true);
   setLiveChrome({ inFlight: true });
 
-  const groups = groupRequests(routes);
-  const visible = groups.slice(0, 4);
-  const ordered = visible.map(group => group.route);
+  const { groups, visible } = visibleFlightGroups(routes);
   const count = visible.length;
   // The card and the lower half are fixed. The fan gets 134px, so more
   // agents means shorter rows, not a taller window.
@@ -2154,10 +2051,11 @@ function renderMulti(routes, totals) {
   el.fan.classList.toggle('ultra', count >= 4);
   el.fan.classList.toggle('micro', count >= 5);
 
-  el.lanesTitle.textContent = `${routes.length} 个请求正在执行`;
+  const activeCount = (lastTrace?.routes || []).filter(isInFlight).length;
+  el.lanesTitle.textContent = activeCount ? `${activeCount} 个请求正在执行` : '请求结果返回中';
   el.lanesSub.textContent = `${groups.length} 组 · 按 Agent / 会话`;
   $('lanesMore').hidden = groups.length <= 4 && routes.length === groups.length;
-  $('lanesMore').textContent = groups.length > 4 ? `另有 ${groups.length - 4} 组` : `展开 ${routes.length} 个请求`;
+  $('lanesMore').textContent = `展开 ${routes.length} 个请求`;
   renderStory(present(chooseLatest(routes), totals, Boolean(settings.maskAccounts)));
 
   setParts(el.caption, [
@@ -2165,23 +2063,27 @@ function renderMulti(routes, totals) {
     { text: ' · 按 Agent / 会话合并显示。', role: 'muted' },
   ]);
 
-  const ids = new Set(ordered.map((route) => String(route.id)));
+  const ids = new Set(visible.map(group => String(group.route.id)));
   for (const id of [...seenRoutes]) {
     if (!ids.has(id)) seenRoutes.delete(id);
   }
 
   const agentFragment = document.createDocumentFragment();
   const accountFragment = document.createDocumentFragment();
+  const agentNodes = new Map();
   for (const group of visible) {
     const route = group.route;
     const id = String(route.id);
     const fresh = !seenRoutes.has(id);
     if (fresh) seenRoutes.add(id);
     const view = present(route, totals, Boolean(settings.maskAccounts));
-    view.agentName += group.routes.length > 1 ? ` · ${group.routes.length}` : '';
+    view.agentName = group.overflow ? `其余 ${group.overflow} 组` : view.agentName + (group.routes.length > 1 ? ` · ${group.routes.length}` : '');
     view.agentModel = group.context;
     const color = agentColor(route.agent);
-    agentFragment.append(buildFanAgent(route, view, fresh, color));
+    const node = buildFanAgent(route, view, fresh, color);
+    node.dataset.layoutKey = `agent:${group.key}`;
+    agentNodes.set(group.key, node);
+    agentFragment.append(node);
   }
   // The account column has its own order, as it does in magpie: a request
   // does not sit level with its account, so the wires cross through the hub.
@@ -2194,11 +2096,16 @@ function renderMulti(routes, totals) {
     if (group.routes.length > 1) {
       view.accountName = group.accountCount > 1 ? `${group.accountCount} 个账号`
         : group.accountCount === 0 ? '等待账号' : view.accountName;
-      view.accountState = `${group.routes.length} 个请求${group.pendingAccounts ? ` · ${group.pendingAccounts} 待选` : '进行中'}`;
+      view.accountState = `${group.routes.length} 条请求${group.pendingAccounts ? ` · ${group.pendingAccounts} 待选` : ''}`;
       if (group.modelCount > 1) view.accountModel = `${group.modelCount} 个模型`;
     }
     const color = agentColor(route.agent);
-    accountFragment.append(buildFanAccount(route, view, fresh, color));
+    const node = buildFanAccount(route, view, fresh, color);
+    node.dataset.layoutKey = `account:${group.key}`;
+    accountFragment.append(node);
+    for (const member of group.routes) flightAnchors.set(String(member.id), {
+      agent: agentNodes.get(group.key), account: node, hub: el.fanHub.querySelector('.hub-card'),
+    });
   }
   el.fanAgents.replaceChildren(agentFragment);
   el.fanAccounts.replaceChildren(accountFragment);
@@ -2210,7 +2117,6 @@ function renderMulti(routes, totals) {
   applyUsageTokens();
   el.accountToken.hidden = true;
 
-  syncFlights(ordered, true);
   requestAnimationFrame(() => {
     drawFanWires();
     reportHitAreas();
@@ -2388,38 +2294,36 @@ function renderStory(view) {
 }
 
 function render() {
-  const activeCount = (lastTrace?.routes || []).filter(isInFlight).length;
-  $('compactStatus').textContent = connection.online ? activeCount ? `${activeCount} 个请求进行中` : '已连接 · 空闲' : connection.retry ? '自动重连中' : '未连接';
+  const routes = Array.isArray(lastTrace?.routes) ? lastTrace.routes : [];
+  const active = routes.filter(isInFlight);
+  flightBook.update(lastTrace, connection.online && !motionReduced() && !frame.compact);
+  flightAnchors.clear();
+  $('compactStatus').textContent = connection.online ? active.length ? `${active.length} 个请求进行中` : '已连接 · 空闲' : connection.retry ? '自动重连中' : '未连接';
   $('compactLiveDot').classList.toggle('online', Boolean(connection.online));
   if (!$('historyView').hidden) renderRequestHistory();
-  if (!connection.online) {
+  if (!connection.online || !lastTrace) {
+    stopFlights();
     const waiting = !connection.detail || connection.detail === '正在连接' || connection.detail === '正在重新连接';
-    stopFlights();
-    renderView(waiting
-      ? connecting(lastTrace?.totals)
-      : offline(connection.detail, settings.gateway, lastTrace?.totals));
+    renderView(!connection.online ? waiting ? connecting(lastTrace?.totals)
+      : offline(connection.detail, settings.gateway, lastTrace?.totals) : empty(undefined));
     return;
   }
 
-  if (!lastTrace) {
-    stopFlights();
-    renderView(empty(undefined));
-    return;
+  const displayed = new Map(active.map(route => [String(route.id), route]));
+  for (const session of flightBook.sessions.values()) {
+    if (session.active) displayed.set(session.id, flightDisplayRoute(session));
   }
-
-  const routes = Array.isArray(lastTrace.routes) ? lastTrace.routes : [];
-  const active = routes.filter(isInFlight);
-  if (active.length >= 2) {
-    renderMulti(active, lastTrace.totals);
-    return;
+  const visible = [...displayed.values()];
+  if (visible.length >= 2) renderMulti(visible, lastTrace.totals);
+  else {
+    const route = visible[0] || chooseLatest(routes);
+    renderView(present(route, lastTrace.totals, Boolean(settings.maskAccounts)),
+      route ? agentColor(route.agent) : '#a18bff');
+    if (route) flightAnchors.set(String(route.id), {
+      agent: el.agentNode, account: el.accountNode, hub: el.hub.querySelector('.hub-card'),
+    });
   }
-
-  const route = active[0] || chooseLatest(routes);
-  renderView(
-    present(route, lastTrace.totals, Boolean(settings.maskAccounts)),
-    route ? agentColor(route.agent) : '#a18bff',
-  );
-  syncFlights(active, false);
+  syncFlights();
 }
 
 function isInFlight(route) {

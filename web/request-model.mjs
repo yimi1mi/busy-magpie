@@ -9,9 +9,9 @@ export function recentRequests(trace, filter = 'all', limit = 20) {
       || String(b.id).localeCompare(String(a.id))).slice(0, limit);
 }
 
-export function groupRequests(routes) {
+export function groupRequests(routes, { includeCompleted = false } = {}) {
   const groups = new Map();
-  for (const route of routes.filter(requestActive)) {
+  for (const route of includeCompleted ? routes : routes.filter(requestActive)) {
     const session = String(route.session || route.conv || '');
     const key = `${route.agent || 'unknown'}|${session}`;
     let group = groups.get(key);
