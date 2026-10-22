@@ -249,8 +249,8 @@ export function present(route, totals, maskAccounts) {
   const inFlight = !route.done || tries.some((item) => !item.done);
   // A failed earlier try that handed the request on is part of the story,
   // not a failed request. Only the route's own outcome decides the card.
-  const failed = Number(route.status) >= 400 || Boolean(route.error) ||
-    Boolean(lastTry && lastTry.done && Number(lastTry.status) >= 400);
+  const failed = !inFlight && (Number(route.status) >= 400 || Boolean(route.error) ||
+    Boolean(lastTry && lastTry.done && Number(lastTry.status) >= 400));
 
   const agent = agentName(route.agent);
   const model = shortModel(route.model);
@@ -385,9 +385,15 @@ function caption(route, who, model, kind, count, single) {
   }
   if (!route.order || route.order.length === 0) {
     return [
-      { text: '没有可用的', role: ROLE.muted },
-      { text: kind, role: ROLE.strong },
-      { text: '，请求还在等待。', role: ROLE.muted },
+      { text: '没有可用的路由候选', role: ROLE.strong },
+      { text: route.done ? '，本次请求已结束。' : '，正在等待可用路由。', role: ROLE.muted },
+    ];
+  }
+  if (route.compaction) {
+    return [
+      { text: '本次复用压缩上下文，仅尝试 ', role: ROLE.muted },
+      { text: who, role: ROLE.strong },
+      { text: '。', role: ROLE.muted },
     ];
   }
   if (route.pinned) {
@@ -399,10 +405,9 @@ function caption(route, who, model, kind, count, single) {
   }
   if (single) {
     return [
+      { text: '本次路由只有一个候选：', role: ROLE.muted },
       { text: who, role: ROLE.strong },
-      { text: ' 是 ', role: ROLE.muted },
-      { text: model, role: ROLE.accent },
-      { text: ` 唯一启用的${kind}，无需选择。`, role: ROLE.muted },
+      { text: '。', role: ROLE.muted },
     ];
   }
   return [
@@ -453,6 +458,7 @@ function stateText(route, lastTry, failed, inFlight, forAccount) {
     return `回答失败${Number(route.status) > 0 ? ` · ${route.status}` : ''}`;
   }
   if (inFlight) {
+    if (lastTry?.done && Number(lastTry.status) >= 400) return '改道中…';
     return lastTry && !lastTry.done ? '回答中…' : '排队中…';
   }
   if (forAccount) return '回答了这个请求';
