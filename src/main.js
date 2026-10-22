@@ -2056,14 +2056,12 @@ ipcMain.on('busy:about-open', () => {
 
 ipcMain.on('busy:menu-toggle', () => setQuickMenuOpen(!quickMenuOpen));
 ipcMain.on('busy:menu-close', () => setQuickMenuOpen(false));
-ipcMain.on('busy:history-open', () => openSettingsPanel('history'));
 ipcMain.on('busy:compact-toggle', toggleCompact);
 ipcMain.on('busy:menu-action', (_event, action) => {
   if (!quickMenuOpen) return;
   switch (action) {
     case 'settings': openSettingsPanel(); break;
     case 'models': openSettingsPanel('models'); break;
-    case 'history': openSettingsPanel('history'); break;
     case 'compact': toggleCompact(); break;
     case 'layout': beginLayout(); break;
     case 'hide': win.hide(); break;

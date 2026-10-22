@@ -14,7 +14,7 @@ import { acceleratorFromEvent } from './hotkey.mjs';
 import { FlightBook } from './flight-playback.mjs';
 import { wireCurve, hubCurve, glideProgress } from './flight-path.mjs';
 import { stagedRoutes, wireState, nextRestExpiry } from './routing-state.mjs';
-import { recentRequests, requestActive, requestFailed, requestGroupKey, attemptRows, redactDiagnostic, errorAdvice, requestSummary, RequestSelection, groupRequests } from './request-model.mjs';
+import { requestActive, requestGroupKey, redactDiagnostic, groupRequests } from './request-model.mjs';
 
 const $ = (id) => document.getElementById(id);
 
@@ -84,8 +84,6 @@ let usageData = null;
 let tokenBaseTitle = '';
 let usageStatus = { loading: false, stale: false, at: 0, error: '' };
 let modelPage = 0;
-let historyFilter = 'all';
-const requestSelection = new RequestSelection();
 let connection = { online: false, detail: '正在连接' };
 let layout = false;
 let frame = { lanes: 1, cardHeight: 400, windowHeight: 432 };
@@ -315,53 +313,6 @@ function renderUsageStatus() {
   renderModelUsage();
 }
 
-function renderRequestHistory() {
-  const listTop = $('historyList').scrollTop;
-  const detailTop = $('historyDetail').scrollTop;
-  const rows = recentRequests(lastTrace, historyFilter, historyFilter === 'active' ? 200 : 20);
-  $('historyScope').textContent = historyFilter === 'active' ? '当前活动请求 · 最多 200 条' : '最多 20 条 · 本次网关会话';
-  const selected = requestSelection.update(lastTrace);
-  $('historyState').textContent = !connection.online ? '网关离线 · 显示上次快照'
-    : requestSelection.previousGateway ? '固定的是上次网关会话的请求' : requestSelection.following ? '跟随最新请求' : '已固定查看';
-  $('historyFollow').disabled = requestSelection.following;
-  const list = document.createDocumentFragment();
-  for (const route of rows) {
-    const view = present(route, {}, Boolean(settings.maskAccounts));
-    const button = create('button', 'history-row'); button.type = 'button';
-    button.classList.toggle('selected', String(selected?.id) === String(route.id) && !requestSelection.previousGateway);
-    button.dataset.requestId = String(route.id);
-    button.append(create('b', '', view.agentName), create('span', '', view.accountModel),
-      create('small', requestFailed(route) ? 'error' : '', `${view.timeText} · ${requestActive(route) ? '进行中' : requestFailed(route) ? '失败' : '完成'} · #${route.id}`));
-    list.append(button);
-  }
-  if (!rows.length) list.append(create('p', 'panel-note', '没有符合条件的请求。'));
-  $('historyList').replaceChildren(list);
-  $('historyList').scrollTop = listTop;
-  const detail = $('historyDetail'); detail.replaceChildren();
-  $('historyCopy').disabled = !selected;
-  if (!selected) { detail.append(create('p', 'panel-note', '请求经过网关后会出现在这里。')); return; }
-  const view = present(selected, {}, Boolean(settings.maskAccounts));
-  detail.append(create('b', 'request-title', `${view.agentName} · ${view.accountModel}`));
-  detail.append(create('p', 'request-state', `${view.accountState} · #${selected.id}`));
-  const metrics = create('div', 'request-metrics');
-  for (const [label, value] of [['首字', selected.ttft], ['总耗时', selected.ms], ['排队', selected.queued]]) {
-    metrics.append(create('span', '', `${label} ${Number(value) > 0 ? formatDuration(value) : '—'}`));
-  }
-  detail.append(metrics);
-  const attempts = attemptRows(selected, Boolean(settings.maskAccounts));
-  for (const item of attempts) {
-    const row = create('div', `request-attempt${item.failed ? ' failed' : ''}`);
-    row.append(create('b', '', `${item.index}. ${item.name} · ${item.state}`),
-      create('small', '', `${item.model}${item.status ? ` · HTTP ${item.status}` : ''}${item.ms ? ` · ${formatDuration(item.ms)}` : ''}`));
-    if (item.error) row.append(create('pre', 'request-error', item.error));
-    detail.append(row);
-  }
-  if (!attempts.length) detail.append(create('p', 'panel-note', selected.done ? '未记录上游尝试。' : '尚未开始上游尝试。'));
-  if (selected.error) detail.append(create('pre', 'request-error', redactDiagnostic(selected.error)));
-  if (requestFailed(selected)) detail.append(create('p', 'panel-note', errorAdvice(Number(selected.status))));
-  detail.scrollTop = detailTop;
-}
-
 let tokenText = '';
 const TOKEN_DIGIT_H = 21;
 
@@ -535,7 +486,7 @@ function reportHitAreas() {
   const canvas = el.stageCanvas?.getBoundingClientRect();
   if (!canvas) return;
   const scale = uiScale();
-  const controls = [el.tokenPill, el.appVersion, $('updateChip'), $('quickMenuToggle'), $('lanesMore'), $('compactPill'), $('compactExpand'), $('compactMenu')]
+  const controls = [el.tokenPill, el.appVersion, $('updateChip'), $('quickMenuToggle'), $('compactPill'), $('compactExpand'), $('compactMenu')]
     .filter((node) => node && !node.hidden && node.isConnected)
     .map((node) => {
       const box = node.getBoundingClientRect();
@@ -949,7 +900,6 @@ function setupSettingsPanel() {
       pane.classList.remove('about');
       $('aboutView').hidden = true;
       $('modelsView').hidden = true;
-      $('historyView').hidden = true;
       document.body.classList.remove('settings-open', 'settings-closing');
     }, 200);
   };
@@ -966,16 +916,13 @@ function setupSettingsPanel() {
     document.body.classList.add('settings-open');
     const about = data?.mode === 'about';
     const models = data?.mode === 'models';
-    const history = data?.mode === 'history';
     pane.dataset.panel = data?.mode || 'settings';
     pane.classList.toggle('about', about);
     $('aboutView').hidden = !about;
     $('modelsView').hidden = !models;
-    $('historyView').hidden = !history;
     pane.scrollTop = 0;
     if (about) aboutRefresh?.();
     else if (models) renderModelUsage();
-    else if (history) renderRequestHistory();
     else load();
   };
 
@@ -1080,25 +1027,6 @@ function setupSettingsPanel() {
   $('modelsClose').addEventListener('click', () => window.busy.settingsClose());
   $('modelsPrev').addEventListener('click', () => { modelPage = Math.max(0, modelPage - 1); renderModelUsage(); });
   $('modelsNext').addEventListener('click', () => { modelPage++; renderModelUsage(); });
-  $('historyClose').addEventListener('click', () => window.busy.settingsClose());
-  $('historyFilter').addEventListener('change', (event) => { historyFilter = event.target.value; $('historyList').scrollTop = 0; renderRequestHistory(); });
-  $('historyFollow').addEventListener('click', () => { requestSelection.follow(lastTrace); renderRequestHistory(); });
-  $('historyList').addEventListener('click', (event) => {
-    const button = event.target.closest('[data-request-id]');
-    if (!button) return;
-    const route = (lastTrace?.routes || []).find(row => String(row.id) === button.dataset.requestId);
-    if (route) { requestSelection.select(route, lastTrace); $('historyDetail').scrollTop = 0; renderRequestHistory(); }
-  });
-  $('historyCopy').addEventListener('click', async () => {
-    const route = requestSelection.snapshot;
-    if (!route) return;
-    const view = present(route, {}, true);
-    try {
-      const copied = await window.busy.copySummary(requestSummary(route, view.agentName));
-      $('historyCopyStatus').textContent = copied ? '已复制脱敏摘要' : '摘要过长，未复制';
-    } catch { $('historyCopyStatus').textContent = '复制失败'; }
-  });
-
   window.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && open) {
       event.preventDefault();
@@ -2063,7 +1991,7 @@ function visibleFlightGroups(routes) {
   const mergedRoutes = rest.flatMap(group => group.routes);
   const accounts = new Set(mergedRoutes.map(route => `${route.provider || ''}/${route.tries?.at(-1)?.id || route.order?.[0]?.id || ''}`));
   const overflow = { ...rest[0], key: 'overflow', routes: mergedRoutes, overflow: rest.length,
-    context: `${mergedRoutes.length} 条请求 · 展开查看`, accountCount: accounts.size,
+    context: `${mergedRoutes.length} 条请求`, accountCount: accounts.size,
     modelCount: new Set(mergedRoutes.map(route => route.model)).size,
     pendingAccounts: rest.reduce((sum, group) => sum + group.pendingAccounts, 0) };
   return { groups, visible: [...groups.slice(0, 3), overflow] };
@@ -2096,8 +2024,6 @@ function renderMulti(routes, totals) {
   el.lanesTitle.textContent = activeCount ? `${activeCount} 个请求正在执行`
     : flightBook.sessions.size ? '请求结果返回中' : '最近完成的请求';
   el.lanesSub.textContent = `${groups.length} 组 · 按 Agent / 会话`;
-  $('lanesMore').hidden = groups.length <= 4 && routes.length === groups.length;
-  $('lanesMore').textContent = `展开 ${routes.length} 个请求`;
   renderStory(present(chooseLatest(routes), totals, Boolean(settings.maskAccounts)));
 
   setParts(el.caption, [
@@ -2218,7 +2144,7 @@ function buildFanAccount(route, view, fresh, color, requestCount = 1) {
   detail.hidden = !metrics.detail;
   account.classList.toggle('has-metrics', Boolean(metrics.detail));
   account.title = [view.accountModel, view.accountState,
-    requestCount > 1 ? `以下数据属于本条请求 #${route.id}；展开查看全部 ${requestCount} 条请求` : '',
+    requestCount > 1 ? `本组共 ${requestCount} 条请求；以下数据属于本条请求 #${route.id}` : '',
     metrics.title].filter(Boolean).join('\n');
   account.append(top, mid, state, detail);
   return account;
@@ -2389,7 +2315,6 @@ function renderRoutingContent() {
   flightAnchors.clear();
   $('compactStatus').textContent = connection.online ? active.length ? `${active.length} 个请求进行中` : '已连接 · 空闲' : connection.retry ? '自动重连中' : '未连接';
   $('compactLiveDot').classList.toggle('online', Boolean(connection.online));
-  if (!$('historyView').hidden) renderRequestHistory();
   if (!connection.online || !lastTrace) {
     stopFlights();
     scheduleStageExpiry(Infinity, routingNow());
@@ -2544,11 +2469,6 @@ async function boot() {
   setupFirstRun();
   setupTokenPill();
   setupQuickMenu();
-  $('lanesMore').addEventListener('click', () => {
-    historyFilter = 'active';
-    $('historyFilter').value = 'active';
-    window.busy.openHistory();
-  });
   window.busy.ready?.();
   if (data.update) renderUpdateState?.(data.update);
   if (data.firstRun) firstRunShow?.();

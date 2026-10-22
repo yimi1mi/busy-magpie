@@ -50,7 +50,6 @@
       </div>
 
       <div class="quick-menu" id="quickMenu" role="menu" aria-label="挂件操作" hidden>
-        <button type="button" role="menuitem" data-menu-action="history">最近请求</button>
         <button type="button" role="menuitem" data-menu-action="settings">设置</button>
         <button type="button" role="menuitem" data-menu-action="models">模型用量</button>
         <button type="button" role="menuitem" data-menu-action="compact" id="compactMenuItem">紧凑模式</button>
@@ -137,7 +136,6 @@
               <b id="lanesTitle">多个 Agent 正在执行</b>
             </span>
             <span class="lanes-sub" id="lanesSub">各自选择账号</span>
-            <button class="lanes-more" id="lanesMore" type="button" hidden>展开请求</button>
           </div>
           <div class="fan" id="fan">
             <svg class="fan-wires" id="fanWires" aria-hidden="true"></svg>
@@ -342,12 +340,6 @@
                 </div>
               </footer>
             </form>
-            <section class="panel-view history-view" id="historyView" hidden>
-              <header class="panel-head"><div><b>最近请求</b><small id="historyScope">最多 20 条 · 本次网关会话</small></div><button class="settings-x" id="historyClose" type="button" aria-label="关闭最近请求">×</button></header>
-              <div class="history-toolbar"><label>筛选 <select id="historyFilter"><option value="all">全部</option><option value="active">进行中</option><option value="failed">失败</option></select></label><button type="button" id="historyFollow">跟随最新</button><span id="historyState"></span></div>
-              <div class="history-columns"><div class="history-list" id="historyList"></div><div class="history-detail" id="historyDetail"></div></div>
-              <footer class="history-foot"><span id="historyCopyStatus" role="status"></span><button type="button" id="historyCopy">复制脱敏摘要</button></footer>
-            </section>
             <section class="panel-view models-view" id="modelsView" hidden>
               <header class="panel-head"><div><b>模型用量</b><small>同一时间窗 · 同一统计口径</small></div><button class="settings-x" id="modelsClose" type="button" aria-label="关闭模型用量">×</button></header>
               <div class="model-chart">
@@ -429,7 +421,7 @@
           <h2 id="firstRunTitle">把实时路由放在桌面上</h2>
           <ul class="guide-steps">
             <li><b>移动和缩放</b><span>按住顶部小圆点约 0.15 秒拖动，拖边框调整大小。</span></li>
-            <li><b>找到功能</b><span>右上角 ··· 可查看最近请求、模型用量、设置和紧凑模式。</span></li>
+            <li><b>找到功能</b><span>右上角 ··· 可查看模型用量、设置和紧凑模式。</span></li>
             <li><b>读懂用量</b><span>单击 token 切换时间窗；模型用量里可查看各模型占比。</span></li>
             <li><b>召回挂件</b><span id="guideHotkey">点击托盘图标，或按 Ctrl+Alt+M 显示 / 隐藏。</span></li>
           </ul>
