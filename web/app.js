@@ -431,19 +431,16 @@ function reportHitAreas() {
   const canvas = el.stageCanvas?.getBoundingClientRect();
   if (!canvas) return;
   const scale = uiScale();
+  const rectangle = (node) => {
+    const box = node.getBoundingClientRect();
+    return { x: Math.round(box.left), y: Math.round(box.top), width: Math.round(box.width), height: Math.round(box.height) };
+  };
   const controls = [el.tokenPill, el.appVersion, $('updateChip'), $('quickMenuToggle'), $('compactPill'), $('compactExpand'), $('compactMenu')]
     .filter((node) => node && !node.hidden && node.isConnected)
-    .map((node) => {
-      const box = node.getBoundingClientRect();
-      return {
-        x: Math.round(box.left),
-        y: Math.round(box.top),
-        width: Math.round(box.width),
-        height: Math.round(box.height),
-      };
-    });
+    .map(rectangle);
   const payload = {
     controls,
+    resize: [...document.querySelectorAll('.resize-handle')].map(rectangle),
     dragTop: Math.round((frame.compact ? $('compactDragBar') : $('dragBar')).getBoundingClientRect().top),
     dragBottom: Math.round((frame.compact ? $('compactDragBar') : $('dragBar')).getBoundingClientRect().bottom),
     ui: Number(scale.toFixed(4)),

@@ -95,7 +95,7 @@ let hoverInteractive = false;
 let hoverKind = null;
 // The renderer measures the controls and drag strip after scaling. Only
 // these regions and the resize border take a pointer while no panel is open.
-let hitAreas = { controls: [], dragTop: 12, dragBottom: 46 };
+let hitAreas = { controls: [], resize: [], dragTop: 12, dragBottom: 46 };
 let dragState = null;
 let resizeState = null;
 let hoverTimer = null;
@@ -1009,29 +1009,15 @@ function watchHover() {
     if (!win || win.isDestroyed() || !win.isVisible() || firstRunOpen || settingsOpen || settingsClosing || quickMenuOpen || layoutMode || dragState || resizeState) return;
     const point = screen.getCursorScreenPoint();
     const bounds = win.getBounds();
-    const card = {
-      left: bounds.x + 16,
-      right: bounds.x + bounds.width - 16,
-      top: bounds.y + 16,
-      bottom: bounds.y + bounds.height - 16,
-    };
-    const edge = 8;
-    const north = point.y >= card.top && point.y <= card.top + edge;
-    const south = point.y >= card.bottom - edge && point.y <= card.bottom;
-    const west = point.x >= card.left && point.x <= card.left + edge;
-    const east = point.x >= card.right - edge && point.x <= card.right;
-    const within = point.x >= card.left && point.x <= card.right
-      && point.y >= card.top && point.y <= card.bottom;
-    const onBorder = !frame.compact && within && (north || south || west || east);
+    const contains = (rect) => point.x >= bounds.x + rect.x && point.x <= bounds.x + rect.x + rect.width
+      && point.y >= bounds.y + rect.y && point.y <= bounds.y + rect.y + rect.height;
+    const onBorder = !frame.compact && hitAreas.resize.some(contains);
     const onTopBar = point.x >= bounds.x
       && point.x <= bounds.x + bounds.width
       && point.y >= bounds.y + hitAreas.dragTop
       && point.y <= bounds.y + hitAreas.dragBottom;
     // Controls take priority over dragging or resizing where they overlap.
-    const onControl = hitAreas.controls.some((rect) => (
-      point.x >= bounds.x + rect.x && point.x <= bounds.x + rect.x + rect.width
-      && point.y >= bounds.y + rect.y && point.y <= bounds.y + rect.y + rect.height
-    ));
+    const onControl = hitAreas.controls.some(contains);
     const kind = onControl ? 'control' : onBorder ? 'resize' : onTopBar ? 'drag' : null;
     setHoverInteractive(Boolean(kind), kind);
   }, 70);
@@ -1039,7 +1025,7 @@ function watchHover() {
 
 function setHitAreas(raw) {
   const source = raw && typeof raw === 'object' ? raw : {};
-  const controls = (Array.isArray(source.controls) ? source.controls : []).flatMap((rect) => {
+  const rectangles = (items) => (Array.isArray(items) ? items : []).flatMap((rect) => {
     if (!rect || typeof rect !== 'object') return [];
     const numbers = ['x', 'y', 'width', 'height'].map((key) => Number(rect[key]));
     if (!numbers.every(Number.isFinite) || numbers[2] <= 0 || numbers[3] <= 0) return [];
@@ -1048,7 +1034,8 @@ function setHitAreas(raw) {
   const top = Number(source.dragTop);
   const bottom = Number(source.dragBottom);
   hitAreas = {
-    controls,
+    controls: rectangles(source.controls),
+    resize: rectangles(source.resize),
     dragTop: Number.isFinite(top) ? top : 12,
     dragBottom: Number.isFinite(bottom) && Number.isFinite(top) && bottom > top
       ? bottom
