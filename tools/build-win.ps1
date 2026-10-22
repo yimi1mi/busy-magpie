@@ -62,6 +62,7 @@ Assert-BuildPath $app
 if (Test-Path $app) { Remove-Item -LiteralPath $app -Recurse -Force }
 New-Item -ItemType Directory -Force $app | Out-Null
 Copy-Item (Join-Path $root 'src') $app -Recurse -Force
+Copy-Item (Join-Path $root 'shell') $app -Recurse -Force
 Copy-Item (Join-Path $root 'web') $app -Recurse -Force
 Copy-Item (Join-Path $root 'plugin') $app -Recurse -Force
 Copy-Item (Join-Path $root 'assets') $app -Recurse -Force

@@ -1,12 +1,12 @@
 {
   "name": "busy-magpie",
   "productName": "Busy Magpie",
-  "version": "1.3.10",
+  "version": "1.4.0",
   "description": "magpie 实时路由桌面挂件 · A transparent, click-through live routing perch for your desktop.",
-  "main": "src/main.js",
+  "main": "shell/bootstrap.cjs",
   "exports": {
     "./server": "./plugin/server.mjs",
-    ".": "./src/main.js"
+    ".": "./shell/bootstrap.cjs"
   },
   "author": "Busy Magpie",
   "license": "MIT",
@@ -30,6 +30,7 @@
     "dev": "electron . --dev",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
+    "dist:business": "node tools/build-payload.cjs",
     "dist:win": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-win.ps1",
     "dist:mac": "electron-builder --mac dmg zip --x64 --arm64 --publish never"
   },
@@ -48,8 +49,9 @@
         "repo": "busy-magpie"
       }
     ],
-    "asar": true,
+    "asar": false,
     "files": [
+      "shell/**/*",
       "src/**/*",
       "web/**/*",
       "plugin/**/*",

@@ -14,7 +14,7 @@ app.whenReady().then(async () => {
     const material = require('../../src/window-material.cjs').windowMaterial(process.platform, require('node:os').release());
     assert.equal(material.kind, 'blur', 'run this native check on supported Windows');
     win = new BrowserWindow({width:632, height:432, frame:false, backgroundColor:'#00000000', show:false, ...material.options});
-    const surface = require('../../src/windows-blur.cjs').attachBlur(win);
+    const surface = require('../../shell/windows-blur.cjs').attachBlur(win);
     const hwnd = win.getNativeWindowHandle().readBigUInt64LE();
     const user = koffi.load('user32.dll'), gdi = koffi.load('gdi32.dll');
     const region = gdi.func('void * __stdcall CreateRectRgn(int,int,int,int)')(0,0,0,0);

@@ -7,7 +7,11 @@ const {
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { autoUpdater } = require('electron-updater');
+const shellRuntime = globalThis.__busyShell;
+const businessVersion = shellRuntime?.businessVersion || app.getVersion();
+const shellVersion = shellRuntime?.shellVersion || app.getVersion();
+const autoUpdater = shellRuntime?.updater || require('electron-updater').autoUpdater;
+const UPDATES_ENABLED = shellRuntime ? shellRuntime.updatesEnabled : app.isPackaged && !process.argv.includes('--preview');
 const { heartbeat } = require('./launch-policy.cjs');
 const { parseGateway, gatewayProblem } = require('./gateway-config.cjs');
 const { fitWindowBounds } = require('./window-bounds.cjs');
@@ -75,11 +79,11 @@ let updateState = {
   progress: 0,
   downloadedBytes: 0,
   totalBytes: 0,
-  current: app.getVersion(),
+  current: businessVersion,
   latest: '',
   releaseUrl: '',
   notes: '',
-  error: '',
+  error: shellRuntime?.recoveryMessage || '',
   checkedAt: 0,
 };
 let lastTrace = null;
@@ -375,7 +379,7 @@ function createWindow() {
     backgroundColor: '#00000000',
     ...MATERIAL.options,
     acceptFirstMouse: true,
-    title: IS_PREVIEW ? `Busy Magpie · 本地预览 ${app.getVersion()}` : 'Busy Magpie',
+    title: IS_PREVIEW ? `Busy Magpie · 本地预览 ${businessVersion}` : 'Busy Magpie',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -387,7 +391,7 @@ function createWindow() {
   });
   frame = { ...frame, compact, cardHeight: height - 32, windowHeight: height };
   if (MATERIAL.kind === 'blur') {
-    try { windowSurface = require('./windows-blur.cjs').attachBlur(win); }
+    try { windowSurface = (shellRuntime?.attachBlur || require('../shell/windows-blur.cjs').attachBlur)(win); }
     catch (error) { activeMaterial = 'none'; log(`background blur: ${error.message}`); }
   }
 
@@ -507,8 +511,9 @@ function compareVersions(a, b) {
 function updateView() {
   return {
     ...updateState,
-    current: app.getVersion(),
-    preview: IS_PREVIEW,
+    current: businessVersion,
+    shellVersion,
+    preview: IS_PREVIEW && !UPDATES_ENABLED,
     pluginVersion: PLUGIN_VERSION,
     auto: settings.checkUpdates !== false,
   };
@@ -519,9 +524,9 @@ function sendUpdateState() {
 }
 
 function refreshUpdateAvailability() {
-  updateState.current = app.getVersion();
+  updateState.current = businessVersion;
   updateState.available = Boolean(
-    updateState.latest && compareVersions(updateState.current, updateState.latest) < 0,
+    updateState.latest && compareVersions(updateState.kind === 'shell' ? shellVersion : businessVersion, updateState.latest) < 0,
   );
   updateState.skipped = Boolean(
     updateState.latest && settings.skippedUpdate === updateState.latest,
@@ -530,13 +535,9 @@ function refreshUpdateAvailability() {
 
 // ── updates ───────────────────────────────────────────────────────────────
 //
-// electron-updater owns the download and the installer: it checks the sha512
-// from the release feed, fetches only the changed blocks when it has a block
-// map, runs the NSIS installer once the card has quit and starts it again.
-// Ours stays the when and the whether: the update mode, the skipped version,
-// the hourly look, the idle moment to install, and the one thing the library
-// cannot know — the launcher plugin starts the card again when its heartbeat
-// goes stale, so an install in progress has to leave a marker.
+// The stable shell owns package verification, storage and restart supervision.
+// Business code owns the update mode and idle policy. Native runtime upgrades
+// still use electron-updater's installer channel.
 
 const QUIET_BEFORE_INSTALL_MS = 5 * 60 * 1000;
 let lastActivity = Date.now();
@@ -588,10 +589,11 @@ function setupUpdater() {
     updateState.checking = false;
     updateState.checkedAt = Date.now();
     updateState.latest = String((info && info.version) || '').replace(/^v/i, '');
+    updateState.kind = info.kind || 'shell';
     updateState.notes = releaseNotesOf(info);
-    updateState.releaseUrl = updateState.latest
+    updateState.releaseUrl = info.releaseUrl || (updateState.latest
       ? `https://github.com/yimi1mi/busy-magpie/releases/tag/v${updateState.latest}`
-      : '';
+      : '');
     refreshUpdateAvailability();
     sendUpdateState();
     const mode = normalizeUpdateMode(settings.updateMode);
@@ -605,9 +607,10 @@ function setupUpdater() {
   });
 
   autoUpdater.on('update-not-available', (info) => {
+    updateState.kind = info?.kind || 'shell';
     updateState.checking = false;
     updateState.checkedAt = Date.now();
-    updateState.latest = String((info && info.version) || app.getVersion()).replace(/^v/i, '');
+    updateState.latest = String((info && info.version) || businessVersion).replace(/^v/i, '');
     updateState.available = false;
     updateState.skipped = false;
     updateState.ready = false;
@@ -659,11 +662,11 @@ function notifyUpdate() {
 async function checkForUpdates(manual = false) {
   if (updateState.checking) return updateView();
   if (!manual && normalizeUpdateMode(settings.updateMode) === 'never') return updateView();
-  if (IS_PREVIEW || !app.isPackaged) {
+  if (!UPDATES_ENABLED) {
     // A dev run has no release feed of its own: say it is current instead of
     // failing through the updater.
     updateState.checkedAt = Date.now();
-    updateState.latest = app.getVersion();
+    updateState.latest = businessVersion;
     updateState.available = false;
     updateState.error = '';
     sendUpdateState();
@@ -675,6 +678,7 @@ async function checkForUpdates(manual = false) {
   try {
     const result = await autoUpdater.checkForUpdates();
     if (result && result.updateInfo) {
+      updateState.kind = result.updateInfo.kind || 'shell';
       updateState.latest = String(result.updateInfo.version || '').replace(/^v/i, '');
       refreshUpdateAvailability();
     }
@@ -689,7 +693,7 @@ async function checkForUpdates(manual = false) {
 }
 
 async function downloadUpdate() {
-  if (IS_PREVIEW || !app.isPackaged || updateState.downloading || updateState.ready) return;
+  if (!UPDATES_ENABLED || updateState.downloading || updateState.ready) return;
   if (updateState.skipped) return;
   try {
     updateState.downloading = true;
@@ -726,7 +730,7 @@ function scheduleQuietInstall() {
 }
 
 async function installUpdate() {
-  if (IS_PREVIEW || !app.isPackaged) return updateView();
+  if (!UPDATES_ENABLED) return updateView();
   if (updateState.installing) return updateView();
   if (process.platform !== 'win32') {
     // An unsigned mac app cannot replace itself; the release page is honest.
@@ -746,9 +750,10 @@ async function installUpdate() {
     quietTimer = null;
     writeUpdatingMarker();
     log(`update: installing ${updateState.latest}`);
-    setImmediate(() => autoUpdater.quitAndInstall(true, true));
+    await autoUpdater.quitAndInstall(true, true);
   } catch (error) {
     updateState.installing = false;
+    clearUpdatingMarker();
     updateState.error = (error && error.message) || '更新失败';
     log(`update install: ${updateState.error}`);
     sendUpdateState();
@@ -1605,7 +1610,7 @@ function buildTrayMenu() {
       click: () => openSettingsPanel('settings'),
     },
     {
-      label: `关于 Busy Magpie…（v${app.getVersion()}）`,
+      label: `关于 Busy Magpie…（v${businessVersion}）`,
       click: () => openAbout(),
     },
     { label: '恢复默认位置和大小', click: resetPlacement },
@@ -1671,7 +1676,7 @@ function applyAutostart() {
 
 function createTray() {
   tray = new Tray(trayImage());
-  tray.setToolTip(IS_PREVIEW ? `Busy Magpie ${app.getVersion()} · 本地预览` : 'Busy Magpie');
+  tray.setToolTip(IS_PREVIEW ? `Busy Magpie ${businessVersion} · 本地预览` : 'Busy Magpie');
   refreshTrayMenu();
   if (IS_WIN) {
     // A single click brings the card back; double-click still toggles it.
@@ -1726,7 +1731,7 @@ function quit() {
 }
 
 ipcMain.handle('busy:bootstrap', () => ({
-  version: app.getVersion(),
+  version: businessVersion,
   preview: IS_PREVIEW,
   pluginVersion: PLUGIN_VERSION,
   update: updateView(),
@@ -1747,7 +1752,7 @@ ipcMain.handle('settings:get', () => {
     raw = JSON.stringify(settings, null, 2);
   }
   return {
-    version: app.getVersion(),
+    version: businessVersion,
     settings: {
       ...settings,
       gateway: settings.gateway || '',
@@ -1959,7 +1964,7 @@ function init() {
   fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
   try {
     // The plugin compares this with the latest GitHub release before updating.
-    fs.writeFileSync(path.join(app.getPath('userData'), 'version'), app.getVersion());
+    fs.writeFileSync(path.join(app.getPath('userData'), 'version'), businessVersion);
   } catch {
     // A version marker is an optimization, never a reason not to start.
   }
@@ -1967,7 +1972,7 @@ function init() {
   if (!PLUGIN_VERSION || settings.pauseUntil <= Date.now()) settings.pauseUntil = 0;
   // A marker left by an install that did not finish would keep the launcher
   // from starting the card; this process running means it is over.
-  clearUpdatingMarker();
+  if (!shellRuntime?.updateInProgress) clearUpdatingMarker();
   setupUpdater();
 
   if (IS_MAC) app.dock.hide();
@@ -2000,7 +2005,7 @@ function init() {
   }
 }
 
-const gotLock = app.requestSingleInstanceLock();
+const gotLock = shellRuntime?.ownsInstanceLock || app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {

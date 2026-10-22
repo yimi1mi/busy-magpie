@@ -21,14 +21,18 @@ if (process.argv.includes('--hold-old')) {
     if (config.dirtySettings) fs.writeFileSync(config.settingsBackup.target, '{"schema":99}');
     if (config.removeBackup) fs.unlinkSync(config.settingsBackup.path);
     if (config.behavior === 'crash') process.exit(17);
+    const shutdown = () => writeJson(path.join(config.root, `shutdown-${token}-${process.pid}.json`),
+      { token, pid: process.pid, at: Date.now(), phase: 'quiescent' });
+    if (config.behavior === 'quiescent') shutdown();
     if (config.behavior === 'bad-health') {
       fs.writeFileSync(path.join(config.root, `health-${token}.json`), JSON.stringify({ token, pid: process.pid + 999999, at: Date.now() }));
-    } else if (config.behavior !== 'timeout') {
+    } else if (config.behavior !== 'timeout' && config.behavior !== 'quiescent') {
       journal.ready(token, process.pid);
       if (config.heartbeat) setInterval(() => {
         if (journal.read().pending?.token === token) journal.ready(token, process.pid);
       }, 400);
       if (config.behavior === 'ready-crash') setTimeout(() => process.exit(18), 30);
+      if (config.behavior === 'ready-quiescent') setTimeout(shutdown, 30);
     }
   } else if (!config.fallbackTimeout) {
     writeJson(path.join(config.root, 'runtime-ready.json'), { pid: process.pid, version: selected.version, at: Date.now() });

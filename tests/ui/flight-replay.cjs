@@ -105,7 +105,7 @@ server.listen(0,'127.0.0.1',async()=>{
  mainModule.filename=filename;
  mainModule.paths=Module._nodeModulePaths(path.dirname(filename));
  mainModule.require=function(id){
-  if(id==='./windows-blur.cjs') return {attachBlur:()=>({refresh(){}})};
+  if(id==='../shell/windows-blur.cjs') return {attachBlur:()=>({refresh(){}})};
   if(id==='electron') return {...require('electron'),BrowserWindow:class extends BrowserWindow {
    constructor(options){const {backgroundMaterial,...offscreenOptions}=options;super({...offscreenOptions,transparent:true,roundedCorners:false,hasShadow:false,webPreferences:{...options.webPreferences,offscreen:true}});}
   }};

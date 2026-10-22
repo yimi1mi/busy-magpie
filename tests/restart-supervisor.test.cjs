@@ -7,13 +7,15 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { createJournal, alive, acquireLock, writeJson } = require('../shell/journal.cjs');
 const { createStore } = require('./fixtures/restart-supervisor/store.cjs');
-const { validateConfig, cleanArgs, restoreSettings } = require('../shell/restart-worker.cjs');
+const { validateConfig, cleanArgs, restoreSettings, readQuiescence } = require('../shell/restart-worker.cjs');
 const fixture = path.join(__dirname, 'fixtures', 'restart-supervisor');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function context(t, behavior = 'success') {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'busy-supervisor-test-'));
-  const builtin = { root: path.join(root, 'builtin'), version: '1.4.0' };
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'busy-supervisor-test-'));
+  const root = path.join(workspace, 'business-updates');
+  fs.mkdirSync(root);
+  const builtin = { root: path.join(workspace, 'builtin'), version: '1.4.0' };
   fs.mkdirSync(builtin.root);
   const store = createStore({ root });
   const journal = createJournal({ root, builtin, store });
@@ -24,7 +26,7 @@ function context(t, behavior = 'success') {
       try { process.kill(pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
     }
     await sleep(80);
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(workspace, { recursive: true, force: true });
   });
   function version(value, hash = 'a') {
     const descriptor = { id: `${value}-${hash.repeat(16)}`, version: value, manifestHash: hash.repeat(64) };
@@ -43,7 +45,7 @@ function context(t, behavior = 'success') {
   const config = { root, builtin, shellVersion: '1.4.0', shellApi: 1, trustedKeys: {}, oldPid: 0,
     executable: process.execPath, args: [path.join(fixture, 'app.cjs'), configPath], cwd: root, behavior,
     timeouts: { oldExitMs: 400, healthMs: 1500, stableMs: 140, pollMs: 10, terminationMs: 500 },
-    updatingMarker: path.join(root, 'user-data', 'updating') };
+    updatingMarker: path.join(workspace, 'updating') };
   function prepare() {
     config.token = journal.prepare(version('1.4.2', 'b'));
     fs.mkdirSync(path.dirname(config.updatingMarker), { recursive: true });
@@ -126,7 +128,7 @@ for (const behavior of ['crash', 'timeout', 'ready-crash', 'bad-health']) {
     const c = context(t, behavior);
     c.accept(c.version('1.4.1'));
     c.prepare();
-    const data = path.join(c.root, 'user-data', 'unrelated-history.json');
+    const data = path.join(path.dirname(c.root), 'unrelated-history.json');
     fs.writeFileSync(data, '{"keep":true}');
     const result = await c.run();
     assert.equal(result.status, 'rolled-back');
@@ -152,7 +154,7 @@ test('old process timeout cancels without killing or restarting it and never res
   c.prepare();
   const transaction = path.join(c.root, 'transactions', c.config.token);
   fs.mkdirSync(transaction, { recursive: true });
-  const target = path.join(c.root, 'user-data', 'settings.json');
+  const target = path.join(path.dirname(c.root), 'settings.json');
   const backup = path.join(transaction, 'settings.json');
   fs.writeFileSync(target, '{"live":2}');
   fs.writeFileSync(backup, '{"live":1}');
@@ -177,7 +179,7 @@ test('failed candidate settings are preserved before restoring the previous sche
   c.prepare();
   const transaction = path.join(c.root, 'transactions', c.config.token);
   fs.mkdirSync(transaction, { recursive: true });
-  const target = path.join(c.root, 'user-data', 'settings.json');
+  const target = path.join(path.dirname(c.root), 'settings.json');
   const backup = path.join(transaction, 'settings.json');
   fs.writeFileSync(target, '{"schema":1,"user":"kept"}');
   fs.copyFileSync(target, backup);
@@ -211,12 +213,70 @@ test('old process handle is acquired before handoff, and candidate starts after 
   assert.ok(log.indexOf('old-process-exited') < log.indexOf('candidate-started'));
 });
 
+test('trusted shutdown handshake permits an update while old native cleanup remains alive', { timeout: 10000 }, async t => {
+  const c = context(t);
+  const token = c.prepare();
+  const old = spawn(process.execPath, [path.join(fixture, 'app.cjs'), c.configPath, '--hold-old'], { stdio: 'ignore', windowsHide: true });
+  c.children.push(old);
+  await until(() => events(c.root).some(event => event.event === 'old'));
+  c.config.oldPid = old.pid;
+  c.config.timeouts.oldExitMs = 3000;
+  const running = c.run();
+  await until(() => fs.existsSync(path.join(c.root, `handoff-${token}.json`)));
+  writeJson(path.join(c.root, `shutdown-${token}-${old.pid}.json`),
+    { token, pid: old.pid, at: Date.now(), phase: 'quiescent' });
+  assert.equal((await running).status, 'confirmed');
+  assert.ok(alive(old.pid));
+  const log = fs.readFileSync(path.join(c.root, 'update.log'), 'utf8');
+  assert.match(log, /old-process-quiescent/);
+  assert.doesNotMatch(log, /old-process-exited/);
+});
+
+for (const behavior of ['quiescent', 'ready-quiescent']) {
+  test(`${behavior} candidate is never promoted and permits settings recovery before native cleanup`, { timeout: 10000 }, async t => {
+    const c = context(t, behavior);
+    c.prepare();
+    const transaction = path.join(c.root, 'transactions', c.config.token);
+    fs.mkdirSync(transaction, { recursive: true });
+    const target = path.join(path.dirname(c.root), 'settings.json');
+    const backup = path.join(transaction, 'settings.json');
+    fs.writeFileSync(target, '{"schema":1}');
+    fs.copyFileSync(target, backup);
+    c.config.settingsBackup = { path: backup, target, existed: true };
+    c.config.dirtySettings = true;
+    const result = await c.run();
+    assert.equal(result.status, 'rolled-back');
+    assert.equal(c.journal.read().current, null);
+    assert.equal(fs.readFileSync(target, 'utf8'), '{"schema":1}');
+    const candidate = events(c.root).find(event => event.event === 'candidate');
+    assert.ok(alive(candidate.pid));
+    const log = fs.readFileSync(path.join(c.root, 'update.log'), 'utf8');
+    assert.ok(log.indexOf('candidate-quiescent') < log.indexOf('settings-restored'), log);
+    assert.doesNotMatch(log, /candidate-stop-requested|candidate-force-stop|candidate-confirmed/);
+  });
+}
+
+test('quiescence requires the exact transaction, process, terminal phase and fresh timestamp', async t => {
+  const c = context(t);
+  c.prepare();
+  const at = Date.now();
+  const marker = { token: c.config.token, pid: process.pid, at, phase: 'quiescent' };
+  const filename = path.join(c.root, `shutdown-${c.config.token}-${process.pid}.json`);
+  for (const invalid of [{ ...marker, token: 'f'.repeat(48) }, { ...marker, pid: process.pid + 1 },
+    { ...marker, phase: 'will-quit' }, { ...marker, at: at - 1 }, { ...marker, at: at + 60000 }]) {
+    writeJson(filename, invalid);
+    assert.equal(readQuiescence(c.config, process.pid, at), null);
+  }
+  writeJson(filename, marker);
+  assert.deepEqual(readQuiescence(c.config, process.pid, at), marker);
+});
+
 test('missing original settings are restored by preserving and removing candidate-created settings', { timeout: 10000 }, async t => {
   const c = context(t, 'crash');
   c.prepare();
   const transaction = path.join(c.root, 'transactions', c.config.token);
   fs.mkdirSync(transaction, { recursive: true });
-  const target = path.join(c.root, 'user-data', 'settings.json');
+  const target = path.join(path.dirname(c.root), 'settings.json');
   c.config.settingsBackup = { path: path.join(transaction, 'settings.json'), target, existed: false };
   c.config.dirtySettings = true;
   assert.equal((await c.run()).status, 'rolled-back');
@@ -230,7 +290,7 @@ test('settings restoration failure retains the pending recovery entry and never 
   c.prepare();
   const transaction = path.join(c.root, 'transactions', c.config.token);
   fs.mkdirSync(transaction, { recursive: true });
-  const target = path.join(c.root, 'user-data', 'settings.json');
+  const target = path.join(path.dirname(c.root), 'settings.json');
   const backup = path.join(transaction, 'settings.json');
   fs.writeFileSync(target, '{"schema":1}');
   fs.copyFileSync(target, backup);

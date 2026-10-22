@@ -974,12 +974,10 @@ function setupAbout() {
     const available = Boolean(data.available && !data.skipped);
     const pct = Math.round((Number(data.progress) || 0) * 100);
     const showLatest = Boolean(data.latest && (available || data.skipped || data.error));
-    // electron-updater downloads first and installs on the way out, so a
-    // ready update is a restart, not another download.
+    // Both update channels download and verify before restarting.
     const ready = Boolean(data.ready && available);
     dot.hidden = !available;
-    // The card's own one-click path: it only says which version and how far
-    // along the download is, and quits into the installer on its own.
+    // Keep the one-click update in the same place as the current version.
     const running = Boolean(data.downloading || data.installing);
     const size = downloadSize(data.downloadedBytes, data.totalBytes);
     document.body.classList.toggle('updating', running);
@@ -987,7 +985,7 @@ function setupAbout() {
       chip.hidden = !available && !running;
       if (!chip.hidden) {
         chipVersion.textContent = data.installing
-          ? '安装中'
+          ? (data.kind === 'business' ? '切换中' : '安装中')
           : data.downloading ? size.compact : ready ? '' : `v${data.latest || ''}`;
         chip.firstChild.textContent = data.downloading ? '下载 ' : ready ? '重启更新' : '更新 ';
         chip.title = data.downloading ? `${size.text} · ${pct}%` : '';
@@ -997,14 +995,17 @@ function setupAbout() {
       // so the header never reads both. The tray has 关于 in the meantime.
       if (button) button.hidden = !chip.hidden;
     }
-    current.textContent = `v${data.current || data.version || '—'}`;
+    current.textContent = data.kind === 'shell' && available
+      ? `运行环境 v${data.shellVersion || data.current || '—'}`
+      : `v${data.current || data.version || '—'}`;
+    current.title = data.shellVersion ? `运行环境 v${data.shellVersion}` : '';
     latest.textContent = showLatest ? `v${data.latest}` : '';
     latest.hidden = !showLatest;
     arrow.hidden = !showLatest;
     $('aboutPlugin').textContent = data.pluginVersion ? `v${data.pluginVersion}` : '未提供';
 
     update.hidden = !available || data.downloading || data.installing;
-    update.textContent = ready ? '重启并安装' : `更新到 v${data.latest || ''}`;
+    update.textContent = ready ? '重启并更新' : `更新到 v${data.latest || ''}`;
     skip.hidden = !available || data.downloading || data.installing;
     check.disabled = Boolean(data.preview || data.checking || data.downloading || data.installing);
     release.hidden = !data.releaseUrl || (!available && !data.error && !data.skipped);
@@ -1025,16 +1026,16 @@ function setupAbout() {
       status.textContent = `正在下载 v${data.latest} · ${pct}%`;
       error.textContent = '';
     } else if (data.installing) {
-      status.textContent = '正在安装，应用会重启…';
+      status.textContent = data.kind === 'business' ? '正在切换版本，应用会重启…' : '正在安装运行环境，应用会重启…';
       error.textContent = '';
     } else if (data.ready && available) {
-      status.textContent = `已下载 v${data.latest}，点「重启并安装」完成`;
+      status.textContent = `已下载 v${data.latest}，点「重启并更新」完成`;
       error.textContent = '';
     } else if (data.checking) {
       status.textContent = '正在检查更新…';
       error.textContent = '';
     } else if (available) {
-      status.textContent = `发现新版本 v${data.latest}`;
+      status.textContent = `${data.kind === 'shell' ? '运行环境有更新' : '发现新版本'} v${data.latest}`;
       error.textContent = '';
     } else if (data.skipped) {
       status.textContent = `已跳过 v${data.latest}，可在发布页手动安装。`;

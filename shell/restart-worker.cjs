@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { createJournal, atomicWrite, writeJson, acquireLock, alive } = require('./journal.cjs');
+const { validateRecovery } = require('./recovery.cjs');
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const samePath = (left, right) => process.platform === 'win32'
@@ -37,6 +38,19 @@ function watchProcess(pid) {
   };
 }
 
+function readQuiescence(config, pid, minAt) {
+  if (!config || !path.isAbsolute(config.root || '') || !/^[a-f0-9]{48}$/.test(config.token || '')
+    || !Number.isInteger(pid) || pid <= 0 || !Number.isFinite(minAt)) return null;
+  try {
+    const filename = path.join(config.root, `shutdown-${config.token}-${pid}.json`);
+    const stat = fs.lstatSync(filename);
+    if (!stat.isFile() || stat.isSymbolicLink()) return null;
+    const marker = JSON.parse(fs.readFileSync(filename, 'utf8'));
+    return marker.token === config.token && marker.pid === pid && marker.phase === 'quiescent'
+      && Number.isFinite(marker.at) && marker.at >= minAt && marker.at <= Date.now() + 1000 ? marker : null;
+  } catch (cause) { if (cause.code === 'ENOENT' || cause instanceof SyntaxError) return null; throw cause; }
+}
+
 function validateConfig(config) {
   if (!config || !path.isAbsolute(config.root || '') || !config.builtin
     || !path.isAbsolute(config.builtin.root || '') || typeof config.builtin.version !== 'string'
@@ -52,6 +66,7 @@ function validateConfig(config) {
     throw new Error('Updating marker must be an absolute local path');
   }
   if (config.settingsBackup) {
+    validateRecovery(config);
     const backup = config.settingsBackup;
     const expected = path.join(config.root, 'transactions', config.token, 'settings.json');
     if (!path.isAbsolute(backup.path || '') || !samePath(backup.path, expected)
@@ -100,8 +115,10 @@ function start(config, token, log) {
   const args = cleanArgs(config.args);
   if (token) args.push(`--business-update-token=${token}`);
   else args.push(`--business-rollback-token=${config.token}`);
+  const startedAt = Date.now();
   const child = spawn(config.executable, args, { cwd: config.cwd || path.dirname(config.executable), env,
     detached: true, windowsHide: false, stdio: 'ignore' });
+  child.startedAt = startedAt;
   // Install the handler immediately; spawn errors otherwise terminate the supervisor.
   child.on('error', cause => { child.spawnError = cause; });
   child.exited = false;
@@ -125,23 +142,33 @@ function childAlive(child) {
   return child && !child.spawnError && child.exitCode === null && child.signalCode === null && alive(child.pid);
 }
 
-async function stopCandidate(child, time, log, role = 'candidate') {
+async function stopCandidate(child, time, log, role = 'candidate', config) {
   if (!child || !child.pid) return true;
-  if (child.exited) return true;
+  let quiescent = false;
+  function stopped() {
+    if (child.exited || quiescent) return true;
+    const marker = readQuiescence(config, child.pid, child.startedAt);
+    if (!marker) return false;
+    log(`${role}-quiescent`, { pid: child.pid, markerAt: marker.at, physicalExit: false });
+    quiescent = true;
+    child.unref();
+    return true;
+  }
+  if (stopped()) return true;
   if (childAlive(child)) {
     log(`${role}-stop-requested`, { pid: child.pid });
     child.kill('SIGTERM');
   }
   let deadline = Date.now() + time.terminationMs;
-  while (!child.exited && Date.now() < deadline) await sleep(time.pollMs);
-  if (!child.exited) {
+  while (!stopped() && Date.now() < deadline) await sleep(time.pollMs);
+  if (!stopped()) {
     log(`${role}-force-stop`, { pid: child.pid });
     // Only this ChildProcess is signalled; no process-name or process-tree kill is used.
     child.kill('SIGKILL');
     deadline = Date.now() + time.terminationMs;
-    while (!child.exited && Date.now() < deadline) await sleep(time.pollMs);
+    while (!stopped() && Date.now() < deadline) await sleep(time.pollMs);
   }
-  return child.exited;
+  return stopped();
 }
 
 async function waitForFallback(child, expectedVersion, startedAt, config, time, log) {
@@ -162,6 +189,7 @@ async function waitForFallback(child, expectedVersion, startedAt, config, time, 
 
 function restoreSettings(config, log) {
   if (!config.settingsBackup) return;
+  validateRecovery(config);
   const { path: backup, target, existed } = config.settingsBackup;
   try {
     const failed = fs.readFileSync(target);
@@ -182,6 +210,7 @@ async function runSupervisor(input, dependencies = {}) {
   const unlock = acquireLock(path.join(config.root, 'supervisor.lock'));
   let candidate = null;
   let oldExited = false;
+  let oldStopped = false;
   let handedOff = false;
   let committed = false;
   let journal;
@@ -198,23 +227,34 @@ async function runSupervisor(input, dependencies = {}) {
     store.verify(pending.descriptor);
     // Acquire the Windows handle before telling the old application it may quit.
     oldProcess = watchProcess(config.oldPid);
+    const handoffReadyAt = Date.now();
     writeJson(path.join(config.root, `handoff-${config.token}.json`),
-      { token: config.token, pid: process.pid, ready: true, at: Date.now() });
+      { token: config.token, pid: process.pid, ready: true, at: handoffReadyAt });
     handedOff = true;
     log('handoff-ready', { oldPid: config.oldPid, exitObservation: oldProcess.mechanism });
     const oldDeadline = Date.now() + time.oldExitMs;
-    while (!oldProcess.exited()) {
+    for (;;) {
+      if (oldProcess.exited()) {
+        oldExited = true;
+        log('old-process-exited', { oldPid: config.oldPid });
+        break;
+      }
+      const marker = readQuiescence(config, config.oldPid, handoffReadyAt);
+      if (marker) {
+        log('old-process-quiescent', { oldPid: config.oldPid, markerAt: marker.at, physicalExit: false });
+        break;
+      }
       if (Date.now() >= oldDeadline) throw new Error('old-process-exit-timeout');
       await sleep(time.pollMs);
     }
-    oldExited = true;
-    log('old-process-exited', { oldPid: config.oldPid });
+    oldStopped = true;
     candidate = start(config, config.token, log);
     await spawned(candidate);
-    log('candidate-started', { pid: candidate.pid });
+    log('candidate-started', { pid: candidate.pid, startedAt: candidate.startedAt });
     const healthDeadline = Date.now() + time.healthMs;
     let healthySince = null;
     for (;;) {
+      if (readQuiescence(config, candidate.pid, candidate.startedAt)) throw new Error('candidate-quiescent-before-confirmation');
       if (!childAlive(candidate)) {
         throw new Error(`candidate-exited: code=${candidate.exitCode}, signal=${candidate.signalCode}, error=${candidate.spawnError?.message || ''}`);
       }
@@ -238,15 +278,15 @@ async function runSupervisor(input, dependencies = {}) {
     candidate.unref();
     return { status: 'confirmed', pid: candidate.pid };
   } catch (cause) {
-    log('update-failed', { reason: cause.message, code: cause.code || null, oldExited, handedOff });
+    log('update-failed', { reason: cause.message, code: cause.code || null, oldExited, oldStopped, handedOff });
     if (committed) throw cause;
-    const stopped = await stopCandidate(candidate, time, log);
+    const stopped = await stopCandidate(candidate, time, log, 'candidate', config);
     if (!stopped) {
       log('rollback-blocked-candidate-alive', { pid: candidate.pid });
       candidate.unref();
       return { status: 'blocked', reason: cause.message, pid: candidate.pid };
     }
-    if (!oldExited) {
+    if (!oldStopped) {
       if (journal) journal.rollback(config.token, cause.message);
       return { status: 'cancelled', reason: cause.message };
     }
@@ -257,14 +297,14 @@ async function runSupervisor(input, dependencies = {}) {
       const startedAt = Date.now();
       fallback = start(config, null, log);
       await spawned(fallback);
-      log('fallback-started', { pid: fallback.pid });
+      log('fallback-started', { pid: fallback.pid, startedAt: fallback.startedAt });
       // The fallback is attempted once. Keep observing its real application readiness.
       fallback.unref();
       await waitForFallback(fallback, selected.version, startedAt, config, time, log);
       return { status: 'rolled-back', reason: cause.message, pid: fallback.pid };
     } catch (fallbackError) {
       log('fallback-start-failed', { reason: fallbackError.message, code: fallbackError.code || null });
-      if (fallback) await stopCandidate(fallback, time, log, 'fallback');
+      if (fallback) await stopCandidate(fallback, time, log, 'fallback', config);
       return { status: 'rollback-failed', reason: fallbackError.message };
     }
   } finally {
@@ -290,4 +330,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { runSupervisor, validateConfig, cleanArgs, restoreSettings, watchProcess };
+module.exports = { runSupervisor, validateConfig, cleanArgs, restoreSettings, watchProcess, readQuiescence };

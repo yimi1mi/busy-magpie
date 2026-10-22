@@ -18,7 +18,7 @@ app.whenReady().then(async()=>{try{
  front=new BrowserWindow({x:74,y:74,width:632,height:432,frame:false,transparent:true,backgroundColor:'#00000000',show:false,focusable:false,skipTaskbar:true,alwaysOnTop:true,roundedCorners:false,hasShadow:false});
  const html=`<!doctype html><html><head><link rel="stylesheet" href="file:///${root.replaceAll('\\','/')}/web/styles.css"></head><body class="native-material"><div id="app"><div class="card"><div class="stage-area"><div class="stage-canvas"><div class="content"></div></div></div></div></div><div style="position:absolute;left:50px;top:50px;width:12px;height:12px;background:rgb(20,240,110);z-index:9999"></div></body></html>`;
  fs.writeFileSync(path.join(output,'fixture.html'),html);await front.loadFile(path.join(output,'fixture.html'));await front.webContents.executeJavaScript('for(const [k,v] of Object.entries({"--ui":"1","--surface-alpha":"0","--content-alpha":"0"}))document.documentElement.style.setProperty(k,v)');
- hwnd=front.getNativeWindowHandle().readBigUInt64LE();require('../../src/windows-blur.cjs').attachBlur(front);back.showInactive();front.showInactive();front.moveTop();
+ hwnd=front.getNativeWindowHandle().readBigUInt64LE();require('../../shell/windows-blur.cjs').attachBlur(front);back.showInactive();front.showInactive();front.moveTop();
  await measure('zero opacity reveals red and blue backgrounds with clean corners',true);
  front.setIgnoreMouseEvents(true,{forward:true});await measure('click-through preserves transparency and corners',true);
  front.setIgnoreMouseEvents(false);await measure('interactive mode preserves transparency and corners',true);
