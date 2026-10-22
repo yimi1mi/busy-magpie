@@ -905,8 +905,6 @@ function setupSettingsPanel() {
     gatewayReport = `Busy Magpie v${data.version}\n网关：${data.resolvedGateway || '未解析'}\n来源：${data.gatewaySource || '自动检测'}\n路由：${connection.online ? '可读取' : connection.detail}\n用量：${usageStatus.error || (usageData ? '可读取' : '尚未读取')}`;
     $('gatewayResult').textContent = '';
     if (pathText) pathText.textContent = data.path || '';
-    const openFile = $('settingsOpenFile');
-    if (openFile && data.path) openFile.title = data.path;
     if (raw) raw.textContent = data.raw || '';
     if (data.version) $('settingsVersion').textContent = `v${data.version}`;
   };
@@ -1016,8 +1014,6 @@ function setupSettingsPanel() {
 
   $('settingsClose').addEventListener('click', () => window.busy.settingsClose());
   $('settingsCancel').addEventListener('click', () => window.busy.settingsClose());
-  $('settingsOpenFile').addEventListener('click', () => window.busy.settingsOpenFile());
-  $('settingsHelp').addEventListener('click', () => window.busy.openGuide());
   gateway.addEventListener('input', () => { $('gatewayResult').textContent = '当前输入尚未测试'; });
   $('gatewayTest').addEventListener('click', async () => {
     const button = $('gatewayTest'); button.disabled = true;
