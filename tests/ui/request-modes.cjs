@@ -67,8 +67,8 @@ async function cards() {
         visible: modes && !modes.hidden && getComputedStyle(modes).display !== 'none',
         titled: Boolean(modes?.closest('[title]') || modes?.querySelector('[title], title')),
         speed: speed?.dataset.mode, effort: effort?.dataset.effort,
-        steps: effort?.querySelectorAll('.effort-step').length,
-        lit: effort?.querySelectorAll('.effort-step.on').length,
+        effortText: effort?.textContent,
+        effortBars: effort?.querySelectorAll('svg, .effort-step').length,
         unknown: effort?.querySelector('.mode-unknown')?.textContent || '',
         speedLabel: speed?.getAttribute('aria-label'), effortLabel: effort?.getAttribute('aria-label'),
         card: rect(node), modes: rect(modes), name: rect(name),
@@ -79,7 +79,7 @@ async function cards() {
   })()`);
 }
 
-function assertModes(card, { speed, effort, lit }) {
+function assertModes(card, { speed, effort }) {
   assert.ok(card, 'expected agent card exists');
   const hasSpeed = speed !== 'unknown', hasEffort = effort !== 'unknown';
   const count = Number(hasSpeed) + Number(hasEffort);
@@ -88,8 +88,8 @@ function assertModes(card, { speed, effort, lit }) {
   assert.equal(card.titled, false, 'mode symbols must not depend on hover titles');
   assert.equal(card.speed, hasSpeed ? speed : undefined, JSON.stringify(card));
   assert.equal(card.effort, hasEffort ? effort : undefined, JSON.stringify(card));
-  assert.equal(card.steps, hasEffort ? 6 : undefined);
-  assert.equal(card.lit, hasEffort ? lit : undefined, JSON.stringify(card));
+  assert.equal(card.effortText, hasEffort ? effort : undefined, JSON.stringify(card));
+  assert.equal(card.effortBars, hasEffort ? 0 : undefined, 'effort uses its exact text without a strength bar');
   assert.equal(card.unknown, '', 'missing modes must not produce question-mark placeholders');
   if (hasSpeed) assert.ok(card.speedLabel, 'speed symbols retain an accessible label');
   if (hasEffort) assert.ok(card.effortLabel, 'effort symbols retain an accessible label');
@@ -157,21 +157,21 @@ async function run() {
     const ordinary = row(100, { tier: 'priority', effort: 'xhigh' });
     let shown = await feed([ordinary]);
     assert.equal(shown.length, 1);
-    assertModes(shown[0], { speed: 'fast', effort: 'xhigh', lit: 5 });
+    assertModes(shown[0], { speed: 'fast', effort: 'xhigh' });
     assertFits(shown[0]);
     await capture('single-fast-xhigh');
-    record('Codex priority and xhigh render two visible symbols with five effort steps and no hover title');
+    record('Codex priority and xhigh render a Fast symbol and exact effort text without a hover title');
 
     const guardian = row(101, { kind: 'guardian', effort: 'low' });
     shown = await feed([ordinary, guardian]);
     assert.equal(shown.length, 1);
-    assertModes(shown[0], { speed: 'fast', effort: 'xhigh', lit: 5 });
+    assertModes(shown[0], { speed: 'fast', effort: 'xhigh' });
     record('a newer guardian request cannot overwrite the conversation mode');
 
     shown = await feed([ordinary, { ...guardian, session: 'helper' }]);
     assert.equal(shown.length, 2);
-    assertModes(shown.find(card => card.key === 'agent:codex|chat'), { speed: 'fast', effort: 'xhigh', lit: 5 });
-    assertModes(shown.find(card => card.key === 'agent:codex|helper'), { speed: 'unknown', effort: 'unknown', lit: 0 });
+    assertModes(shown.find(card => card.key === 'agent:codex|chat'), { speed: 'fast', effort: 'xhigh' });
+    assertModes(shown.find(card => card.key === 'agent:codex|helper'), { speed: 'unknown', effort: 'unknown' });
     record('an auxiliary-only session hides its mode row without borrowing another session mode or showing placeholders');
 
     const completed = { ...ordinary, done: true, status: 200, ms: 1000,
@@ -179,29 +179,29 @@ async function run() {
     shown = await feed([completed, guardian]);
     assert.equal(shown.length, 1);
     assert.equal(shown[0].id, undefined, 'only the guardian remains staged, so the single-card view is used');
-    assertModes(shown[0], { speed: 'fast', effort: 'xhigh', lit: 5 });
+    assertModes(shown[0], { speed: 'fast', effort: 'xhigh' });
     record('the complete trace retains the conversation mode after its ordinary request leaves staged routes');
 
     shown = await feed([row(200, { session: '', effort: 'high' }), row(201, { session: '', tier: 'priority' })]);
     assert.equal(shown.length, 2);
-    assertModes(shown.find(card => card.id === '200'), { speed: 'unknown', effort: 'high', lit: 4 });
-    assertModes(shown.find(card => card.id === '201'), { speed: 'fast', effort: 'unknown', lit: 0 });
+    assertModes(shown.find(card => card.id === '200'), { speed: 'unknown', effort: 'high' });
+    assertModes(shown.find(card => card.id === '201'), { speed: 'fast', effort: 'unknown' });
     record('requests without a session keep one symbol for their own known field without borrowing another request mode');
 
     const claude = { agent: 'claude', provider: 'anthropic', model: 'claude-opus', effort: 'high',
       order: [{ id: 'test-account', kind: 'account', icon: 'anthropic', provider: 'anthropic' }] };
     shown = await feed([row(300, { ...claude, tier: 'priority', session: 'claude-priority' }),
       row(301, { ...claude, tier: 'fast', session: 'claude-fast' })]);
-    assertModes(shown.find(card => card.id === '300'), { speed: 'other', effort: 'high', lit: 4 });
-    assertModes(shown.find(card => card.id === '301'), { speed: 'fast', effort: 'high', lit: 4 });
+    assertModes(shown.find(card => card.id === '300'), { speed: 'other', effort: 'high' });
+    assertModes(shown.find(card => card.id === '301'), { speed: 'fast', effort: 'high' });
     await capture('claude-priority-and-fast');
     record('Claude priority remains distinct while its normalized speed fast lights the Fast symbol');
 
     const levels = [
-      { speed: 'fast', effort: 'low', lit: 2 },
-      { speed: 'fast', effort: 'high', lit: 4 },
-      { speed: 'fast', effort: 'ultra', lit: 6 },
-      { speed: 'unknown', effort: 'unknown', lit: 0 },
+      { speed: 'fast', effort: 'low' },
+      { speed: 'fast', effort: 'high' },
+      { speed: 'fast', effort: 'ultra' },
+      { speed: 'unknown', effort: 'unknown' },
     ];
     for (const count of [2, 3, 4]) {
       shown = await feed(levels.slice(0, count).map((level, index) => row(400 + index, {
@@ -245,39 +245,39 @@ async function run() {
           timeOrigin: saved?.timeOrigin === performance.timeOrigin };
       })()`);
       dynamicModes.push({ step, session: dynamicSession, requestIds: routes.map(route => route.id),
-        expected, continuity, rendered: { effort: current?.effort ?? null, lit: current?.lit ?? null,
+        expected, continuity, rendered: { effort: current?.effort ?? null, effortText: current?.effortText ?? null,
           symbolCount: current?.count, rowHidden: current?.visible === false }, dom: current });
       fs.writeFileSync(path.join(output, 'dynamic-results.json'), JSON.stringify(dynamicModes, null, 2));
       assert.ok(Object.values(continuity).every(Boolean), 'mode update must reuse the live document and Agent card: ' + JSON.stringify(continuity));
       assertModes(current, expected);
       assertFits(current);
     };
-    for (const [effort, lit] of [['low', 2], ['high', 4], ['xhigh', 5], ['ultra', 6]]) {
+    for (const effort of ['low', 'high', 'xhigh', 'ultra']) {
       evolving = { ...evolving, effort };
-      await dynamicStep('same request ' + effort, [evolving], { speed: 'fast', effort, lit });
+      await dynamicStep('same request ' + effort, [evolving], { speed: 'fast', effort });
       if (effort === 'low' || effort === 'ultra') await capture('dynamic-' + effort);
     }
     const newerHigh = row(601, { session: dynamicSession, tier: 'priority', effort: 'high' });
-    await dynamicStep('new ordinary request high', [evolving, newerHigh], { speed: 'fast', effort: 'high', lit: 4 });
+    await dynamicStep('new ordinary request high', [evolving, newerHigh], { speed: 'fast', effort: 'high' });
     const newerGuardian = row(602, { session: dynamicSession, kind: 'guardian', effort: 'low' });
     await dynamicStep('newer guardian low cannot override high', [evolving, newerHigh, newerGuardian],
-      { speed: 'fast', effort: 'high', lit: 4 });
+      { speed: 'fast', effort: 'high' });
     let newest = row(603, { session: dynamicSession, tier: 'priority', effort: 'low' });
     const earlier = [evolving, newerHigh, newerGuardian];
-    await dynamicStep('new ordinary request low', [...earlier, newest], { speed: 'fast', effort: 'low', lit: 2 });
+    await dynamicStep('new ordinary request low', [...earlier, newest], { speed: 'fast', effort: 'low' });
     newest = { ...newest, effort: 'none' };
-    await dynamicStep('explicit none retains an unlit effort symbol', [...earlier, newest],
-      { speed: 'fast', effort: 'none', lit: 0 });
+    await dynamicStep('explicit none retains its exact effort text', [...earlier, newest],
+      { speed: 'fast', effort: 'none' });
     delete newest.effort;
     await dynamicStep('missing effort leaves speed only', [...earlier, newest],
-      { speed: 'fast', effort: 'unknown', lit: 0 });
+      { speed: 'fast', effort: 'unknown' });
     delete newest.tier;
     await dynamicStep('both fields missing hides the whole mode row', [...earlier, newest],
-      { speed: 'unknown', effort: 'unknown', lit: 0 });
+      { speed: 'unknown', effort: 'unknown' });
     newest = { ...newest, tier: 'priority', effort: 'future-level' };
-    await dynamicStep('unknown effort enum is hidden without guessing', [...earlier, newest],
-      { speed: 'fast', effort: 'unknown', lit: 0 });
-    record('11 same-session updates change effort symbols on the same live Agent node without reloading');
+    await dynamicStep('a new effort enum keeps its raw text without guessing', [...earlier, newest],
+      { speed: 'fast', effort: 'future-level' });
+    record('11 same-session updates change effort text on the same live Agent node without reloading');
     assert.equal(errors.length, 0, errors.join('\n'));
     await finish();
   } catch (error) { await finish(error); }

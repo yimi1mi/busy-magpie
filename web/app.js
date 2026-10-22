@@ -1934,19 +1934,13 @@ function renderRequestModes(target, modes, visible = true) {
     ? `${value.requestSource.speed === 'sent' ? '发送' : '请求'}速度：${value.requestSpeedKind === 'fast' ? 'Fast' : value.requestSpeedValue}`
     : '速度模式未提供');
   speed.append(modeSvg([['path', { d: 'M13.5 1 6 9h5l-1 6 8-9h-5z', class: 'speed-bolt' }]]));
-  const effort = create('span', 'mode-icon mode-effort');
-  const level = { none: 0, minimal: 1, low: 2, medium: 3, high: 4, xhigh: 5, max: 6, ultra: 6 }[value.requestEffortValue];
+  const effort = create('span', 'mode-icon mode-effort', value.requestEffortValue);
   effort.dataset.effort = value.requestEffortValue || 'unknown';
-  effort.setAttribute('role', 'img');
   effort.setAttribute('aria-label', value.requestEffortValue
     ? `${value.requestSource.effort === 'sent' ? '发送' : '请求'}思考强度：${value.requestEffortValue}`
     : '思考强度未提供');
-  effort.append(modeSvg(Array.from({ length: 6 }, (_, index) => ['rect', {
-    x: 1 + index * 4, y: 12 - index * 1.8, width: 2.5, height: 3 + index * 1.8, rx: .7,
-    class: index < level ? 'effort-step on' : 'effort-step',
-  }])));
   if (value.requestSpeedKind) target.append(speed);
-  if (level !== undefined) target.append(effort);
+  if (value.requestEffortValue) target.append(effort);
   target.hidden = target.childElementCount === 0;
 }
 

@@ -975,14 +975,15 @@ body.menu-open .stage-canvas {
 .mode-icon svg { width: 24px; height: 15px; overflow: visible; }
 .speed-bolt { fill: none; stroke: currentColor; stroke-width: 1.2; stroke-linejoin: round; opacity: .3; }
 .mode-speed[data-mode="fast"] .speed-bolt { fill: #f4d581; stroke: #f4d581; opacity: 1; }
-.effort-step { fill: currentColor; opacity: .17; }
-.effort-step.on { opacity: .95; }
+.mode-effort { width: auto; min-width: 0; max-width: 100%; align-items: center; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font: 600 10px/15px var(--mono); }
 .stage .node.agent:has(.request-modes:not([hidden])) { height: 104px; }
 .fan .request-modes { height: 13px; margin-top: 4px; }
 .fan .mode-icon, .fan .mode-icon svg { height: 13px; }
+.fan .mode-effort { font-size: 9px; line-height: 13px; }
 .fan.crowded .node.has-modes .agent-copy .model { display: none; }
 .fan.crowded .request-modes { margin-top: 2px; height: 11px; }
 .fan.crowded .mode-icon, .fan.crowded .mode-icon svg { height: 11px; }
+.fan.crowded .mode-effort { font-size: 8.5px; line-height: 11px; }
 
 .stage .node.account {
   display: flex;
