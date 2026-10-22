@@ -130,6 +130,7 @@
               <b id="lanesTitle">多个 Agent 正在执行</b>
             </span>
             <span class="lanes-sub" id="lanesSub">各自选择账号</span>
+            <button class="lanes-more" id="lanesMore" type="button" hidden>展开请求</button>
           </div>
           <div class="fan" id="fan">
             <svg class="fan-wires" id="fanWires" aria-hidden="true"></svg>
@@ -314,7 +315,7 @@
               </footer>
             </form>
             <section class="panel-view history-view" id="historyView" hidden>
-              <header class="panel-head"><div><b>最近请求</b><small>最多 20 条 · 本次网关会话</small></div><button class="settings-x" id="historyClose" type="button" aria-label="关闭最近请求">×</button></header>
+              <header class="panel-head"><div><b>最近请求</b><small id="historyScope">最多 20 条 · 本次网关会话</small></div><button class="settings-x" id="historyClose" type="button" aria-label="关闭最近请求">×</button></header>
               <div class="history-toolbar"><label>筛选 <select id="historyFilter"><option value="all">全部</option><option value="active">进行中</option><option value="failed">失败</option></select></label><button type="button" id="historyFollow">跟随最新</button><span id="historyState"></span></div>
               <div class="history-columns"><div class="history-list" id="historyList"></div><div class="history-detail" id="historyDetail"></div></div>
               <footer class="history-foot"><span id="historyCopyStatus" role="status"></span><button type="button" id="historyCopy">复制脱敏摘要</button></footer>

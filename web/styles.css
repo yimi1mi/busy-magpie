@@ -1767,6 +1767,10 @@ body.menu-open .stage-canvas {
   display: none;
 }
 
+.lanes-more { flex: none; margin-left: 8px; padding: 3px 6px; border: 1px solid rgba(161,139,255,0.25); border-radius: 5px; background: rgba(161,139,255,0.08); color: var(--accent); font: inherit; font-size: 8px; pointer-events: auto; cursor: pointer; }
+.lanes-more[hidden] { display: none; }
+.fan.ultra .agent-copy .model { display: block; font-size: 7.5px; line-height: 10px; }
+
 .fan-hub {
   position: absolute;
   left: 50%;

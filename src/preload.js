@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('busy', {
   setHitAreas: (areas) => ipcRenderer.send('busy:hit-areas', areas),
   toggleMenu: () => ipcRenderer.send('busy:menu-toggle'),
   closeMenu: () => ipcRenderer.send('busy:menu-close'),
+  openHistory: () => ipcRenderer.send('busy:history-open'),
   menuAction: (action) => ipcRenderer.send('busy:menu-action', action),
   copySummary: (text) => ipcRenderer.invoke('busy:copy-summary', text),
   settingsGet: () => ipcRenderer.invoke('settings:get'),

@@ -1853,6 +1853,7 @@ ipcMain.on('busy:about-open', () => {
 
 ipcMain.on('busy:menu-toggle', () => setQuickMenuOpen(!quickMenuOpen));
 ipcMain.on('busy:menu-close', () => setQuickMenuOpen(false));
+ipcMain.on('busy:history-open', () => openSettingsPanel('history'));
 ipcMain.on('busy:menu-action', (_event, action) => {
   if (!quickMenuOpen) return;
   switch (action) {

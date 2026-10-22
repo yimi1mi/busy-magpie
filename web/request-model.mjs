@@ -9,6 +9,33 @@ export function recentRequests(trace, filter = 'all', limit = 20) {
       || String(b.id).localeCompare(String(a.id))).slice(0, limit);
 }
 
+export function groupRequests(routes) {
+  const groups = new Map();
+  for (const route of routes.filter(requestActive)) {
+    const session = String(route.session || route.conv || '');
+    const key = `${route.agent || 'unknown'}|${session}`;
+    let group = groups.get(key);
+    if (!group) {
+      group = { key, session, agent: route.agent || '', routes: [] };
+      groups.set(key, group);
+    }
+    group.routes.push(route);
+  }
+  return [...groups.values()].sort((a, b) => a.key.localeCompare(b.key)).map(group => {
+    group.routes.sort((a, b) => (Date.parse(a.time) || 0) - (Date.parse(b.time) || 0) || String(a.id).localeCompare(String(b.id)));
+    group.route = group.routes[0];
+    group.context = group.route.folder || (group.session ? `会话 ${group.session.slice(-6)}` : '未提供会话');
+    const accounts = group.routes.map(route => {
+      const id = route.tries?.at(-1)?.id || route.order?.[0]?.id;
+      return id ? `${route.provider || ''}/${id}` : null;
+    });
+    group.accountCount = new Set(accounts.filter(Boolean)).size;
+    group.pendingAccounts = accounts.filter(id => !id).length;
+    group.modelCount = new Set(group.routes.map(route => route.model)).size;
+    return group;
+  });
+}
+
 export function redactDiagnostic(value, limit = 1800) {
   const safe = String(value || '')
     .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9+/_=.-]+/gi, '$1 [已隐藏]')

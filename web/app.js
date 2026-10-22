@@ -8,7 +8,7 @@ import {
   present,
 } from './presenter.js';
 import { modelUsage, paintModelTracks } from './model-usage.mjs';
-import { recentRequests, requestActive, requestFailed, attemptRows, redactDiagnostic, errorAdvice, requestSummary, RequestSelection } from './request-model.mjs';
+import { recentRequests, requestActive, requestFailed, attemptRows, redactDiagnostic, errorAdvice, requestSummary, RequestSelection, groupRequests } from './request-model.mjs';
 
 const $ = (id) => document.getElementById(id);
 
@@ -285,7 +285,8 @@ function renderUsageStatus() {
 function renderRequestHistory() {
   const listTop = $('historyList').scrollTop;
   const detailTop = $('historyDetail').scrollTop;
-  const rows = recentRequests(lastTrace, historyFilter);
+  const rows = recentRequests(lastTrace, historyFilter, historyFilter === 'active' ? 200 : 20);
+  $('historyScope').textContent = historyFilter === 'active' ? '当前活动请求 · 最多 200 条' : '最多 20 条 · 本次网关会话';
   const selected = requestSelection.update(lastTrace);
   $('historyState').textContent = !connection.online ? '网关离线 · 显示上次快照'
     : requestSelection.previousGateway ? '固定的是上次网关会话的请求' : requestSelection.following ? '跟随最新请求' : '已固定查看';
@@ -496,7 +497,7 @@ function reportHitAreas() {
   const canvas = el.stageCanvas?.getBoundingClientRect();
   if (!canvas) return;
   const scale = uiScale();
-  const controls = [el.tokenPill, el.appVersion, $('updateChip'), $('quickMenuToggle')]
+  const controls = [el.tokenPill, el.appVersion, $('updateChip'), $('quickMenuToggle'), $('lanesMore')]
     .filter((node) => node && !node.hidden && node.isConnected)
     .map((node) => {
       const box = node.getBoundingClientRect();
@@ -2001,17 +2002,17 @@ function renderMulti(routes, totals) {
   setMulti(true);
   setLiveChrome({ inFlight: true });
 
-  const ordered = routes.slice().sort((a, b) => stamp(b) - stamp(a));
-  const agents = new Set(ordered.map((route) => route.agent || '')).size;
-  const count = ordered.length;
+  const groups = groupRequests(routes);
+  const visible = groups.slice(0, 4);
+  const ordered = visible.map(group => group.route);
+  const count = visible.length;
   // The card and the lower half are fixed. The fan gets 134px, so more
   // agents means shorter rows, not a taller window.
   const available = 134;
-  const gap = count <= 2 ? 8 : count === 3 ? 3 : count <= 5 ? 2 : 1;
-  const maxNode = count === 2 ? 65 : count === 3 ? 44 : count === 4 ? 33 : 30;
-  const minNode = count >= 8 ? 12 : count >= 5 ? 14 : 18;
+  const gap = count <= 2 ? 8 : count === 3 ? 3 : 2;
+  const maxNode = count === 1 ? 80 : count === 2 ? 65 : count === 3 ? 44 : 33;
   const nodeHeight = Math.max(
-    minNode,
+    18,
     Math.min(maxNode, Math.floor((available - gap * (count - 1)) / count)),
   );
   el.fan.style.setProperty('--fan-node-h', `${nodeHeight}px`);
@@ -2022,13 +2023,15 @@ function renderMulti(routes, totals) {
   el.fan.classList.toggle('ultra', count >= 4);
   el.fan.classList.toggle('micro', count >= 5);
 
-  el.lanesTitle.textContent = `${count} 个请求正在执行`;
-  el.lanesSub.textContent = `${agents} 个 Agent · 各自选择账号`;
-  renderStory(present(ordered[0], totals, Boolean(settings.maskAccounts)));
+  el.lanesTitle.textContent = `${routes.length} 个请求正在执行`;
+  el.lanesSub.textContent = `${groups.length} 组 · 按 Agent / 会话`;
+  $('lanesMore').hidden = groups.length <= 4 && routes.length === groups.length;
+  $('lanesMore').textContent = groups.length > 4 ? `另有 ${groups.length - 4} 组` : `展开 ${routes.length} 个请求`;
+  renderStory(present(chooseLatest(routes), totals, Boolean(settings.maskAccounts)));
 
   setParts(el.caption, [
-    { text: `${count} 个请求同时经过 magpie`, role: 'strong' },
-    { text: ' · 每个 Agent 各自选择账号。', role: 'muted' },
+    { text: `${routes.length} 个请求 · ${groups.length} 组活动`, role: 'strong' },
+    { text: ' · 按 Agent / 会话合并显示。', role: 'muted' },
   ]);
 
   const ids = new Set(ordered.map((route) => String(route.id)));
@@ -2038,21 +2041,31 @@ function renderMulti(routes, totals) {
 
   const agentFragment = document.createDocumentFragment();
   const accountFragment = document.createDocumentFragment();
-  for (const route of ordered) {
+  for (const group of visible) {
+    const route = group.route;
     const id = String(route.id);
     const fresh = !seenRoutes.has(id);
     if (fresh) seenRoutes.add(id);
     const view = present(route, totals, Boolean(settings.maskAccounts));
+    view.agentName += group.routes.length > 1 ? ` · ${group.routes.length}` : '';
+    view.agentModel = group.context;
     const color = agentColor(route.agent);
     agentFragment.append(buildFanAgent(route, view, fresh, color));
   }
   // The account column has its own order, as it does in magpie: a request
   // does not sit level with its account, so the wires cross through the hub.
-  const accountOrder = ordered.slice().sort(accountCompare);
-  for (const route of accountOrder) {
+  const accountOrder = visible.slice().sort((a, b) => accountCompare(a.route, b.route));
+  for (const group of accountOrder) {
+    const route = group.route;
     const id = String(route.id);
     const fresh = !seenRoutes.has(id);
     const view = present(route, totals, Boolean(settings.maskAccounts));
+    if (group.routes.length > 1) {
+      view.accountName = group.accountCount > 1 ? `${group.accountCount} 个账号`
+        : group.accountCount === 0 ? '等待账号' : view.accountName;
+      view.accountState = `${group.routes.length} 个请求${group.pendingAccounts ? ` · ${group.pendingAccounts} 待选` : '进行中'}`;
+      if (group.modelCount > 1) view.accountModel = `${group.modelCount} 个模型`;
+    }
     const color = agentColor(route.agent);
     accountFragment.append(buildFanAccount(route, view, fresh, color));
   }
@@ -2069,6 +2082,7 @@ function renderMulti(routes, totals) {
   syncFlights(ordered, true);
   requestAnimationFrame(() => {
     drawFanWires();
+    reportHitAreas();
     setTimeout(drawFanWires, 80);
   });
 }
@@ -2369,6 +2383,11 @@ async function boot() {
   setupFirstRun();
   setupTokenPill();
   setupQuickMenu();
+  $('lanesMore').addEventListener('click', () => {
+    historyFilter = 'active';
+    $('historyFilter').value = 'active';
+    window.busy.openHistory();
+  });
   window.busy.ready?.();
   if (data.update) renderUpdateState?.(data.update);
   if (data.firstRun) firstRunShow?.();
