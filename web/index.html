@@ -362,11 +362,11 @@
             </section>
             <div class="about-view" id="aboutView" hidden>
               <header class="about-head">
-                <div>
-                  <b>关于 Busy Magpie</b>
-                  <span>应用更新与版本信息</span>
+                <div class="about-brand">
+                  <div class="about-mark" aria-hidden="true"><svg viewBox="0 0 44 44"><path id="aboutBirdPath" fill-rule="evenodd"></path></svg></div>
+                  <div class="about-identity"><b>Busy Magpie</b></div>
                 </div>
-                <button class="settings-x" id="aboutClose" type="button" aria-label="关闭">×</button>
+                <button class="settings-x" id="aboutClose" type="button" aria-label="关闭关于页面">×</button>
               </header>
 
               <div class="about-scroll">
@@ -397,7 +397,7 @@
                     <span>启动器插件</span>
                     <b class="mono" id="aboutPlugin">v—</b>
                   </div>
-                  <p>插件由 magpie 管理。需要更新启动器时，请到 magpie → Plugins → Busy Magpie 点 Update，不要在应用里直接覆盖。</p>
+                  <p>由 magpie 管理，在 Plugins → Busy Magpie 中点击 Update 更新。</p>
                 </section>
 
                 <p class="about-error" id="aboutError" role="status"></p>

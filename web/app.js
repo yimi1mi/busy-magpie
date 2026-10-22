@@ -121,6 +121,7 @@ function iconSetup() {
   if (icons.magpie) {
     bird.setAttribute('d', icons.magpie);
     fanBird.setAttribute('d', icons.magpie);
+    $('aboutBirdPath').setAttribute('d', icons.magpie);
   }
   if (icons.openai) openai.setAttribute('d', icons.openai);
   if (icons.deepseek) deepseek.setAttribute('d', icons.deepseek);
