@@ -6,6 +6,19 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_mode:
+        description: '产出方式：仅构建、预发布或正式发布'
+        required: true
+        default: build
+        type: choice
+        options:
+          - build
+          - prerelease
+          - release
+
+permissions:
+  contents: read
 
 jobs:
   package:
@@ -33,17 +46,23 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run ${{ matrix.script }}
+      - name: Verify Windows business updates and rollback
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $appPath = (Resolve-Path 'dist/win-unpacked').Path
+          node tests/business-update-e2e.cjs --packaged $appPath
       - name: Verify macOS business updates and rollback
         if: runner.os == 'macOS'
         shell: bash
         run: |
           APP_PATH="$(node -e "const path=require('node:path');process.stdout.write(path.resolve('dist',process.arch==='arm64'?'mac-arm64':'mac','Busy Magpie.app'))")"
           node tests/business-update-e2e.cjs --packaged "$APP_PATH"
-      - name: Preserve macOS update test evidence
-        if: always() && runner.os == 'macOS'
+      - name: Preserve business update test evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: business-update-evidence-macos
+          name: business-update-evidence-${{ matrix.artifact }}
           path: |
             artifacts/business-update-e2e/**/result.json
             artifacts/business-update-e2e/**/profile/business-updates/update.log
@@ -51,13 +70,55 @@ jobs:
             artifacts/business-update-e2e/**/electron.stderr.log
             artifacts/business-update-e2e/**/lifecycle.ndjson
           if-no-files-found: ignore
+      - name: Verify and describe release assets
+        run: node tools/release-artifacts.cjs prepare --directory dist --platform ${{ matrix.artifact }}
       - uses: actions/upload-artifact@v4
         with:
           name: busy-magpie-${{ matrix.artifact }}
           path: |
-            dist/*.exe
-            dist/*.dmg
-            dist/*.zip
-            dist/*.yml
-            dist/*.blockmap
-          if-no-files-found: warn
+            dist/Busy.Magpie-*.exe
+            dist/Busy.Magpie-*.dmg
+            dist/Busy.Magpie-*.zip
+            dist/Busy.Magpie-*.blockmap
+            dist/Busy.Magpie-*.sha256
+            dist/latest.yml
+            dist/latest-mac.yml
+            dist/release-manifest-*.json
+          if-no-files-found: error
+          compression-level: 0
+
+  release:
+    name: Verify release bundle and publish selected mode
+    needs: package
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    concurrency:
+      group: busy-magpie-release-publishing
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install release tooling
+        run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: busy-magpie-*
+          path: download
+      - name: Collect verified platform assets
+        run: node tools/release-artifacts.cjs collect --directory download --output release
+      - name: Verify release plan without publishing
+        run: node tools/publish-release.cjs --directory release --mode build --repository "$GITHUB_REPOSITORY" --source-sha "$GITHUB_SHA"
+      - name: Publish selected release mode
+        if: inputs.release_mode != 'build'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_MODE: ${{ inputs.release_mode }}
+        run: node tools/publish-release.cjs --directory release --mode "$RELEASE_MODE" --repository "$GITHUB_REPOSITORY" --source-sha "$GITHUB_SHA"

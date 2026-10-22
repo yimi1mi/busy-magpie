@@ -117,7 +117,21 @@ macOS 构建默认**不提供 Developer ID 签名和公证**；首次打开如�
 xattr -dr com.apple.quarantine "/Applications/Busy Magpie.app"
 ```
 
-CI 配置包含 `windows-latest` 上的 Windows 安装包构建、`macos-latest` 上的 dmg / zip 构建，以及 macOS 打包应用的业务更新、回退和重启保持测试。macOS 构建也会生成 `latest-mac.yml`。Windows 和 macOS 均支持签名业务包更新；运行环境的完整自动安装仅在 Windows 上可用，macOS 仍需手动安装。
+CI 配置包含 `windows-latest` 上的 Windows 安装包构建、`macos-latest` 上的 dmg / zip 构建，以及两个平台打包应用的业务更新、回退和重启保持测试。macOS 构建也会生成 `latest-mac.yml`。Windows 和 macOS 均支持签名业务包更新；运行环境的完整自动安装仅在 Windows 上可用，macOS 仍需手动安装。
+
+### 通过 Action 发布
+
+在 GitHub 的 **Actions → build → Run workflow** 中选择分支或标签，再选择 `release_mode`：
+
+| 模式 | 结果 |
+| --- | --- |
+| `build` | 只构建、测试和校验产物，不修改 Release；这是默认模式 |
+| `prerelease` | 两个平台全部通过后，自动上传附件并公开为预发布，不设为 Latest |
+| `release` | 两个平台全部通过后，自动上传附件并设为正式 Latest |
+
+Action 会运行 Windows、macOS 打包应用的真实业务升级与回退测试，汇总同一提交的产物，核对更新元数据、文件大小和哈希，再上传 Release。附件先进入草稿，全部上传并核对服务器摘要后才公开，不需要从 Actions 下载到本机再上传。
+
+版本号取自 `package.json`。发布新版本前先更新版本并提交；如果 `v<版本号>` 标签已存在，必须指向本次提交。已正式发布的不同内容会被拒绝覆盖，应递增版本号。普通分支推送、标签推送和 PR 默认只构建，发布由上述手动模式明确选择。
 
 ## 安装路径
 

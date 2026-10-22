@@ -58,6 +58,10 @@ npm run dist:business -- --output dist/business-1.4.1 --key-file artifacts/signi
 - 发布顺序为先上传新的版本包，再替换业务清单；旧包保留。先在隔离 profile 验证升级和回退，再更新此渠道。
 - 构建命令只生成本地产物，不创建标签、不上传文件、不发布 Release。第一次迁入 1.4.0 仍需完整安装；以后修改 Electron、原生依赖或壳接口也需要完整安装。
 
+完整安装包可通过 `build` Action 的 `release_mode` 发布：`build` 只构建和校验，`prerelease` 自动上传后公开为预发布，`release` 自动上传后公开为正式 Latest。Windows 和 macOS 的构建、真实更新测试均成功后，Action 在 GitHub 内汇总两平台清单并发布，不需要经过本机搬运。发布前核对标签提交，发布后核对每个附件的服务器 SHA256；上传或校验失败时不公开半成品，也不覆盖内容不同的已有正式版本。
+
+这条 Action 发布的是完整安装包，不能代替需要独立签名私钥的 `business-stable` 业务包发布流程。
+
 默认业务地址在 `shell/config.json`。普通安装版只接受 HTTPS，逐跳检查重定向。开发实例或 `--preview` 可以显式设置 `BUSY_MAGPIE_DEV_UPDATE_FEED`，允许本机 HTTP 夹具；普通预览默认不检查或安装更新，也不改正式用户配置和登录启动项。
 
 ## 验证与诊断
