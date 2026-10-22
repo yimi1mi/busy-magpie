@@ -64,6 +64,8 @@ let updateState = {
   ready: false,
   installing: false,
   progress: 0,
+  downloadedBytes: 0,
+  totalBytes: 0,
   current: app.getVersion(),
   latest: '',
   releaseUrl: '',
@@ -585,6 +587,8 @@ function setupUpdater() {
     updateState.downloading = true;
     updateState.installing = false;
     updateState.progress = Math.max(0, Math.min(1, Number(progress && progress.percent) / 100 || 0));
+    updateState.downloadedBytes = Number.isFinite(Number(progress?.transferred)) ? Math.max(0, Number(progress.transferred)) : 0;
+    updateState.totalBytes = Number.isFinite(Number(progress?.total)) ? Math.max(0, Number(progress.total)) : 0;
     sendUpdateState();
   });
 
@@ -592,6 +596,7 @@ function setupUpdater() {
     updateState.downloading = false;
     updateState.ready = true;
     updateState.progress = 1;
+    if (updateState.totalBytes > 0) updateState.downloadedBytes = updateState.totalBytes;
     sendUpdateState();
     scheduleQuietInstall();
   });
@@ -656,6 +661,8 @@ async function downloadUpdate() {
   try {
     updateState.downloading = true;
     updateState.error = '';
+    updateState.downloadedBytes = 0;
+    updateState.totalBytes = 0;
     sendUpdateState();
     await autoUpdater.downloadUpdate();
   } catch (error) {

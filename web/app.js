@@ -8,6 +8,7 @@ import {
   present,
 } from './presenter.js';
 import { modelUsage, paintModelTracks } from './model-usage.mjs';
+import { downloadSize } from './download-progress.mjs';
 import { recentRequests, requestActive, requestFailed, attemptRows, redactDiagnostic, errorAdvice, requestSummary, RequestSelection, groupRequests } from './request-model.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -1029,13 +1030,16 @@ function setupAbout() {
     // The card's own one-click path: it only says which version and how far
     // along the download is, and quits into the installer on its own.
     const running = Boolean(data.downloading || data.installing);
+    const size = downloadSize(data.downloadedBytes, data.totalBytes);
+    document.body.classList.toggle('updating', running);
     if (chip) {
       chip.hidden = !available && !running;
       if (!chip.hidden) {
         chipVersion.textContent = data.installing
           ? '安装中'
-          : data.downloading ? `${pct}%` : ready ? '' : `v${data.latest || ''}`;
-        chip.firstChild.textContent = ready ? '重启更新' : '更新 ';
+          : data.downloading ? size.compact : ready ? '' : `v${data.latest || ''}`;
+        chip.firstChild.textContent = data.downloading ? '下载 ' : ready ? '重启更新' : '更新 ';
+        chip.title = data.downloading ? `${size.text} · ${pct}%` : '';
         chip.disabled = running;
       }
       // The two share one spot: a pending release takes the version's place,
@@ -1056,6 +1060,9 @@ function setupAbout() {
 
     progress.hidden = !(data.downloading || data.installing);
     progressBar.style.width = `${data.installing ? 100 : pct}%`;
+    $('updateBytes').textContent = size.text;
+    $('updatePercent').textContent = `${pct}%`;
+    $('updateProgressMeta').hidden = !(data.downloading || data.installing || data.ready);
 
     if (data.error) {
       status.textContent = data.error;
