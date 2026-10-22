@@ -772,6 +772,7 @@ function setupSettingsPanel() {
   const raw = $('settingsRaw');
   const status = $('settingsStatus');
   const save = $('settingsSave');
+  const tabs = [...document.querySelectorAll('[data-settings-page]')];
   let open = false;
   let busy = false;
   let closeTimer = 0;
@@ -794,6 +795,31 @@ function setupSettingsPanel() {
       chip.setAttribute('aria-pressed', active.has(key) ? 'true' : 'false');
     }
   };
+
+  const selectPage = (tab) => {
+    if (recordingHotkey) window.busy.captureHotkey(false);
+    for (const item of tabs) {
+      const selected = item === tab;
+      item.setAttribute('aria-selected', String(selected));
+      item.tabIndex = selected ? 0 : -1;
+      $(item.getAttribute('aria-controls')).hidden = !selected;
+    }
+  };
+
+  for (const tab of tabs) {
+    tab.addEventListener('click', () => selectPage(tab));
+    tab.addEventListener('keydown', (event) => {
+      let index = tabs.indexOf(tab);
+      if (event.key === 'ArrowRight') index = (index + 1) % tabs.length;
+      else if (event.key === 'ArrowLeft') index = (index + tabs.length - 1) % tabs.length;
+      else if (event.key === 'Home') index = 0;
+      else if (event.key === 'End') index = tabs.length - 1;
+      else return;
+      event.preventDefault();
+      tabs[index].focus();
+      selectPage(tabs[index]);
+    });
+  }
 
   for (const chip of periodChips) {
     chip.addEventListener('click', () => {

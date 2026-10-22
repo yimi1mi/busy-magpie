@@ -223,104 +223,116 @@
             </header>
 
             <form id="settingsForm" class="settings-form" autocomplete="off">
+              <div class="settings-tabs" role="tablist" aria-label="设置分类">
+                <button type="button" class="settings-tab" id="settingsTab-appearance" role="tab" aria-controls="settingsPage-appearance" aria-selected="true" tabindex="0" data-settings-page="appearance">外观与动效</button>
+                <button type="button" class="settings-tab" id="settingsTab-usage" role="tab" aria-controls="settingsPage-usage" aria-selected="false" tabindex="-1" data-settings-page="usage">用量与更新</button>
+                <button type="button" class="settings-tab" id="settingsTab-connection" role="tab" aria-controls="settingsPage-connection" aria-selected="false" tabindex="-1" data-settings-page="connection">连接与快捷键</button>
+              </div>
               <div class="settings-groups">
-                <section class="settings-group">
-                  <div class="settings-duo">
-                    <label class="settings-switch">
-                      <span><b>总在最前</b><small>盖在其他窗口上方</small></span>
-                      <input type="checkbox" id="settingsTopmost">
-                    </label>
-                    <label class="settings-switch">
-                      <span><b>隐藏账号名称</b><small>邮箱和 Key 打码</small></span>
-                      <input type="checkbox" id="settingsMask">
-                    </label>
-                  </div>
-                  <div class="settings-opacity">
-                    <span><b>不透明度</b></span>
-                    <input type="range" id="settingsOpacity" min="40" max="100" step="1" value="100">
-                    <output id="settingsOpacityOut">100%</output>
-                  </div>
-                  <label class="settings-switch"><span><b>紧凑模式</b><small>只显示连接、活动请求和用量</small></span><input type="checkbox" id="settingsCompact"></label>
-                  <label class="settings-switch"><span><b>安静模式</b><small>停止飞鸟、流光和数字动画</small></span><input type="checkbox" id="settingsQuiet"></label>
-                  <div class="gateway-actions"><button type="button" id="settingsResetPosition">恢复默认位置和大小</button></div>
-                </section>
-
-                <section class="settings-group">
-                  <div class="settings-field">
-                    <div class="settings-caption"><b>时间窗</b><small>单击胶囊只在这些之间循环</small></div>
-                    <div class="settings-chips" id="settingsPeriods" role="group" aria-label="时间窗">
-                      <button type="button" class="settings-chip" data-period="today" aria-pressed="true">今日</button>
-                      <button type="button" class="settings-chip" data-period="7d" aria-pressed="true">7 天</button>
-                      <button type="button" class="settings-chip" data-period="30d" aria-pressed="true">30 天</button>
-                      <button type="button" class="settings-chip" data-period="all" aria-pressed="true">全部</button>
+                <div class="settings-page" id="settingsPage-appearance" role="tabpanel" aria-labelledby="settingsTab-appearance">
+                  <section class="settings-group">
+                    <div class="settings-duo">
+                      <label class="settings-switch">
+                        <span><b>总在最前</b><small>盖在其他窗口上方</small></span>
+                        <input type="checkbox" id="settingsTopmost">
+                      </label>
+                      <label class="settings-switch">
+                        <span><b>隐藏账号名称</b><small>邮箱和 Key 打码</small></span>
+                        <input type="checkbox" id="settingsMask">
+                      </label>
                     </div>
-                  </div>
-                  <div class="settings-field">
-                    <div class="settings-caption"><b>数值</b><small>滚动的数字代表什么</small></div>
-                    <div class="settings-chips" id="settingsMetrics" role="group" aria-label="胶囊数值">
-                      <button type="button" class="settings-chip" data-metric="total" aria-pressed="true">总 token</button>
-                      <button type="button" class="settings-chip" data-metric="input" aria-pressed="false">输入</button>
-                      <button type="button" class="settings-chip" data-metric="output" aria-pressed="false">输出</button>
-                      <button type="button" class="settings-chip" data-metric="cache" aria-pressed="false">缓存读</button>
+                    <div class="settings-opacity">
+                      <span><b>不透明度</b></span>
+                      <input type="range" id="settingsOpacity" min="40" max="100" step="1" value="100">
+                      <output id="settingsOpacityOut">100%</output>
                     </div>
-                  </div>
-                  <label class="settings-switch">
-                    <span><b>数字滚动</b><small>关闭后直接替换</small></span>
-                    <input type="checkbox" id="settingsRoll">
-                  </label>                </section>
+                    <label class="settings-switch"><span><b>紧凑模式</b><small>只显示连接、活动请求和用量</small></span><input type="checkbox" id="settingsCompact"></label>
+                    <label class="settings-switch"><span><b>安静模式</b><small>停止飞鸟、流光和数字动画</small></span><input type="checkbox" id="settingsQuiet"></label>
+                    <div class="gateway-actions"><button type="button" id="settingsResetPosition">恢复默认位置和大小</button></div>
+                  </section>
 
-                <section class="settings-group">
-                  <div class="settings-duo">
-                    <label class="settings-switch">
-                      <span><b>额度条</b><small>剩余额度与续期</small></span>
-                      <input type="checkbox" id="settingsQuota">
-                    </label>
-                    <label class="settings-switch">
-                      <span><b>耗时拆解</b><small>首字延迟写进明细</small></span>
-                      <input type="checkbox" id="settingsTiming">
-                    </label>
-                  </div>
-                  <div class="settings-duo">
-                    <div class="settings-chiprow">
-                      <span class="settings-chiprow-label"><b>更新</b></span>
-                      <div class="settings-chips" id="settingsUpdate" role="group" aria-label="更新方式">
-                        <button type="button" class="settings-chip" data-update="idle" aria-pressed="true">空闲</button>
-                        <button type="button" class="settings-chip" data-update="notice" aria-pressed="false">提示</button>
-                        <button type="button" class="settings-chip" data-update="never" aria-pressed="false">不检查</button>
+                  <section class="settings-group">
+                    <div class="settings-field">
+                      <div class="settings-caption"><b>穿过动效</b></div>
+                      <div class="settings-chips" id="settingsEffects" role="group" aria-label="穿过动效">
+                        <button type="button" class="settings-chip" data-effect="none" aria-pressed="false">无</button>
+                        <button type="button" class="settings-chip" data-effect="ripple" aria-pressed="true">涟漪</button>
+                        <button type="button" class="settings-chip" data-effect="vortex" aria-pressed="false">漩涡</button>
+                        <button type="button" class="settings-chip" data-effect="dissolve" aria-pressed="false">溶解</button>
+                        <button type="button" class="settings-chip" data-effect="arc" aria-pressed="false">电弧</button>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+                <div class="settings-page" id="settingsPage-usage" role="tabpanel" aria-labelledby="settingsTab-usage" hidden>
+                  <section class="settings-group">
+                    <div class="settings-field">
+                      <div class="settings-caption"><b>时间窗</b><small>单击胶囊只在这些之间循环</small></div>
+                      <div class="settings-chips" id="settingsPeriods" role="group" aria-label="时间窗">
+                        <button type="button" class="settings-chip" data-period="today" aria-pressed="true">今日</button>
+                        <button type="button" class="settings-chip" data-period="7d" aria-pressed="true">7 天</button>
+                        <button type="button" class="settings-chip" data-period="30d" aria-pressed="true">30 天</button>
+                        <button type="button" class="settings-chip" data-period="all" aria-pressed="true">全部</button>
+                      </div>
+                    </div>
+                    <div class="settings-field">
+                      <div class="settings-caption"><b>数值</b><small>滚动的数字代表什么</small></div>
+                      <div class="settings-chips" id="settingsMetrics" role="group" aria-label="胶囊数值">
+                        <button type="button" class="settings-chip" data-metric="total" aria-pressed="true">总 token</button>
+                        <button type="button" class="settings-chip" data-metric="input" aria-pressed="false">输入</button>
+                        <button type="button" class="settings-chip" data-metric="output" aria-pressed="false">输出</button>
+                        <button type="button" class="settings-chip" data-metric="cache" aria-pressed="false">缓存读</button>
                       </div>
                     </div>
                     <label class="settings-switch">
-                      <span><b>保活</b><small>请求时自动拉起</small></span>
-                      <input type="checkbox" id="settingsKeepAlive">
+                      <span><b>数字滚动</b><small>关闭后直接替换</small></span>
+                      <input type="checkbox" id="settingsRoll">
                     </label>
-                  </div>                </section>
+                  </section>
 
-                <section class="settings-group">
-                  <div class="settings-field">
-                    <div class="settings-caption"><b>穿过动效</b></div>
-                    <div class="settings-chips" id="settingsEffects" role="group" aria-label="穿过动效">
-                      <button type="button" class="settings-chip" data-effect="none" aria-pressed="false">无</button>
-                      <button type="button" class="settings-chip" data-effect="ripple" aria-pressed="true">涟漪</button>
-                      <button type="button" class="settings-chip" data-effect="vortex" aria-pressed="false">漩涡</button>
-                      <button type="button" class="settings-chip" data-effect="dissolve" aria-pressed="false">溶解</button>
-                      <button type="button" class="settings-chip" data-effect="arc" aria-pressed="false">电弧</button>
+                  <section class="settings-group">
+                    <div class="settings-duo">
+                      <label class="settings-switch">
+                        <span><b>额度条</b><small>剩余额度与续期</small></span>
+                        <input type="checkbox" id="settingsQuota">
+                      </label>
+                      <label class="settings-switch">
+                        <span><b>耗时拆解</b><small>首字延迟写进明细</small></span>
+                        <input type="checkbox" id="settingsTiming">
+                      </label>
                     </div>
-                  </div>
-                </section>
+                    <div class="settings-duo">
+                      <div class="settings-chiprow">
+                        <span class="settings-chiprow-label"><b>更新</b></span>
+                        <div class="settings-chips" id="settingsUpdate" role="group" aria-label="更新方式">
+                          <button type="button" class="settings-chip" data-update="idle" aria-pressed="true">空闲</button>
+                          <button type="button" class="settings-chip" data-update="notice" aria-pressed="false">提示</button>
+                          <button type="button" class="settings-chip" data-update="never" aria-pressed="false">不检查</button>
+                        </div>
+                      </div>
+                      <label class="settings-switch">
+                        <span><b>保活</b><small>请求时自动拉起</small></span>
+                        <input type="checkbox" id="settingsKeepAlive">
+                      </label>
+                    </div>
+                  </section>
+                </div>
+                <div class="settings-page" id="settingsPage-connection" role="tabpanel" aria-labelledby="settingsTab-connection" hidden>
+                  <section class="settings-group">
+                    <div class="settings-row">
+                      <span><b>网关</b><small id="settingsGatewayHint">留空自动读取 magpie 的端口</small></span>
+                      <input type="text" id="settingsGateway" class="settings-input" placeholder="留空自动检测">
+                    </div>
+                    <div class="gateway-actions"><button type="button" id="gatewayTest">测试连接</button><button type="button" id="gatewayCopy">复制诊断</button></div>
+                    <p class="gateway-result" id="gatewayResult" role="status"></p>
+                  </section>
 
-                <section class="settings-group">
-                  <div class="settings-row">
-                    <span><b>网关</b><small id="settingsGatewayHint">留空自动读取 magpie 的端口</small></span>
-                    <input type="text" id="settingsGateway" class="settings-input" placeholder="留空自动检测">
-                  </div>
-                  <div class="gateway-actions"><button type="button" id="gatewayTest">测试连接</button><button type="button" id="gatewayCopy">复制诊断</button></div>
-                  <p class="gateway-result" id="gatewayResult" role="status"></p>
-                </section>
-                <section class="settings-group">
-                  <label class="settings-switch"><span><b>显示 / 隐藏快捷键</b><small>任何窗口在前面时都可召回</small></span><input type="checkbox" id="settingsHotkeyOn"></label>
-                  <div class="hotkey-row"><input id="settingsHotkey" class="settings-input" type="text" readonly aria-label="显示隐藏快捷键"><button type="button" id="hotkeyRecord">录制快捷键</button></div>
-                  <p class="gateway-result" id="hotkeyStatus" role="status"></p>
-                </section>
+                  <section class="settings-group">
+                    <label class="settings-switch"><span><b>显示 / 隐藏快捷键</b><small>任何窗口在前面时都可召回</small></span><input type="checkbox" id="settingsHotkeyOn"></label>
+                    <div class="hotkey-row"><input id="settingsHotkey" class="settings-input" type="text" readonly aria-label="显示隐藏快捷键"><button type="button" id="hotkeyRecord">录制快捷键</button></div>
+                    <p class="gateway-result" id="hotkeyStatus" role="status"></p>
+                  </section>
+                </div>
               </div>
 
               <footer class="settings-foot">
