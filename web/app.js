@@ -42,7 +42,6 @@ const el = {
   tokenPill: $('tokenPill'),
   tokenTotal: $('tokenTotal'),
   tokenWindow: $('tokenWindow'),
-  tokenMeter: $('tokenMeter'),
   providerIcon: $('providerIcon'),
   wireIn: $('wireIn'),
   wireOut: $('wireOut'),
@@ -78,6 +77,7 @@ let settings = {
 };
 let lastTrace = null;
 let usageData = null;
+let tokenBaseTitle = '';
 let usageStatus = { loading: false, stale: false, at: 0, error: '' };
 let modelPage = 0;
 let historyFilter = 'all';
@@ -218,10 +218,7 @@ function applyUsageTokens() {
     const period = activePeriod();
     applyTokenPill({
       total: value,
-      // The bar is the cache hit rate; asking for the cache itself would
-      // just repeat the number above it.
-      pct: metricKey === 'cache' ? null : cacheRate,
-      windowLabel: `${PERIOD_SHORT[period] || ''} · ${{ total: '总量', input: '输入', output: '输出', cache: '缓存' }[metricKey]}`,
+      windowLabel: `${PERIOD_SHORT[period] || ''}${metricKey === 'total' ? '' : ` · ${{ input: '输入', output: '输出', cache: '缓存' }[metricKey]}`}`,
       title: `${PERIOD_LONG[period] || usagePeriod(usageData)} · ${metric.label} ${formatTokens(value)}`
         + ` · 输入 ${formatTokens(input)} · 输出 ${formatTokens(output)}`
         + ` · 缓存 ${formatTokens(cache)}${cacheRate !== null ? `（${Math.round(cacheRate * 100)}%）` : ''}`
@@ -247,14 +244,24 @@ function applyUsageTokens() {
 
 function renderModelUsage() {
   const view = modelUsage(usageData, pillMetric());
-  const orbit = $('tokenOrbits');
   const rows = view.consistent ? view.rows : [];
-  orbit.toggleAttribute('hidden', !rows.length);
-  if (rows.length && el.tokenPill.offsetWidth > 0) paintModelTracks(orbit, rows.slice(0, 3), el.tokenPill.offsetWidth + 18, 45);
+  const bar = $('tokenModelBar');
+  const segments = document.createDocumentFragment();
+  const major = rows.filter(row => row.value > 0).slice(0, 4);
+  for (const row of major) {
+    const segment = create('i', 'token-model-segment');
+    segment.style.width = `${row.share * 100}%`;
+    segment.style.background = row.color;
+    segments.append(segment);
+  }
+  bar.replaceChildren(segments);
+  bar.hidden = !major.length;
+  const summary = major.map(row => `${row.name} ${(row.share * 100).toFixed(1)}%`).join(' · ');
+  el.tokenPill.title = tokenBaseTitle + (summary ? `\n模型占比：${summary}\n灰色部分为其余用量；完整明细见 ··· → 模型用量` : '');
   const pages = Math.max(1, Math.ceil(rows.length / 8));
   modelPage = Math.min(modelPage, pages - 1);
   const page = rows.slice(modelPage * 8, modelPage * 8 + 8);
-  paintModelTracks($('modelTracks'), page, 360, 146, 6);
+  paintModelTracks($('modelTracks'), page, 300, 116, 5);
   $('modelsTotal').textContent = formatTokens(view.total);
   $('modelsPeriod').textContent = `${PERIOD_SHORT[activePeriod()]} · ${PILL_METRICS[pillMetric()].label}`;
   $('modelsPage').textContent = `${modelPage + 1} / ${pages}`;
@@ -470,7 +477,7 @@ function setTokenTotal(text, animate = true) {
   el.tokenTotal.replaceChildren(roll);
 }
 
-function applyTokenPill({ total = 0, pct = null, title = '', windowLabel = '' } = {}) {
+function applyTokenPill({ total = 0, title = '', windowLabel = '' } = {}) {
   $('compactTotal').textContent = usageData ? formatTokens(total) : '—';
   $('compactPeriod').textContent = windowLabel;
   $('compactPill').title = title || '单击切换时间窗';
@@ -486,13 +493,8 @@ function applyTokenPill({ total = 0, pct = null, title = '', windowLabel = '' } 
   const text = formatTokens(total);
   setTokenTotal(text, settings.rollTokens !== false && !motionReduced());
   if (el.tokenWindow) el.tokenWindow.textContent = windowLabel;
-  el.tokenPill.title = title || `${text} token`;
-  if (el.tokenMeter) {
-    el.tokenMeter.parentElement.hidden = pct === null || pct === undefined;
-    el.tokenMeter.style.width = pct === null || pct === undefined
-      ? '0%'
-      : `${Math.max(2, Math.min(100, pct * 100)).toFixed(1)}%`;
-  }
+  tokenBaseTitle = title || `${text} token`;
+  el.tokenPill.title = tokenBaseTitle;
   requestAnimationFrame(reportHitAreas);
 }
 
