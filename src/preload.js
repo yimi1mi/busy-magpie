@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld('busy', {
   settingsGet: () => ipcRenderer.invoke('settings:get'),
   settingsSave: (data) => ipcRenderer.invoke('settings:save', data),
   testGateway: (raw) => ipcRenderer.invoke('gateway:test', raw),
+  captureHotkey: (on) => ipcRenderer.send('hotkey:capture', on),
+  testHotkey: (value) => ipcRenderer.invoke('hotkey:test', value),
   previewOpacity: (value) => ipcRenderer.send('settings:opacity', value),
   settingsOpenFile: () => ipcRenderer.send('settings:open-file'),
   settingsClose: () => ipcRenderer.send('settings:close'),
@@ -84,6 +86,9 @@ contextBridge.exposeInMainWorld('busy', {
   },
   onActionError: (callback) => {
     ipcRenderer.on('magpie:action-error', (_event, error) => callback(error));
+  },
+  onHotkeyCapture: (callback) => {
+    ipcRenderer.on('magpie:hotkey-capture', (_event, on) => callback(on));
   },
   onFirstRun: (callback) => {
     ipcRenderer.on('magpie:first-run', (_event, data) => callback(data));

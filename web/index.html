@@ -315,6 +315,11 @@
                   <div class="gateway-actions"><button type="button" id="gatewayTest">测试连接</button><button type="button" id="gatewayCopy">复制诊断</button></div>
                   <p class="gateway-result" id="gatewayResult" role="status"></p>
                 </section>
+                <section class="settings-group">
+                  <label class="settings-switch"><span><b>显示 / 隐藏快捷键</b><small>任何窗口在前面时都可召回</small></span><input type="checkbox" id="settingsHotkeyOn"></label>
+                  <div class="hotkey-row"><input id="settingsHotkey" class="settings-input" type="text" readonly aria-label="显示隐藏快捷键"><button type="button" id="hotkeyRecord">录制快捷键</button></div>
+                  <p class="gateway-result" id="hotkeyStatus" role="status"></p>
+                </section>
               </div>
 
               <footer class="settings-foot">

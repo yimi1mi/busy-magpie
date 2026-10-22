@@ -22,3 +22,8 @@ test('an invalid gateway is rejected without changing the live address', () => {
   const result=h.save({...h.api.settings(),gateway:'this is not an address'});
   assert.equal(result.ok,false);assert.equal(JSON.stringify(h.api.settings()),before);
 });
+test('an occupied shortcut is rejected before writing or applying settings', () => {
+  const h=mainHarness({hotkeyTaken:true});const before=JSON.stringify(h.api.settings());
+  const result=h.save({...h.api.settings(),hotkey:'Control+Alt+K',hotkeyOn:true});
+  assert.equal(result.ok,false);assert.match(result.error,/占用/);assert.equal(JSON.stringify(h.api.settings()),before);
+});

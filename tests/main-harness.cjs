@@ -3,7 +3,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 
-function mainHarness({ writeError = false } = {}) {
+function mainHarness({ writeError = false, hotkeyTaken = false } = {}) {
   const root = path.resolve(__dirname, '..');
   const handlers = new Map();
   const listeners = new Map();
@@ -31,7 +31,7 @@ function mainHarness({ writeError = false } = {}) {
   const electron = {
     app, ipcMain: { handle: (name, fn) => handlers.set(name, fn), on: (name, fn) => listeners.set(name, fn) },
     screen: { getDisplayNearestPoint: () => ({ workArea: {x:0,y:0,width:1920,height:1080} }) },
-    globalShortcut: { unregisterAll() {}, register: () => true },
+    globalShortcut: { unregisterAll() {}, unregister() {}, register: () => !hotkeyTaken },
     Notification: { isSupported: () => false }, shell: {}, Menu: {},
   };
   const context = vm.createContext({

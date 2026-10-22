@@ -9,6 +9,7 @@ import {
 } from './presenter.js';
 import { modelUsage, paintModelTracks } from './model-usage.mjs';
 import { downloadSize } from './download-progress.mjs';
+import { acceleratorFromEvent } from './hotkey.mjs';
 import { recentRequests, requestActive, requestFailed, attemptRows, redactDiagnostic, errorAdvice, requestSummary, RequestSelection, groupRequests } from './request-model.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -776,6 +777,8 @@ function setupSettingsPanel() {
   let savedOpacity = 1;
   let previewingOpacity = false;
   let gatewayReport = '';
+  let recordingHotkey = false;
+  let recordedHotkey = false;
 
   const setStatus = (text, error = false) => {
     status.textContent = text || '';
@@ -843,6 +846,9 @@ function setupSettingsPanel() {
     keepAlive.checked = s.keepAlive !== false;
     $('settingsCompact').checked = Boolean(s.compact);
     $('settingsQuiet').checked = Boolean(s.quietMotion);
+    $('settingsHotkeyOn').checked = s.hotkeyOn !== false;
+    $('settingsHotkey').value = s.hotkey || 'Control+Alt+M';
+    $('hotkeyStatus').textContent = s.hotkeyOn === false ? '快捷键已关闭' : data.hotkey?.ok ? '快捷键已注册' : '快捷键尚未注册成功，可重新录入或关闭';
     opacity.value = String(Math.round((Number(s.opacity) || 1) * 100));
     opacityOut.textContent = `${opacity.value}%`;
     savedOpacity = Math.min(1, Math.max(0.4, Number(s.opacity) || 1));
@@ -944,6 +950,8 @@ function setupSettingsPanel() {
         keepAlive: keepAlive.checked,
         compact: $('settingsCompact').checked,
         quietMotion: $('settingsQuiet').checked,
+        hotkey: $('settingsHotkey').value,
+        hotkeyOn: $('settingsHotkeyOn').checked,
       });
       if (!result?.ok) {
         setStatus(result?.error || '保存失败', true);
@@ -981,6 +989,27 @@ function setupSettingsPanel() {
       const copied = await window.busy.copySummary(redactDiagnostic(gatewayReport, 5000));
       $('gatewayResult').textContent = copied ? '已复制诊断信息，不含账号和凭据。' : '复制失败';
     } catch { $('gatewayResult').textContent = '复制失败'; }
+  });
+  $('hotkeyRecord').addEventListener('click', () => window.busy.captureHotkey(!recordingHotkey));
+  window.busy.onHotkeyCapture((on) => {
+    recordingHotkey = Boolean(on);
+    $('hotkeyRecord').textContent = on ? '取消录制' : '录制快捷键';
+    if (on) { recordedHotkey = false; $('hotkeyStatus').textContent = '请按组合键，例如 Ctrl+Alt+M；Esc 取消'; $('settingsHotkey').focus(); }
+    else if (!recordedHotkey) $('hotkeyStatus').textContent = '已取消录制';
+  });
+  $('settingsHotkey').addEventListener('keydown', async (event) => {
+    if (!recordingHotkey) return;
+    event.preventDefault(); event.stopPropagation();
+    if (event.key === 'Escape') { window.busy.captureHotkey(false); return; }
+    const value = acceleratorFromEvent(event, window.busy.platform);
+    if (!value) return;
+    recordedHotkey = true;
+    $('settingsHotkey').value = value;
+    window.busy.captureHotkey(false);
+    try {
+      const result = await window.busy.testHotkey(value);
+      $('hotkeyStatus').textContent = result.ok ? '组合键可用，保存后生效' : result.error;
+    } catch { $('hotkeyStatus').textContent = '无法检测快捷键，请重试'; }
   });
   $('modelsClose').addEventListener('click', () => window.busy.settingsClose());
   $('modelsPrev').addEventListener('click', () => { modelPage = Math.max(0, modelPage - 1); renderModelUsage(); });

@@ -95,6 +95,7 @@ let positionTimer = null;
 let aliveTimer = null;
 let pauseTimer = null;
 let compactPosition = null;
+let shortcutRecording = false;
 let frame = { lanes: 1, cardHeight: 400, windowHeight: 432 };
 
 function log(message) {
@@ -404,6 +405,11 @@ function createWindow() {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   win.webContents.on('before-input-event', (event, input) => {
+    if (shortcutRecording && input.type === 'keyDown' && input.key === 'Escape') {
+      setShortcutCapture(false);
+      event.preventDefault();
+      return;
+    }
     if ((firstRunOpen || settingsOpen || quickMenuOpen || layoutMode || dragState || resizeState)
       && input.type === 'keyDown' && input.key === 'Escape') {
       if (firstRunOpen) {
@@ -439,7 +445,7 @@ function createWindow() {
     hoverKind = null;
     refreshTrayMenu();
   });
-  win.on('blur', () => setQuickMenuOpen(false));
+  win.on('blur', () => { setQuickMenuOpen(false); setShortcutCapture(false); });
 
   win.webContents.on('did-start-loading', () => {
     rendererReady = false;
@@ -858,6 +864,7 @@ function setQuickMenuOpen(value) {
 
 function openSettingsPanel(mode = 'settings') {
   if (!win || win.isDestroyed()) return;
+  setShortcutCapture(false);
   setQuickMenuOpen(false);
   if (!rendererReady) {
     pendingSettings = true;
@@ -890,6 +897,7 @@ function openSettingsPanel(mode = 'settings') {
 
 function closeSettingsPanel() {
   if (!settingsOpen || settingsClosing) return;
+  setShortcutCapture(false);
   settingsClosing = true;
   settingsOpen = false;
   currentPanelMode = 'settings';
@@ -932,7 +940,7 @@ function registerHotkey() {
   globalShortcut.unregisterAll();
   hotkeyOk = false;
   const accelerator = String(settings.hotkey || DEFAULT_HOTKEY).trim();
-  if (settings.hotkeyOn === false || !accelerator) return;
+  if (shortcutRecording || settings.hotkeyOn === false || !accelerator) return;
   try {
     hotkeyOk = globalShortcut.register(accelerator, () => toggleVisible());
   } catch (error) {
@@ -940,6 +948,26 @@ function registerHotkey() {
     log(`hotkey ${accelerator} not registered: ${error.message}`);
   }
   if (!hotkeyOk) log(`hotkey ${accelerator} is taken or invalid`);
+}
+
+function setShortcutCapture(on) {
+  const next = Boolean(on && settingsOpen && currentPanelMode === 'settings');
+  if (shortcutRecording === next) return;
+  shortcutRecording = next;
+  win?.webContents.setIgnoreMenuShortcuts(next);
+  registerHotkey();
+  send('magpie:hotkey-capture', next);
+}
+
+function testHotkey(value) {
+  const accelerator = String(value || '').trim();
+  if (!accelerator) return { ok: false, error: '请先录入快捷键' };
+  if (accelerator === settings.hotkey && hotkeyOk) return { ok: true };
+  try {
+    if (!globalShortcut.register(accelerator, toggleVisible)) return { ok: false, error: '这个快捷键已被系统或其他程序占用' };
+    globalShortcut.unregister(accelerator);
+    return { ok: true };
+  } catch { return { ok: false, error: '快捷键格式无效，请重新录入' }; }
 }
 
 function toggleVisible() {
@@ -1764,6 +1792,7 @@ ipcMain.handle('settings:get', () => {
     resolvedGateway: displayAddress(resolveGateway()),
     gatewaySource: gatewayInfo().source,
     gatewayError: gatewayInfo().error,
+    hotkey: { ok: hotkeyOk, on: settings.hotkeyOn !== false },
     path: settingsPath,
     raw,
   };
@@ -1797,6 +1826,11 @@ ipcMain.handle('settings:save', (_event, input) => {
       : Boolean(data.hotkeyOn);
     const hotkeyChanged = nextHotkey !== settings.hotkey
       || nextHotkeyOn !== (settings.hotkeyOn !== false);
+    setShortcutCapture(false);
+    if (hotkeyChanged && nextHotkeyOn) {
+      const checked = testHotkey(nextHotkey);
+      if (!checked.ok) return checked;
+    }
 
     const nextSettings = {
       ...settings,
@@ -1889,6 +1923,7 @@ ipcMain.handle('settings:save', (_event, input) => {
       resolvedGateway: displayAddress(resolveGateway()),
       gatewaySource: gatewayInfo().source,
       gatewayError: gatewayInfo().error,
+      hotkey: { ok: hotkeyOk, on: settings.hotkeyOn !== false },
     };
   } catch (error) {
     log(`save settings: ${error.message}`);
@@ -1903,6 +1938,8 @@ ipcMain.on('settings:open-file', () => {
 
 ipcMain.on('settings:close', () => closeSettingsPanel());
 ipcMain.handle('gateway:test', (_event, raw) => testGateway(raw));
+ipcMain.on('hotkey:capture', (_event, on) => setShortcutCapture(on));
+ipcMain.handle('hotkey:test', (_event, value) => testHotkey(value));
 
 // While the slider is dragged the window follows it at once; nothing is
 // written until Save, and closing the panel puts the stored value back.

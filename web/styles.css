@@ -892,6 +892,9 @@ body.layout .token-pill {
 .gateway-actions button:disabled { opacity: 0.45; cursor: default; }
 .gateway-result { margin: 7px 0 0; color: var(--muted); font-size: 9px; line-height: 1.5; white-space: pre-line; overflow-wrap: anywhere; }
 .gateway-result.error { color: var(--warn); }
+.hotkey-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.hotkey-row input { flex: 1; min-width: 0; }
+.hotkey-row button { padding: 5px 9px; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; background: rgba(255,255,255,0.04); color: var(--ink); font: inherit; font-size: 10px; cursor: pointer; }
 
 body.menu-open .stage-canvas {
   pointer-events: auto;
