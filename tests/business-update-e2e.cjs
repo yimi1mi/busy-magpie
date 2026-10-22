@@ -1,8 +1,8 @@
 'use strict';
 
-// Run with Node on Windows. All application state, signed fixtures and evidence
+// Run with Node on Windows or macOS. All state, signed fixtures and evidence
 // stay under artifacts/; the installed widget and its userData are never used.
-// Optional: --packaged <absolute win-unpacked directory> copies and exercises
+// Optional: --packaged <absolute win-unpacked directory or macOS .app> copies
 // that complete runtime with app.isPackaged=true instead of a development app.
 // --original-immutable <directory> leaves the build untouched and uses local
 // debugger ports plus the existing artifacts/signing/business-ed25519.pem key.
@@ -24,8 +24,9 @@ const originalSource = args[0] === '--original-immutable' ? args[1] : null;
 const originalImmutable = Boolean(originalSource);
 const packaged = Boolean(packagedSource || originalSource);
 const output = path.join(project, 'artifacts', 'business-update-e2e', `${Date.now()}-${process.pid}`);
-const runtimeRoot = originalImmutable ? path.resolve(originalSource) : path.join(output, 'runtime');
-const appRoot = packaged ? path.join(runtimeRoot, 'resources', 'app') : path.join(output, 'app');
+let runtimeRoot = originalImmutable ? path.resolve(originalSource) : path.join(output, 'runtime');
+let appRoot = packaged ? path.join(runtimeRoot, 'resources', 'app') : path.join(output, 'app');
+let packagedExecutable = packaged ? path.join(runtimeRoot, 'Busy Magpie.exe') : null;
 const profile = path.join(output, 'profile');
 const updateRoot = path.join(profile, 'business-updates');
 const reports = path.join(output, 'reports');
@@ -33,6 +34,7 @@ const checks = [];
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 let server;
 let child;
+const launchedChildren = [];
 let stdout;
 let stderr;
 let nextCommand = 0;
@@ -67,6 +69,11 @@ function snapshot(directory) {
     for (const entry of fs.readdirSync(folder, {withFileTypes: true})) {
       const filename = path.join(folder, entry.name);
       if (entry.isDirectory()) walk(filename);
+      else if (entry.isSymbolicLink()) {
+        // Framework bundles use relative symlinks. Compare the link itself and
+        // never traverse it outside the copied runtime during verification.
+        files[path.relative(directory, filename).replaceAll('\\', '/')] = 'symlink:' + fs.readlinkSync(filename);
+      }
       else {
         assert.ok(entry.isFile(), `Unexpected non-file: ${filename}`);
         files[path.relative(directory, filename).replaceAll('\\', '/')] = sha256(fs.readFileSync(filename));
@@ -75,6 +82,25 @@ function snapshot(directory) {
   }
   walk(directory);
   return files;
+}
+
+function packagedLayout(source) {
+  if (process.platform === 'win32') {
+    const root = path.resolve(source);
+    return {root, app: path.join(root, 'resources', 'app'), executable: path.join(root, 'Busy Magpie.exe')};
+  }
+  let root = path.resolve(source);
+  while (!root.endsWith('.app') && path.dirname(root) !== root) root = path.dirname(root);
+  assert.ok(root.endsWith('.app'), 'Pass a macOS .app bundle or its Contents/MacOS executable');
+  const info = path.join(root, 'Contents', 'Info.plist');
+  const result = spawnSync('/usr/bin/plutil', ['-extract', 'CFBundleExecutable', 'raw', '-o', '-', info], {encoding: 'utf8'});
+  if (result.error) throw result.error;
+  assert.equal(result.status, 0, result.stderr || 'Cannot read the app executable from Info.plist');
+  const name = result.stdout.trim();
+  assert.ok(name && path.basename(name) === name && !name.includes('\\'), 'Invalid CFBundleExecutable');
+  const executable = path.join(root, 'Contents', 'MacOS', name);
+  if (fs.statSync(source).isFile()) assert.equal(path.resolve(source), executable, 'The supplied executable must be the main app executable');
+  return {root, app: path.join(root, 'Contents', 'Resources', 'app'), executable};
 }
 
 // This driver is copied into the fixture shell. It only hides test windows and
@@ -86,7 +112,8 @@ function electronDriver() {
   const {app, ipcMain} = require('electron');
   const output = process.env.BUSY_MAGPIE_E2E_ROOT;
   const packaged = process.env.BUSY_MAGPIE_E2E_PACKAGED === '1';
-  const appRoot = packaged ? path.join(output, 'runtime', 'resources', 'app') : path.join(output, 'app');
+  const appRoot = process.env.BUSY_MAGPIE_E2E_APP_ROOT
+    || (packaged ? path.join(output, 'runtime', 'resources', 'app') : path.join(output, 'app'));
   const entry = {pid: process.pid, argv: process.argv, directory: __dirname, expectedAppRoot: appRoot,
     appPath: app.getAppPath(), isPackaged: app.isPackaged, packaged, previewDirectory: process.env.BUSY_MAGPIE_PREVIEW_DIR};
   fs.writeFileSync(path.join(output, `driver-entry-${process.pid}.json`), JSON.stringify(entry, null, 2));
@@ -165,6 +192,9 @@ function electronDriver() {
       } else if (command.action === 'check') {
         const state = await contents.executeJavaScript('window.busy.updatesCheck()');
         write('command-' + command.id, {state, pid: process.pid});
+      } else if (command.action === 'try-install') {
+        const state = await contents.executeJavaScript('window.busy.updatesInstall()');
+        write('command-' + command.id, {state, pid: process.pid});
       } else if (command.action === 'save') {
         const opacity = JSON.stringify(command.opacity);
         const result = await contents.executeJavaScript(`window.busy.settingsGet().then(current=>window.busy.settingsSave({...current.settings,opacity:${opacity}}))`);
@@ -229,7 +259,7 @@ function lifecycleEvents() {
 function nativeExitObserved(pid) {
   return events().some(event => (event.event === 'old-process-exited' && event.oldPid === pid)
     || (['candidate-exit', 'fallback-exit'].includes(event.event) && event.pid === pid))
-    || lifecycleEvents().some(event => event.pid === pid && event.event === 'initial-child-exit');
+    || lifecycleEvents().some(event => event.pid === pid && ['initial-child-exit', 'ordinary-child-exit'].includes(event.event));
 }
 function stoppedBusiness(pid, token, since) {
   const marker = readJson(path.join(updateRoot, `shutdown-${token}-${pid}.json`));
@@ -262,6 +292,15 @@ async function inspectorTarget(port, type) {
   } catch { return null; }
 }
 function listeningPorts(pid) {
+  if (process.platform === 'darwin') {
+    const result = spawnSync('/usr/sbin/lsof', ['-nP', '-a', '-p', String(pid), '-iTCP', '-sTCP:LISTEN', '-Fn'], {encoding: 'utf8', timeout: 5000});
+    if (result.error) throw result.error;
+    assert.ok(result.status === 0 || result.status === 1, result.stderr || 'lsof failed');
+    return result.stdout.split(/\r?\n/).flatMap(line => {
+      const match = /^n127\.0\.0\.1:(\d+)$/.exec(line);
+      return match ? [Number(match[1])] : [];
+    });
+  }
   const result = spawnSync('netstat.exe', ['-ano', '-p', 'tcp'], {windowsHide: true, encoding: 'utf8', timeout: 5000});
   if (result.error) throw result.error;
   return result.stdout.split(/\r?\n/).flatMap(line => {
@@ -351,7 +390,7 @@ function createExternalController() {
   function validateRuntime(runtime) {
     assert.equal(runtime.isPackaged, true);
     assert.equal(runtime.appPath, appRoot);
-    assert.equal(runtime.executable, path.join(runtimeRoot, 'Busy Magpie.exe'));
+    assert.equal(runtime.executable, packagedExecutable);
     const prefix = (path.join(appRoot, 'node_modules') + path.sep).toLowerCase();
     for (const filename of [...Object.values(runtime.dependencies), ...runtime.loadedDependencies]) {
       assert.ok(filename.toLowerCase().startsWith(prefix), 'Runtime dependency escaped the original package: ' + filename);
@@ -409,6 +448,7 @@ function createExternalController() {
     async command(pid, action, extra) {
       assert.equal(current?.pid, pid);
       if (action === 'check') return {pid, state: await renderer.evaluate('window.busy.updatesCheck()')};
+      if (action === 'try-install') return {pid, state: await renderer.evaluate('window.busy.updatesInstall()')};
       if (action === 'save') return {pid, result: await renderer.evaluate(`window.busy.settingsGet().then(current=>window.busy.settingsSave({...current.settings,opacity:${JSON.stringify(extra.opacity)}}))`)};
       if (action === 'inspect') return {pid, state: await renderer.evaluate(stateExpression), runtime: current.runtime, errors: [...errors]};
       if (action === 'install') {
@@ -435,17 +475,22 @@ function createExternalController() {
 }
 
 async function run() {
-  assert.equal(process.platform, 'win32', 'Business update installation currently requires Windows');
+  assert.ok(['win32', 'darwin'].includes(process.platform), 'Run this real-runtime check on Windows or macOS');
   assert.ok(args.length === 0 || (args.length === 2 && ['--packaged', '--original-immutable'].includes(args[0]) && path.isAbsolute(args[1])),
-    'Usage: node tests/business-update-e2e.cjs [--packaged|--original-immutable <absolute win-unpacked directory>]');
+    'Usage: node tests/business-update-e2e.cjs [--packaged|--original-immutable <absolute win-unpacked directory or macOS .app/executable>]');
   fs.mkdirSync(reports, {recursive: true});
   fs.mkdirSync(profile, {recursive: true});
   if (packaged) {
     const source = packagedSource || originalSource;
-    assert.ok(fs.statSync(source).isDirectory(), 'The packaged source must be a directory');
-    assert.ok(fs.statSync(path.join(source, 'Busy Magpie.exe')).isFile(), 'The packaged source must contain Busy Magpie.exe');
-    assert.ok(fs.statSync(path.join(source, 'resources', 'app', 'package.json')).isFile(), 'The packaged source must contain resources/app/package.json');
-    if (!originalImmutable) fs.cpSync(source, runtimeRoot, {recursive: true});
+    const layout = packagedLayout(source);
+    assert.ok(fs.statSync(layout.root).isDirectory(), 'The packaged source must be a directory');
+    assert.ok(fs.statSync(layout.executable).isFile(), 'The packaged source must contain its app executable');
+    assert.ok(fs.statSync(path.join(layout.app, 'package.json')).isFile(), 'The packaged source must contain an unpacked resources/app/package.json (build.asar=false)');
+    runtimeRoot = originalImmutable ? layout.root : process.platform === 'darwin'
+      ? path.join(output, path.basename(layout.root)) : path.join(output, 'runtime');
+    appRoot = path.join(runtimeRoot, path.relative(layout.root, layout.app));
+    packagedExecutable = path.join(runtimeRoot, path.relative(layout.root, layout.executable));
+    if (!originalImmutable) fs.cpSync(layout.root, runtimeRoot, {recursive: true, verbatimSymlinks: process.platform === 'darwin'});
   } else {
     fs.mkdirSync(appRoot, {recursive: true});
     for (const folder of ['src', 'web', 'assets', 'shell']) fs.cpSync(path.join(project, folder), path.join(appRoot, folder), {recursive: true});
@@ -471,7 +516,7 @@ async function run() {
     fs.writeFileSync(path.join(appRoot, 'shell', 'trusted-keys.json'), JSON.stringify(trustedKeys));
   }
   const files = collectFiles(appRoot);
-  function payload(version, failed) {
+  function payload(version, failed, overrides = {}) {
     const payloadFiles = new Map(files);
     if (failed) payloadFiles.set('src/main.js', Buffer.from(`'use strict';
 const fs = require('node:fs');
@@ -482,17 +527,23 @@ const settings = JSON.parse(fs.readFileSync(filename, 'utf8'));
 fs.writeFileSync(filename, JSON.stringify({...settings, opacity:0.91, failedMigration:'isolated-e2e'}));
 throw new Error('isolated-e2e candidate failed before renderer startup');
 `));
-    const manifest = createManifest({version, keyId, files: payloadFiles});
-    const bytes = createPackage({manifest, files: payloadFiles, privateKey});
+    const manifest = createManifest({version, keyId: overrides.keyId || keyId, files: payloadFiles,
+      minShellVersion: overrides.minShellVersion || '1.4.0'});
+    const bytes = createPackage({manifest, files: payloadFiles, privateKey: overrides.privateKey || privateKey});
     const manifestHash = sha256(canonicalManifest(manifest));
-    fs.writeFileSync(path.join(output, `${version}.bmpkg`), bytes);
+    const filename = `${version}${overrides.suffix || ''}.bmpkg`;
+    fs.writeFileSync(path.join(output, filename), bytes);
     return {bytes, descriptor: {id: `${version}-${manifestHash.slice(0, 16)}`, version, manifestHash},
-      feed: {format: 1, version, minShellVersion: '1.4.0', shellApi: 1, size: bytes.length, sha256: sha256(bytes), packageUrl: `/${version}.bmpkg`}};
+      feed: {format: 1, version, minShellVersion: '1.4.0', shellApi: 1, size: bytes.length, sha256: sha256(bytes), packageUrl: `/${filename}`}};
   }
   const success = payload('1.4.1', false);
   const failure = payload('1.4.2', true);
+  const nextHealthy = payload('1.4.3', false);
+  const untrustedKey = crypto.generateKeyPairSync('ed25519').privateKey;
+  const invalidSignature = payload('1.4.3', false, {keyId: 'untrusted-e2e', privateKey: untrustedKey, suffix: '-untrusted'});
   let feed = success.feed;
-  const packages = new Map([['/1.4.1.bmpkg', success.bytes], ['/1.4.2.bmpkg', failure.bytes]]);
+  const packages = new Map([success, failure, nextHealthy, invalidSignature].map(item => [item.feed.packageUrl, item.bytes]));
+  const packageRequests = [];
   server = http.createServer((request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1');
     if (url.pathname === '/business-latest.json') {
@@ -500,6 +551,7 @@ throw new Error('isolated-e2e candidate failed before renderer startup');
       response.end(JSON.stringify(feed));
     } else if (packages.has(url.pathname)) {
       const bytes = packages.get(url.pathname);
+      packageRequests.push(url.pathname);
       response.setHeader('Content-Type', 'application/octet-stream');
       response.setHeader('Content-Length', bytes.length);
       response.end(bytes);
@@ -513,12 +565,12 @@ throw new Error('isolated-e2e candidate failed before renderer startup');
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   writeJson(path.join(profile, 'settings.json'), {gateway: origin, topmost: false, autostart: false, keepAlive: false, updateMode: 'never', left: 120, top: 120});
-  const electron = packaged ? path.join(runtimeRoot, 'Busy Magpie.exe') : require('electron');
+  const electron = packaged ? packagedExecutable : require('electron');
   const executableHash = sha256(fs.readFileSync(electron));
   const builtinFiles = snapshot(appRoot);
   const originalFiles = originalImmutable ? snapshot(runtimeRoot) : null;
   const env = {...process.env, BUSY_MAGPIE_E2E_ROOT: output, BUSY_MAGPIE_E2E_PACKAGED: packaged ? '1' : '0',
-    BUSY_MAGPIE_PREVIEW_DIR: profile, BUSY_MAGPIE_DEV_UPDATE_FEED: origin + '/business-latest.json'};
+    BUSY_MAGPIE_E2E_APP_ROOT: appRoot, BUSY_MAGPIE_PREVIEW_DIR: profile, BUSY_MAGPIE_DEV_UPDATE_FEED: origin + '/business-latest.json'};
   delete env.ELECTRON_RUN_AS_NODE;
   stdout = fs.openSync(path.join(output, 'electron.stdout.log'), 'a');
   stderr = fs.openSync(path.join(output, 'electron.stderr.log'), 'a');
@@ -527,9 +579,16 @@ throw new Error('isolated-e2e candidate failed before renderer startup');
     externalController = createExternalController();
     launchArgs.push('--remote-debugging-address=127.0.0.1', '--remote-debugging-port=0', '--inspect=127.0.0.1:0', `--user-data-dir=${profile}`);
   }
-  child = spawn(electron, launchArgs, {cwd: packaged ? runtimeRoot : appRoot, env, windowsHide: !originalImmutable, stdio: ['ignore', stdout, stderr]});
-  child.on('error', error => writeJson(path.join(reports, 'spawn-error.json'), {error: error.stack}));
-  child.on('exit', (code, signal) => fs.appendFileSync(path.join(output, 'lifecycle.ndjson'), JSON.stringify({pid: child.pid, event: 'initial-child-exit', at: Date.now(), code, signal}) + '\n'));
+  function launchApplication() {
+    const launched = spawn(electron, launchArgs, {cwd: packaged ? runtimeRoot : appRoot, env, windowsHide: !originalImmutable, stdio: ['ignore', stdout, stderr]});
+    const first = launchedChildren.length === 0;
+    launchedChildren.push(launched);
+    launched.on('error', error => writeJson(path.join(reports, 'spawn-error.json'), {error: error.stack}));
+    launched.on('exit', (code, signal) => fs.appendFileSync(path.join(output, 'lifecycle.ndjson'), JSON.stringify({pid: launched.pid,
+      event: first ? 'initial-child-exit' : 'ordinary-child-exit', at: Date.now(), code, signal}) + '\n'));
+    return launched;
+  }
+  child = launchApplication();
   const original = await ready('1.4.0');
   assert.equal(original.pid, child.pid);
   assert.equal(original.runtime.isPackaged, packaged);
@@ -614,24 +673,114 @@ throw new Error('isolated-e2e candidate failed before renderer startup');
   assert.deepEqual(fs.readFileSync(path.join(profile, 'settings.json')), baselineSettings);
   assert.ok(events().some(entry => entry.token === failedRecord.token && entry.event === 'settings-restored'));
   record('v1.4.2 main-process failure restores v1.4.1 in a new process and rolls settings back byte-for-byte');
+
+  const launchesAfterRollback = events().filter(event => event.event === 'candidate-started').length;
+  const requestsAfterRollback = packageRequests.length;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const quarantined = await command(restored.pid, 'check');
+    assert.equal(quarantined.state.available, false);
+    assert.match(quarantined.state.error, /上次更新未成功|不重复尝试/);
+    const attempted = await command(restored.pid, 'try-install');
+    assert.equal(attempted.state.ready, false);
+    assert.equal(attempted.state.installing, false);
+  }
+  assert.equal(packageRequests.length, requestsAfterRollback);
+  assert.equal(events().filter(event => event.event === 'candidate-started').length, launchesAfterRollback);
+  assert.deepEqual(journal(), failedState);
+  record('rechecking the failed v1.4.2 neither downloads it again nor starts another candidate');
+
+  const versionsBeforeRejects = fs.readdirSync(path.join(updateRoot, 'versions')).sort();
+  const rejected = [];
+  for (const [name, artifact, expectedError] of [
+    ['untrusted signature', invalidSignature, /signature|signing key/i],
+  ]) {
+    feed = artifact.feed;
+    const beforeRequests = packageRequests.length;
+    const available = await command(restored.pid, 'check');
+    assert.equal(available.state.latest, '1.4.3');
+    assert.equal(available.state.available, true);
+    const refused = await command(restored.pid, 'try-install');
+    assert.match(refused.state.error, expectedError, `${name}: ${refused.state.error}`);
+    assert.equal(refused.state.ready, false);
+    assert.equal(refused.state.installing, false);
+    assert.ok(packageRequests.length > beforeRequests, name + ' must exercise the real download path');
+    assert.deepEqual(journal(), failedState);
+    assert.deepEqual(fs.readdirSync(path.join(updateRoot, 'versions')).sort(), versionsBeforeRejects);
+    assert.equal(events().filter(event => event.event === 'candidate-started').length, launchesAfterRollback);
+    assert.deepEqual(fs.readFileSync(path.join(profile, 'settings.json')), baselineSettings);
+    const stillRunning = await command(restored.pid, 'inspect');
+    assert.equal(stillRunning.state.version, '1.4.1');
+    assert.equal(stillRunning.state.opacity, 0.42);
+    assert.equal(fs.existsSync(path.join(profile, 'updating')), false);
+    rejected.push({name, error: refused.state.error, pid: restored.pid});
+    record(name + ' is rejected before any new process or settings change');
+  }
+
+  feed = nextHealthy.feed;
+  const nextCheck = await command(restored.pid, 'check');
+  assert.equal(nextCheck.state.latest, '1.4.3');
+  assert.equal(nextCheck.state.available, true);
+  await command(restored.pid, 'install');
+  const recovered = await ready('1.4.3');
+  await waitFor('higher healthy version committed', () => journal()?.current?.version === '1.4.3' && journal().pending === null);
+  const nextStart = events().find(event => event.event === 'candidate-started' && event.pid === recovered.pid);
+  await settled(nextStart.token, 'candidate-confirmed');
+  const nextHandoff = readJson(path.join(updateRoot, `handoff-${nextStart.token}.json`));
+  shutdownObservations.push(stoppedBusiness(restored.pid, nextStart.token, nextHandoff.at));
+  assert.deepEqual(journal().current, nextHealthy.descriptor);
+  assert.deepEqual(journal().previous, success.descriptor);
+  assert.deepEqual(journal().failures, failedState.failures);
+  assert.equal(recovered.state.version, '1.4.3');
+  assert.equal(recovered.state.opacity, 0.42);
+  assert.equal(recovered.state.shellVersion, '1.4.0');
+  assert.match(recovered.state.versionText, /v1\.4\.3/);
+  assert.deepEqual(recovered.errors, []);
+  const recoveredRoot = store.verify(journal().current).root;
+  const recoveredFiles = snapshot(recoveredRoot);
+  record('a higher valid v1.4.3 installs after quarantine and rejected downloads, retaining v1.4.1 as previous');
+
+  async function quitBusiness(pid) {
+    const requestedAt = Date.now();
+    await command(pid, 'exit');
+    await waitFor('fixture business quits after verification', () => {
+      const lifecycle = lifecycleEvents().filter(event => event.pid === pid && event.at >= requestedAt);
+      return ['window-closed', 'process-exit', 'quit'].every(name => lifecycle.some(event => event.event === name));
+    }, 15000);
+    shutdownObservations.push({pid, businessQuitObserved: true, nativeExitObserved: nativeExitObserved(pid), observedAt: Date.now()});
+  }
+  await quitBusiness(recovered.pid);
+  assert.equal(journal().pending, null);
+  child = launchApplication();
+  const relaunched = await ready('1.4.3', [recovered.pid]);
+  assert.equal(relaunched.pid, child.pid);
+  assert.equal(relaunched.state.opacity, 0.42);
+  assert.equal(relaunched.state.shellVersion, '1.4.0');
+  assert.match(relaunched.state.versionText, /v1\.4\.3/);
+  assert.deepEqual(relaunched.errors, []);
+  const relaunchEntry = fs.readFileSync(path.join(output, 'starts.ndjson'), 'utf8').trim().split(/\r?\n/)
+    .map(line => JSON.parse(line)).find(entry => entry.pid === relaunched.pid);
+  assert.ok(relaunchEntry);
+  assert.equal(relaunchEntry.argv.some(arg => arg.startsWith('--business-update-token') || arg.startsWith('--business-rollback-token')), false);
+  assert.deepEqual(journal().current, nextHealthy.descriptor);
+  assert.deepEqual(journal().previous, success.descriptor);
+  assert.deepEqual(fs.readFileSync(path.join(profile, 'settings.json')), baselineSettings);
+  record('an ordinary launch without an update token restores confirmed v1.4.3 and the same settings');
+
   assert.deepEqual(snapshot(healthyRoot), healthyFiles);
+  assert.deepEqual(snapshot(recoveredRoot), recoveredFiles);
   assert.deepEqual(snapshot(appRoot), builtinFiles);
   if (originalImmutable) assert.deepEqual(snapshot(runtimeRoot), originalFiles);
   assert.equal(sha256(fs.readFileSync(electron)), executableHash);
   assert.deepEqual(store.verify(success.descriptor).manifest.version, '1.4.1');
   assert.deepEqual(store.verify(failure.descriptor).manifest.version, '1.4.2');
+  assert.deepEqual(store.verify(nextHealthy.descriptor).manifest.version, '1.4.3');
   assert.equal(fs.existsSync(path.join(profile, 'updating')), false);
   record('version directories, host application files and Electron executable remain unchanged');
-  const finalQuitRequestedAt = Date.now();
-  await command(restored.pid, 'exit');
-  await waitFor('fixture business quits after verification', () => {
-    const lifecycle = lifecycleEvents().filter(event => event.pid === restored.pid && event.at >= finalQuitRequestedAt);
-    return ['window-closed', 'process-exit', 'quit'].every(name => lifecycle.some(event => event.event === name));
-  }, 15000);
-  shutdownObservations.push({pid: restored.pid, token: null, businessQuitObserved: true,
-    nativeExitObserved: nativeExitObserved(restored.pid), observedAt: Date.now()});
-  writeJson(path.join(output, 'result.json'), {ok: true, mode: originalImmutable ? 'original-immutable' : packaged ? 'packaged-copy' : 'development', checks, original, upgraded, restored, failedState,
-    shutdownObservations, lifecycle: lifecycleEvents(), executableHash, healthyFiles, builtinFiles});
+  await quitBusiness(relaunched.pid);
+  writeJson(path.join(output, 'result.json'), {ok: true, mode: originalImmutable ? 'original-immutable' : packaged ? 'packaged-copy' : 'development', checks,
+    platform: process.platform, architecture: process.arch,
+    original, upgraded, restored, recovered, relaunched, failedState, finalState: journal(), rejected, packageRequests,
+    shutdownObservations, lifecycle: lifecycleEvents(), executableHash, healthyFiles, recoveredFiles, builtinFiles});
   console.log('Evidence:', output);
 }
 
@@ -646,6 +795,7 @@ run().catch(error => {
   const starts = path.join(output, 'starts.ndjson');
   const owned = new Set(fs.existsSync(starts) ? fs.readFileSync(starts, 'utf8').trim().split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line).pid) : []);
   if (child?.pid) owned.add(child.pid);
+  for (const launched of launchedChildren) if (launched.pid) owned.add(launched.pid);
   for (const event of events()) if (event.supervisorPid) owned.add(event.supervisorPid);
   const lifecyclePath = path.join(output, 'lifecycle.ndjson');
   const quitting = new Set(fs.existsSync(lifecyclePath) ? fs.readFileSync(lifecyclePath, 'utf8').trim().split(/\r?\n/).filter(Boolean)
@@ -653,7 +803,7 @@ run().catch(error => {
   for (const pid of owned) if (alive(pid) && !quitting.has(pid)) { try { process.kill(pid); } catch {} }
   // Preserve a process already in app.quit for exit-boundary diagnosis instead
   // of turning its natural shutdown into a test-generated termination.
-  child?.unref();
+  for (const launched of launchedChildren) launched.unref();
   if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
   if (stdout !== undefined) fs.closeSync(stdout);
   if (stderr !== undefined) fs.closeSync(stderr);

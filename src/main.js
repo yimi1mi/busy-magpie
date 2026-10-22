@@ -732,8 +732,9 @@ function scheduleQuietInstall() {
 async function installUpdate() {
   if (!UPDATES_ENABLED) return updateView();
   if (updateState.installing) return updateView();
-  if (process.platform !== 'win32') {
-    // An unsigned mac app cannot replace itself; the release page is honest.
+  if (process.platform !== 'win32' && updateState.kind !== 'business') {
+    // Business packages leave the signed app bundle untouched. Replacing the
+    // macOS runtime itself still requires a manual full installer upgrade.
     if (updateState.releaseUrl) shell.openExternal(updateState.releaseUrl);
     return updateView();
   }

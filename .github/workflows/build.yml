@@ -16,8 +16,8 @@ jobs:
           - os: windows-latest
             script: dist:win
             artifact: windows
-          # Unsigned (ad-hoc) macOS builds: fine for a manual install, not for
-          # in-app updates, which need a Developer ID signature and notarizing.
+          # macOS runtime upgrades remain manual; signed business packages are
+          # verified separately and do not modify the application bundle.
           - os: macos-latest
             script: dist:mac
             artifact: macos
@@ -33,6 +33,24 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run ${{ matrix.script }}
+      - name: Verify macOS business updates and rollback
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          APP_PATH="$(node -e "const path=require('node:path');process.stdout.write(path.resolve('dist',process.arch==='arm64'?'mac-arm64':'mac','Busy Magpie.app'))")"
+          node tests/business-update-e2e.cjs --packaged "$APP_PATH"
+      - name: Preserve macOS update test evidence
+        if: always() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: business-update-evidence-macos
+          path: |
+            artifacts/business-update-e2e/**/result.json
+            artifacts/business-update-e2e/**/profile/business-updates/update.log
+            artifacts/business-update-e2e/**/profile/business-updates/journal.json
+            artifacts/business-update-e2e/**/electron.stderr.log
+            artifacts/business-update-e2e/**/lifecycle.ndjson
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: busy-magpie-${{ matrix.artifact }}

@@ -3,7 +3,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 
-function mainHarness({ writeError = false, preview = false } = {}) {
+function mainHarness({ writeError = false, preview = false, platform = 'win32' } = {}) {
   const root = path.resolve(__dirname, '..');
   const handlers = new Map();
   const listeners = new Map();
@@ -15,6 +15,7 @@ function mainHarness({ writeError = false, preview = false } = {}) {
   let updateChecks = 0;
   let loginChanges = 0;
   let globalShortcutReads = 0;
+  const openedUrls = [];
   const paths = new Map();
   const disk = {
     mkdirSync() {},
@@ -35,7 +36,7 @@ function mainHarness({ writeError = false, preview = false } = {}) {
   const electron = {
     app, ipcMain: { handle: (name, fn) => handlers.set(name, fn), on: (name, fn) => listeners.set(name, fn) },
     screen: { getDisplayNearestPoint: () => ({ workArea: {x:0,y:0,width:1920,height:1080} }) },
-    Notification: { isSupported: () => false }, shell: {}, Menu: {},
+    Notification: { isSupported: () => false }, shell: { openExternal: url => openedUrls.push(url) }, Menu: {},
   };
   Object.defineProperty(electron, 'globalShortcut', {
     get() { globalShortcutReads++; return {}; },
@@ -43,7 +44,7 @@ function mainHarness({ writeError = false, preview = false } = {}) {
   const context = vm.createContext({
     require: id => id === 'electron' ? electron : id === 'electron-updater' ? {autoUpdater}
       : id === 'fs' ? disk : require(id.startsWith('.') ? path.resolve(root,'src',id) : id),
-    __dirname: path.join(root,'src'), process: {platform:'win32',argv:preview?['--preview']:[],env:preview?{BUSY_MAGPIE_PREVIEW_DIR:'/test/preview'}:{},on() {}},
+    __dirname: path.join(root,'src'), process: {platform,argv:preview?['--preview']:[],env:preview?{BUSY_MAGPIE_PREVIEW_DIR:'/test/preview'}:{},on() {}},
     console, URL, AbortController, Date: class extends Date { static now() { return now; } },
     fetch: async () => ({ok:true,json:async()=>({period:'today',input:1})}),
     setTimeout: () => ++nextTimer, clearTimeout() {}, setImmediate: fn => fn(),
@@ -60,7 +61,7 @@ function mainHarness({ writeError = false, preview = false } = {}) {
       usageData:()=>usageData,
       usageStatus:()=>usageStatus,
       schedule:()=>scheduleQuietInstall(),
-      prepareUpdate:()=>{updateState.ready=true;updateState.available=true;updateState.latest='1.4.0';},
+      prepareUpdate:(kind='shell')=>{updateState.ready=true;updateState.available=true;updateState.latest='1.4.0';updateState.kind=kind;updateState.releaseUrl='https://github.com/yimi1mi/busy-magpie/releases/tag/v1.4.0';},
       changeMode:mode=>{settings.updateMode=mode;},
       setTrace:routes=>{lastTrace={routes};},
       autostart:()=>applyAutostart(),
@@ -68,7 +69,7 @@ function mainHarness({ writeError = false, preview = false } = {}) {
       installUpdate:()=>installUpdate(),
     };`, context);
   return {
-    api: context.testApi, files, paths,
+    api: context.testApi, files, paths, openedUrls,
     ipcChannels: [...handlers.keys(), ...listeners.keys()],
     save: input => handlers.get('settings:save')({}, input),
     period: value => handlers.get('usage:set-period')({}, value),
