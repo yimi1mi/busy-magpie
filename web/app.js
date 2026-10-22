@@ -220,10 +220,10 @@ function applyUsageTokens() {
       total: value,
       windowLabel: `${PERIOD_SHORT[period] || ''}${metricKey === 'total' ? '' : ` · ${{ input: '输入', output: '输出', cache: '缓存' }[metricKey]}`}`,
       title: `${PERIOD_LONG[period] || usagePeriod(usageData)} · ${metric.label} ${formatTokens(value)}`
-        + ` · 输入 ${formatTokens(input)} · 输出 ${formatTokens(output)}`
-        + ` · 缓存 ${formatTokens(cache)}${cacheRate !== null ? `（${Math.round(cacheRate * 100)}%）` : ''}`
         + ` · ${Number(usageData.calls || 0).toLocaleString()} 请求`
-        + ' · 单击切换时间窗',
+        + `\n输入 ${formatTokens(input)} · 输出 ${formatTokens(output)}`
+        + ` · 缓存 ${formatTokens(cache)}${cacheRate !== null ? `（${Math.round(cacheRate * 100)}%）` : ''}`
+        + '\n单击切换时间窗',
     });
     renderModelUsage();
     return;
@@ -256,8 +256,16 @@ function renderModelUsage() {
   }
   bar.replaceChildren(segments);
   bar.hidden = !major.length;
-  const summary = major.map(row => `${row.name} ${(row.share * 100).toFixed(1)}%`).join(' · ');
-  el.tokenPill.title = tokenBaseTitle + (summary ? `\n模型占比：${summary}\n灰色部分为其余用量；完整明细见 ··· → 模型用量` : '');
+  const highlighted = major.slice(0, 3);
+  const summary = highlighted.map(row => {
+    const name = Array.from(row.name.replace(/\s+/g, ' '));
+    const label = name.length > 32 ? `${name.slice(0, 31).join('')}…` : name.join('');
+    return `${label} ${(row.share * 100).toFixed(1)}%`;
+  });
+  const remainder = Math.max(0, view.total - highlighted.reduce((sum, row) => sum + row.value, 0));
+  if (highlighted.length && remainder > 0) summary.push(`其余用量 ${(remainder / view.total * 100).toFixed(1)}%`);
+  el.tokenPill.title = tokenBaseTitle + (summary.length
+    ? `\n\n模型占比 · ${PILL_METRICS[pillMetric()].label}\n${summary.join('\n')}\n完整明细：··· → 模型用量` : '');
   const pages = Math.max(1, Math.ceil(rows.length / 8));
   modelPage = Math.min(modelPage, pages - 1);
   const page = rows.slice(modelPage * 8, modelPage * 8 + 8);
