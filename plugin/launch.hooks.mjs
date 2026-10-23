@@ -2,18 +2,17 @@
 //
 // magpie loads this file in its Bun plugin host. The host starts when the
 // plugin is first used, and this file then starts the desktop widget if it is
-// already installed. The gateway request is always passed through untouched.
+// already installed, or downloads and installs a release first. The gateway
+// request is always passed through untouched.
 
-import { execFileSync, spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { existsSync, promises as fsp, readFileSync, statSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { spawn } from 'node:child_process';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import launchPolicy from '../src/launch-policy.cjs';
 
-const RELEASE = 'https://github.com/yimi1mi/busy-magpie/releases/latest';
-const API = 'https://api.github.com/repos/yimi1mi/busy-magpie/releases/latest';
+import { installApp, RELEASE } from './install.mjs';
 const EXE = 'Busy Magpie.exe';
 
 function pluginVersion() {
@@ -31,10 +30,8 @@ const PLUGIN_VERSION = pluginVersion();
 let launched = false;
 let lastEnsure = 0;
 let installing = false;
-let checking = false;
 let installTried = false;
 let warned = false;
-let releaseCache = null;
 
 function psQuote(value) {
   return String(value).replace(/'/g, "''");
@@ -131,66 +128,17 @@ function spawnApp(exe) {
       windowsHide: true,
     });
     child.on('error', (error) => {
+      launched = false;
       console.warn(`[busy-magpie] could not start ${exe}: ${error.message}`);
     });
     child.unref();
-    launched = true;
-    console.log(`[busy-magpie] started ${exe}`);
+    child.once('spawn', () => {
+      launched = true;
+      console.log(`[busy-magpie] started ${exe}`);
+    });
   } catch (error) {
     console.warn(`[busy-magpie] could not start ${exe}: ${error.message}`);
   }
-}
-
-async function getRelease() {
-  if (releaseCache) return releaseCache;
-  const response = await fetch(API, {
-    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'busy-magpie-plugin' },
-  });
-  if (!response.ok) throw new Error(`GitHub answered ${response.status}`);
-  releaseCache = await response.json();
-  return releaseCache;
-}
-
-async function installApp() {
-  if (process.platform !== 'win32') return '';
-  console.log('[busy-magpie] downloading the latest release installer');
-  notify('Busy Magpie', '正在下载安装包，完成后会自动打开…');
-
-  const release = await getRelease();
-  const asset = (release.assets || []).find((item) => (
-    !/sha256/i.test(item.name) && /win-x64\.exe$/i.test(item.name)
-  ));
-  if (!asset) throw new Error('no Windows x64 installer in the latest release');
-
-  const download = await fetch(asset.browser_download_url, {
-    headers: { 'User-Agent': 'busy-magpie-plugin' },
-  });
-  if (!download.ok) throw new Error(`download answered ${download.status}`);
-  const body = Buffer.from(await download.arrayBuffer());
-  if (asset.digest && asset.digest.startsWith('sha256:')) {
-    const got = createHash('sha256').update(body).digest('hex');
-    if (got !== asset.digest.slice(7).toLowerCase()) {
-      throw new Error('installer checksum does not match the release');
-    }
-  }
-
-  const installer = path.join(tmpdir(), 'busy-magpie-setup.exe');
-  await fsp.writeFile(installer, body);
-  console.log(`[busy-magpie] installing ${release.tag_name} silently`);
-  notify('Busy Magpie', '下载完成，正在安装…');
-  await new Promise((resolve, reject) => {
-    const child = spawn(installer, ['/S'], {
-      stdio: 'ignore',
-      windowsHide: true,
-    });
-    child.on('error', reject);
-    child.on('exit', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`installer exited with ${code}`));
-    });
-  });
-  await fsp.rm(installer, { force: true });
-  return findApp();
 }
 
 // The card touches this file while it runs, so a request can tell a hidden
@@ -241,7 +189,7 @@ function updateInProgress() {
 }
 
 function ensureApp() {
-  if (process.env.BUSY_MAGPIE_NO_LAUNCH === '1' || installing || checking) return;
+  if (process.env.BUSY_MAGPIE_NO_LAUNCH === '1' || installing) return;
   if (updateInProgress()) return;
 
   const state = appState();
@@ -271,7 +219,7 @@ function ensureApp() {
       warned = true;
       console.warn(
         `[busy-magpie] app not found; install it from ${RELEASE} `
-        + 'or set BUSY_MAGPIE_APP to Busy Magpie.exe',
+        + 'or set BUSY_MAGPIE_APP to the application executable',
       );
     }
     return;
@@ -279,15 +227,13 @@ function ensureApp() {
 
   installTried = true;
   installing = true;
-  installApp()
+  installApp({ findApp, notify })
     .then((installed) => {
       if (installed) {
         notify('Busy Magpie', '安装完成，正在启动桌面卡片');
         spawnApp(installed);
-      } else if (!warned) {
-        warned = true;
-        console.warn(`[busy-magpie] installed, but ${EXE} was not found`);
-        notify('Busy Magpie', '安装完成，但没有找到启动文件');
+      } else {
+        throw new Error('installation did not return an application executable');
       }
     })
     .catch((error) => {

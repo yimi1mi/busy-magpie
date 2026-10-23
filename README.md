@@ -33,7 +33,7 @@ magpie 的「路由」页很好看，但它只在 magpie 自己的窗口里。Bu
 
 ## 作为 magpie 插件
 
-这个仓库同时是一个 **magpie 启动器插件**。安装它不会替换桌面卡片，而是在 magpie 第一次加载插件时，把已经安装的 Busy Magpie 桌面卡片启动起来：
+这个仓库同时是一个 **magpie 启动器插件**。magpie 第一次加载插件时，会启动已安装的 Busy Magpie；尚未安装时，插件会自行下载正式发布包，安装后启动，无需运行开发目录里的源码或 dist 产物：
 
 ```bash
 magpie plugin add github:yimi1mi/busy-magpie
@@ -42,11 +42,13 @@ magpie plugin add github:yimi1mi/busy-magpie
 工作方式：
 
 - 插件入口是 `plugin/launch.hooks.mjs`，在 `package.json` 的 `magpie.hooks` 里声明。
-- magpie 第一次用到插件宿主时（通常是第一个 Agent 请求），查找已安装的 `Busy Magpie.exe` 并启动。
-- 没安装时会自动从 GitHub 最新 release 下载安装包，校验 SHA-256 后静默安装到 `%LOCALAPPDATA%\Programs\Busy Magpie`，再启动。设置 `BUSY_MAGPIE_NO_INSTALL=1` 可以关闭自动安装。
+- magpie 第一次用到插件宿主时（通常是第一个 Agent 请求），查找已安装的桌面应用并启动。
+- 没安装时会自动从 GitHub 最新正式 release 下载安装包，校验 SHA-256 后安装并启动。Windows 使用 x64 安装器，静默安装到 `%LOCALAPPDATA%\Programs\Busy Magpie`；macOS 按运行架构选择 arm64 / x64 ZIP，安装到 `~/Applications/Busy Magpie.app`，无需管理员权限。
+- 下载文件保存在系统临时目录中新建的 `busy-magpie-*` 子目录。macOS 解压到 `~/Applications/.busy-magpie-install-*` 暂存目录，检查可执行文件后再整体移动到安装位置；不会覆盖已有应用，结束后清理下载和解压临时文件。下载与安装在后台进行，Agent 请求直接通过。
+- 设置 `BUSY_MAGPIE_NO_INSTALL=1` 可以关闭自动安装；`BUSY_MAGPIE_NO_LAUNCH=1` 同时关闭自动启动。
 - 下载开始、开始安装、安装完成/失败时都会发一条系统通知（Windows 用通知气泡，macOS 用通知中心）。如果系统开了专注模式，通知可能被折叠；插件日志里仍有 `[busy-magpie]` 记录。
 - `plugin/server.mjs` 是一个空 provider stub，避免 magpie 把 Electron 主进程当成供应商插件加载。
-- 如果安装在非默认目录，设置 `BUSY_MAGPIE_APP` 指向 `Busy Magpie.exe` 后重启 magpie：
+- 如果安装在非默认目录，设置 `BUSY_MAGPIE_APP` 指向可执行文件后重启 magpie（Mac 为 `.app/Contents/MacOS/Busy Magpie`）：
 
 ```powershell
 setx BUSY_MAGPIE_APP "D:\Apps\Busy Magpie\Busy Magpie.exe"
@@ -54,7 +56,7 @@ setx BUSY_MAGPIE_APP "D:\Apps\Busy Magpie\Busy Magpie.exe"
 
 插件只负责启动桌面层；透明穿透、实时 trace 和所有界面仍然由 Electron 应用提供。magpie 的插件页面运行在沙盒 iframe 里，既拿不到实时 trace，也不能创建跨应用的透明窗口，所以这里采用启动器，而不是页面插件。
 
-安装内置版本为 `v1.4.0`。桌面卡片、设置和托盘显示当前业务版本；业务包更新后，它可以高于运行环境版本。插件列表的版本仍由插件自身的 `package.json` 决定。
+安装内置版本为 `v1.4.1`。桌面卡片、设置和托盘显示当前业务版本；业务包更新后，它可以高于运行环境版本。插件列表的版本仍由插件自身的 `package.json` 决定。
 
 ## 截图
 
@@ -102,7 +104,7 @@ npm start
 npm run dist:win
 
 # 输出到独立目录，保留原来的安装包和解包目录
-npm run dist:win -- -OutputDirectory dist/local-1.4.0
+npm run dist:win -- -OutputDirectory dist/local-1.4.1
 
 # macOS：dmg + zip（x64 / arm64）
 # 必须在 macOS 上执行
@@ -159,9 +161,11 @@ Windows 安装包是 **per-user** 安装（`nsis.perMachine: false`），默认�
 3. `%LOCALAPPDATA%\Programs\busy-magpie` / `BusyMagpie`
 4. `%LOCALAPPDATA%\Busy Magpie`
 5. `%PROGRAMFILES%\Busy Magpie` / `%PROGRAMFILES(X86)%`
-6. macOS `/Applications/Busy Magpie.app`
+6. macOS `/Applications/Busy Magpie.app`、`~/Applications/Busy Magpie.app`
 
 如果安装到了自定义目录，设置 `BUSY_MAGPIE_APP` 即可；默认路径下不需要配置。
+
+macOS 自动安装使用 `~/Applications/Busy Magpie.app`；插件包仍由 magpie 管理，桌面应用单独安装。开发目录与发布包安装位置无关。
 
 ### 卸载插件时会发生什么
 
