@@ -1,8 +1,8 @@
 {
   "name": "busy-magpie",
   "productName": "Busy Magpie",
-  "version": "1.4.1",
-  "description": "magpie 实时路由桌面挂件 · A transparent, click-through live routing perch for your desktop.",
+  "version": "1.4.2",
+  "description": "magpie 实时路由桌面挂件 · A transparent live routing perch for your desktop.",
   "main": "shell/bootstrap.cjs",
   "exports": {
     "./server": "./plugin/server.mjs",

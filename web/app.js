@@ -424,7 +424,7 @@ function applyTokenPill({ total = 0, title = '', windowLabel = '' } = {}) {
   requestAnimationFrame(reportHitAreas);
 }
 
-// Main lets the pointer in over controls and the drag strip after scaling.
+// Main uses scaled control bounds for hover, dragging and resizing.
 let lastHitKey = '';
 
 function reportHitAreas() {
@@ -467,7 +467,7 @@ function setupQuickMenu() {
   });
 
   const outside = (event) => open && !menu.contains(event.target) && !button.contains(event.target);
-  // Consume the entire outside click before restoring native click-through.
+  // Consume the entire outside click before dismissing the menu.
   // In particular, pressing the drag bar must only dismiss this menu.
   document.addEventListener('pointerdown', (event) => {
     if (!outside(event)) return;

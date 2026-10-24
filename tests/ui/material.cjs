@@ -62,8 +62,8 @@ async function run() {
   assert.equal(await js('window.busy.bootstrap().then(x=>Object.hasOwn(x,"firstRun"))'),false);
   assert.equal(ipcMain.listenerCount('busy:first-run-dismiss'),0);
   assert.equal(ipcMain.listenerCount('busy:open-install-dir'),0);
-  assert.equal(ignored,true);
-  record('a fresh profile starts directly in pointer pass-through mode with no guide or guide API');
+  assert.equal(ignored,false);
+  record('a fresh profile blocks pointer pass-through with no guide or guide API');
   const material=await js('window.busy.bootstrap().then(x=>x.settings.backgroundMaterial)');
   assert.equal(material,'blur');
   assert.equal(await js('document.body.classList.contains("native-material")'),true);
@@ -86,7 +86,7 @@ async function run() {
   cursor={x:-10000,y:-10000};
   await sleep(100);
   assert.deepEqual(win.getPosition(),releasedPosition);
-  assert.equal(ignored,true);
+  assert.equal(ignored,false);
   win.setBounds(originalBounds);
   record('a fresh profile allows long-press dragging and stops moving when released');
   const stored=JSON.parse(fs.readFileSync(path.join(profile,'settings.json'),'utf8')).opacity??1;

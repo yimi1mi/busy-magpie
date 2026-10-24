@@ -71,7 +71,7 @@ async function run(){try{
    record(`${material} ${width}px: four edges and four corners resize and stop on release`);
   }
  }
- cursor={x:-10000,y:-10000};await sleep(100);assert.equal(ignored,true);record('leaving the handles restores pointer pass-through');
+ cursor={x:-10000,y:-10000};await sleep(100);assert.equal(ignored,false);record('leaving the handles keeps panel clicks blocked');
  assert.equal(errors.length,0,errors.join('\n'));finish();
 }catch(error){finish(error);}}
 server.listen(0,'127.0.0.1',async()=>{

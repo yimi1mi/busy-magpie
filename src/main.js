@@ -96,8 +96,8 @@ let layoutMode = false;
 let layoutTimer = null;
 let hoverInteractive = false;
 let hoverKind = null;
-// The renderer measures the controls and drag strip after scaling. Only
-// these regions and the resize border take a pointer while no panel is open.
+// The renderer measures controls, the drag strip and resize handles after
+// scaling so hover affordances match the visible content.
 let hitAreas = { controls: [], resize: [], dragTop: 12, dragBottom: 46 };
 let dragState = null;
 let resizeState = null;
@@ -406,13 +406,13 @@ function createWindow() {
   }
 
   applyTopmost();
-  applyClickThrough();
+  applyPointerInput();
   win.loadFile(RENDERER);
 
   win.once('ready-to-show', () => {
     if (Number(settings.pauseUntil) > Date.now()) return;
     win.showInactive();
-    applyClickThrough();
+    applyPointerInput();
     applyTopmost();
   });
 
@@ -794,15 +794,12 @@ function applyTopmost() {
   win.setAlwaysOnTop(settings.topmost, IS_MAC ? 'floating' : 'normal');
 }
 
-function applyClickThrough() {
+function applyPointerInput() {
   if (!win || win.isDestroyed()) return;
-  if (settingsOpen || settingsClosing || quickMenuOpen || layoutMode || hoverInteractive) {
-    win.setIgnoreMouseEvents(false);
-    win.setFocusable(true);
-  } else {
-    win.setIgnoreMouseEvents(true, { forward: true });
-    win.setFocusable(false);
-  }
+  // Background clicks belong to this panel even when no control is active.
+  win.setIgnoreMouseEvents(false);
+  win.setFocusable(Boolean(settingsOpen || settingsClosing || quickMenuOpen
+    || layoutMode || dragState || resizeState || hoverInteractive));
 }
 
 function showWindow() {
@@ -814,7 +811,7 @@ function showWindow() {
     touchAlive();
   }
   if (!win.isVisible()) win.showInactive();
-  applyClickThrough();
+  applyPointerInput();
   applyTopmost();
   refreshTrayMenu();
 }
@@ -905,7 +902,7 @@ function setQuickMenuOpen(value) {
   quickMenuOpen = open;
   applyWindowMode();
   setHoverInteractive(false);
-  applyClickThrough();
+  applyPointerInput();
   send('magpie:quick-menu', open);
   if (open) win.focus();
 }
@@ -955,16 +952,15 @@ function closeSettingsPanel() {
   send('magpie:settings-panel', { open: false });
   // Let the panel's fade finish before the card takes the pointer again.
   setTimeout(() => {
-    if (win && !win.isDestroyed()) {
-      win.setIgnoreMouseEvents(true, { forward: true });
-      win.setFocusable(false);
-      win.blur();
-      applyTopmost();
-    }
     settingsClosing = false;
     applyWindowMode();
     hoverInteractive = false;
     hoverKind = null;
+    applyPointerInput();
+    if (win && !win.isDestroyed()) {
+      win.blur();
+      applyTopmost();
+    }
     refreshTrayMenu();
   }, 180);
 }
@@ -983,14 +979,13 @@ function setHoverInteractive(value, kind = null) {
   if (hoverInteractive === value && hoverKind === kind) return;
   hoverInteractive = value;
   hoverKind = value ? kind : null;
-  applyClickThrough();
+  applyPointerInput();
   send('magpie:grab', hoverKind === 'drag');
   send('magpie:resize', hoverKind === 'resize');
 }
 
-// Only the top strip is allowed to catch the pointer while the card is
-// otherwise click-through. Hovering it wakes the strip up; the renderer
-// then turns a long press into a manual drag.
+// Hover selects the drag/resize cursor and makes controls focusable.
+// The renderer turns a long press on the top strip into a manual drag.
 function watchHover() {
   clearInterval(hoverTimer);
   hoverTimer = setInterval(() => {
@@ -1071,8 +1066,7 @@ function endDrag() {
   savePosition();
   hoverInteractive = false;
   if (win && !win.isDestroyed()) {
-    win.setIgnoreMouseEvents(true, { forward: true });
-    win.setFocusable(false);
+    applyPointerInput();
     win.blur();
     applyTopmost();
     send('magpie:grab', false);
@@ -1183,10 +1177,9 @@ function endResize() {
   resizeState = null;
   saveSettings();
   if (win && !win.isDestroyed()) {
-    // The drawer leaves the window interactive; the bare card does not.
+    // Keep keyboard focus in the drawer while it remains open.
     if (!settingsOpen) {
-      win.setIgnoreMouseEvents(true, { forward: true });
-      win.setFocusable(false);
+      applyPointerInput();
       win.blur();
     }
     applyTopmost();
@@ -1228,8 +1221,7 @@ function endLayout() {
   savePosition();
   if (win && !win.isDestroyed()) {
     win.webContents.send('magpie:layout', false);
-    win.setIgnoreMouseEvents(true, { forward: true });
-    win.setFocusable(false);
+    applyPointerInput();
     win.blur();
     applyTopmost();
     send('magpie:grab', false);

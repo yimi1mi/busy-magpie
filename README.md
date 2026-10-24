@@ -2,11 +2,11 @@
 
 **magpie 实时路由桌面挂件**
 
-**A transparent, click-through live routing perch for your desktop.**
+**A transparent live routing perch for your desktop.**
 
-一张透明、无边框、鼠标可以穿透的实时卡片。它读取 magpie 本机 trace，显示当前 Agent 经过了哪些路由、最终落到哪个账号，以及这段时间用了多少 token。
+一张透明、无边框的实时卡片，面板内的鼠标点击不会穿透到下面的窗口。它读取 magpie 本机 trace，显示当前 Agent 经过了哪些路由、最终落到哪个账号，以及这段时间用了多少 token。
 
-A transparent, borderless, click-through card that reads magpie's local trace and shows which routes each agent took, which account it landed on, and the total tokens used.
+A transparent, borderless card that blocks clicks within the panel, reads magpie's local trace and shows which routes each agent took, which account it landed on, and the total tokens used.
 
 [![platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20%C2%B7%20macOS%2012%2B-4b465c?style=flat-square)](#)
 [![electron](https://img.shields.io/badge/Electron-39-8f7cff?style=flat-square)](https://www.electronjs.org/)
@@ -21,7 +21,7 @@ A transparent, borderless, click-through card that reads magpie's local trace an
 magpie 的「路由」页很好看，但它只在 magpie 自己的窗口里。Busy Magpie 把同一段实时链路变成一个常驻桌面的小层：
 
 - **透明、无边框**，不挡桌面。背景不透明度可调，新用户默认 30%；文字和控件保持清晰。
-- **点击穿透**：正常状态下鼠标点击会落到下面的窗口，不抢焦点。
+- **阻挡点击**：面板内的鼠标点击不会落到下面的窗口，主视图和紧凑模式都生效。
 - **不修改 magpie**：只读取本机的 `/v1/magpie/trace` 和 `/v1/magpie/usage`。
 - **同时显示所有正在执行的 Agent**：Agent 在左，magpie 在中间，账号在右；线路在 magpie 处交叉。
 - **会话模式**：左侧按 Agent 与会话分组；缺少会话 ID 时每个请求单独显示。闪电点亮表示最近普通请求申请 Fast，旁边显示 low / high / xhigh / max / ultra 等思考强度文字；缺少信息时隐藏对应标记。申请值缺失时使用当前尝试的发送值；标记不代表服务端已兑现 Fast，也不比较不同模型的思考能力。
@@ -54,9 +54,9 @@ magpie plugin add github:yimi1mi/busy-magpie
 setx BUSY_MAGPIE_APP "D:\Apps\Busy Magpie\Busy Magpie.exe"
 ```
 
-插件只负责启动桌面层；透明穿透、实时 trace 和所有界面仍然由 Electron 应用提供。magpie 的插件页面运行在沙盒 iframe 里，既拿不到实时 trace，也不能创建跨应用的透明窗口，所以这里采用启动器，而不是页面插件。
+插件只负责启动桌面层；透明窗口、实时 trace 和所有界面仍然由 Electron 应用提供。magpie 的插件页面运行在沙盒 iframe 里，既拿不到实时 trace，也不能创建跨应用的透明窗口，所以这里采用启动器，而不是页面插件。
 
-安装内置版本为 `v1.4.1`。桌面卡片、设置和托盘显示当前业务版本；业务包更新后，它可以高于运行环境版本。插件列表的版本仍由插件自身的 `package.json` 决定。
+安装内置版本为 `v1.4.2`。桌面卡片、设置和托盘显示当前业务版本；业务包更新后，它可以高于运行环境版本。插件列表的版本仍由插件自身的 `package.json` 决定。
 
 ## 截图
 
@@ -187,7 +187,7 @@ magpie 插件没有卸载生命周期钩子，所以**移除插件不会自动�
 
 ### 操作菜单
 
-右上角的 `···` 常驻显示，点击可打开设置、隐藏挂件或查看关于与更新。菜单展开后暂时接收鼠标操作；按 Esc、点击卡片空白处或切到其他窗口会收起菜单，恢复点击穿透。方向键可选择菜单项，Enter 执行。
+右上角的 `···` 常驻显示，点击可打开设置、隐藏挂件或查看关于与更新。按 Esc、点击卡片空白处或切到其他窗口会收起菜单；面板始终阻挡鼠标点击。方向键可选择菜单项，Enter 执行。
 
 首次启动直接显示卡片，不再弹出使用指南。
 
@@ -197,7 +197,7 @@ magpie 插件没有卸载生命周期钩子，所以**移除插件不会自动�
 
 ### 移动
 
-- **长按卡片顶部**（中间一排小圆点）约 0.15 秒即可拖动；松手恢复点击穿透。
+- **长按卡片顶部**（中间一排小圆点）约 0.15 秒即可拖动；松手停止移动。
 
 ### 调整大小
 
@@ -207,16 +207,16 @@ magpie 插件没有卸载生命周期钩子，所以**移除插件不会自动�
 - 尺寸会写入 `settings.json`，下次启动保持。
 - 设置或托盘菜单里的「恢复默认位置和大小」可把挂件找回主屏。断开显示器或改变分辨率时，窗口会重新限制到现有屏幕的可用区域。
 
-### 点击穿透
+### 鼠标点击
 
-正常状态以下区域会在鼠标悬停时临时接收指针：
+整张面板都会阻挡鼠标点击，包括主视图、紧凑模式、设置和关于页面。背景透明度只改变外观，不会开启点击穿透。以下区域保留对应操作：
 
 - 顶部约 28px 的移动条
 - 四条边的 7px 缩放带和四角的 14×14px 缩放区域
 - 顶部中间的 token 胶囊
 - 右上角的操作菜单、版本号或更新按钮
 
-其余区域始终穿透，点击会落到下面的窗口。操作菜单、设置、关于、调整位置模式下整张卡片会接收指针，关闭后恢复穿透；点击卡片空白处收起菜单时，该次点击不会再触发卡片上的其他操作。
+点击卡片空白处收起菜单时，该次点击不会再触发卡片上的其他操作；关闭菜单、设置或结束拖动、缩放后，面板仍会阻挡点击。
 
 ## 路由视图
 
@@ -276,7 +276,7 @@ Fast 和思考强度分别显示，缺少哪项就隐藏哪项；两项都没有
 
 顶部 token 胶囊读取 magpie 的 `/v1/magpie/usage`，显示当前时间窗的 token。数字变化时逐位向上滚动（可在设置里关掉，改成直接替换）。悬停可查看输入、输出、缓存用量和缓存命中率。账号卡片保留单次请求的 Token 明细和输出速度；没有输出速度时显示首字延迟。
 
-**单击胶囊切换时间窗**：在设置里勾选的那几个窗口之间循环（默认 今日 → 近 7 天 → 近 30 天 → 全部），选择写进 `settings.json`，重启后保持。胶囊和右上角按钮接收鼠标点击，其余内容区域保持点击穿透。
+**单击胶囊切换时间窗**：在设置里勾选的那几个窗口之间循环（默认 今日 → 近 7 天 → 近 30 天 → 全部），选择写进 `settings.json`，重启后保持。胶囊和右上角按钮接收鼠标点击，其余内容区域也会阻挡点击。
 
 胶囊显示的数值可以在设置里切换：总 token（输入 + 输出 + 缓存读/写）、输入、输出、缓存读。
 

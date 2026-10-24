@@ -8,6 +8,7 @@ function mainHarness({ writeError = false, preview = false, platform = 'win32' }
   const handlers = new Map();
   const listeners = new Map();
   const intervals = new Map();
+  const timeouts = new Map();
   const files = new Map();
   let now = 0;
   let nextTimer = 0;
@@ -32,10 +33,11 @@ function mainHarness({ writeError = false, preview = false, platform = 'win32' }
   autoUpdater.checkForUpdates = async () => {updateChecks++;return null;};
   const app = new EventEmitter();
   Object.assign(app, { setName() {}, getVersion: () => '1.3.10', isPackaged: true,
-    getPath: () => '/test', setPath: (key,value) => paths.set(key,value), setLoginItemSettings() {loginChanges++;}, requestSingleInstanceLock: () => false, quit() {} });
+    getPath: () => '/test', setPath: (key,value) => paths.set(key,value), setLoginItemSettings() {loginChanges++;}, requestSingleInstanceLock: () => false, quit() {}, focus() {} });
   const electron = {
     app, ipcMain: { handle: (name, fn) => handlers.set(name, fn), on: (name, fn) => listeners.set(name, fn) },
-    screen: { getDisplayNearestPoint: () => ({ workArea: {x:0,y:0,width:1920,height:1080} }) },
+    screen: { getDisplayNearestPoint: () => ({ workArea: {x:0,y:0,width:1920,height:1080} }),
+      getCursorScreenPoint: () => ({x:100,y:100}) },
     Notification: { isSupported: () => false }, shell: { openExternal: url => openedUrls.push(url) }, Menu: {},
   };
   Object.defineProperty(electron, 'globalShortcut', {
@@ -47,7 +49,8 @@ function mainHarness({ writeError = false, preview = false, platform = 'win32' }
     __dirname: path.join(root,'src'), process: {platform,argv:preview?['--preview']:[],env:preview?{BUSY_MAGPIE_PREVIEW_DIR:'/test/preview'}:{},on() {}},
     console, URL, AbortController, Date: class extends Date { static now() { return now; } },
     fetch: async () => ({ok:true,json:async()=>({period:'today',input:1})}),
-    setTimeout: () => ++nextTimer, clearTimeout() {}, setImmediate: fn => fn(),
+    setTimeout: fn => {const id=++nextTimer;timeouts.set(id,fn);return id;},
+    clearTimeout: id => timeouts.delete(id), setImmediate: fn => fn(),
     setInterval: fn => {const id=++nextTimer;intervals.set(id,fn);return id;},
     clearInterval: id => intervals.delete(id),
   });
@@ -67,6 +70,19 @@ function mainHarness({ writeError = false, preview = false, platform = 'win32' }
       autostart:()=>applyAutostart(),
       checkUpdates:()=>checkForUpdates(true),
       installUpdate:()=>installUpdate(),
+      attachWindow:value=>{win=value;rendererReady=true;},
+      showWindow:()=>showWindow(),
+      hover:(value,kind)=>setHoverInteractive(value,kind),
+      menu:value=>setQuickMenuOpen(value),
+      openPanel:()=>openSettingsPanel(),
+      closePanel:()=>closeSettingsPanel(),
+      startDrag:()=>startDrag(),
+      endDrag:()=>endDrag(),
+      startResize:direction=>startResize(direction),
+      endResize:()=>endResize(),
+      beginLayout:()=>beginLayout(),
+      endLayout:()=>endLayout(),
+      toggleCompact:()=>toggleCompact(),
     };`, context);
   return {
     api: context.testApi, files, paths, openedUrls,
@@ -75,6 +91,7 @@ function mainHarness({ writeError = false, preview = false, platform = 'win32' }
     period: value => handlers.get('usage:set-period')({}, value),
     setFetch(fn) { context.fetch = fn; },
     tick(ms) {now+=ms;for(const fn of [...intervals.values()])fn();},
+    runTimeouts() {const pending=[...timeouts.values()];timeouts.clear();for(const fn of pending)fn();},
     get installed() {return installed;},
     get updateChecks() {return updateChecks;},
     get loginChanges() {return loginChanges;},
