@@ -13,6 +13,8 @@ const scale = option('scale', '1.75');
 assert.ok(['1', '1.25', '1.5', '1.75', '2'].includes(scale));
 const label = option('label', 'current');
 assert.match(label, /^[a-z0-9-]+$/);
+const initialWorkArea = option('work-area', '');
+assert.ok(!initialWorkArea || /^\d{3,4}x\d{3,4}$/.test(initialWorkArea), 'use --work-area=WIDTHxHEIGHT in DIP');
 const root = path.resolve(__dirname, '../..');
 const output = path.join(root, 'artifacts', 'drag-bounds', `${label}-${scale}`);
 const profile = path.join(output, `profile-${process.pid}`);
@@ -23,9 +25,13 @@ app.getVersion = () => JSON.parse(fs.readFileSync(path.join(root, 'package.json'
 app.commandLine.appendSwitch('force-device-scale-factor', scale);
 app.disableHardwareAcceleration();
 
-let win, finished = false, dragCalls = 0;
+let win, finished = false, dragCalls = 0, resizeCalls = 0;
 let cursor = { x: -10000, y: -10000 };
+let workArea = initialWorkArea ? {
+  x: 0, y: 0, width: Number(initialWorkArea.split('x')[0]), height: Number(initialWorkArea.split('x')[1]),
+} : null;
 const checks = [], samples = [], boundsCalls = [], ignoreCalls = [], rendererErrors = [];
+const layoutSizes = {};
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const js = source => win.webContents.executeJavaScript(source);
 const size = bounds => ({ width: bounds.width, height: bounds.height });
@@ -51,7 +57,7 @@ function finish(error) {
   if (finished) return;
   finished = true;
   fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({
-    ok: !error, scale, electron: process.versions.electron, checks, samples,
+    ok: !error, scale, initialWorkArea, electron: process.versions.electron, checks, samples, layoutSizes,
     boundsCalls, ignoreCalls, rendererErrors, error: error?.stack,
   }, null, 2));
   if (error) console.error(error.stack);
@@ -134,7 +140,11 @@ async function run() {
     assert.equal(boundsCalls.length, writes, 'stationary dragging must not rewrite native bounds');
     record('stationary long press makes no native bounds writes');
 
-    await repeatedDrags('normal', { width: 632, height: 432 });
+    // Startup fits the requested size to the runner's logical work area. Keep
+    // that accepted size fixed across every gesture, rather than assuming a
+    // 632x432 desktop or reading the rounded native bounds back as the target.
+    layoutSizes.normal = await layoutSize();
+    await repeatedDrags('normal', layoutSizes.normal);
     await js('window.busy.toggleCompact()');
     await sleep(120);
     await repeatedDrags('compact', { width: 360, height: 112 });
@@ -142,15 +152,24 @@ async function run() {
     await sleep(120);
 
     const beforeResize = win.getBounds();
+    // Supply room for an actual enlargement even on a CI desktop narrower than
+    // the card. This changes only the app's resize constraint, not its native
+    // window or the DIP/pixel conversion exercised by dragging.
+    workArea = { x: beforeResize.x - 100, y: beforeResize.y - 100,
+      width: beforeResize.width + 400, height: beforeResize.height + 400 };
     cursor = { x: beforeResize.x + beforeResize.width - 2, y: beforeResize.y + beforeResize.height - 2 };
+    const resizeStarts = resizeCalls;
     await js('window.busy.resizeStart("se")');
+    const resizeDeadline = Date.now() + 1500;
+    while (resizeCalls === resizeStarts && Date.now() < resizeDeadline) await sleep(20);
+    assert.equal(resizeCalls, resizeStarts + 1, 'resize must reach the production handler before moving');
     cursor = { x: cursor.x + 44, y: cursor.y + 30 };
     await sleep(90);
     await js('window.busy.resizeEnd()');
     await sleep(80);
-    const saved = await js('window.busy.settingsGet()');
-    const resized = { width: saved.settings.width, height: saved.settings.height };
-    assert.ok(resized.width > 632 && resized.height > 432, 'the resize control must remain usable');
+    const resized = layoutSizes.resized = await layoutSize();
+    assert.ok(resized.width >= beforeResize.width + 40 && resized.height > beforeResize.height,
+      'the resize control must enlarge the actual starting dimensions');
     await repeatedDrags('resized', resized);
 
     for (let attempt = 0; attempt < 4; attempt++) await displayChanged();
@@ -178,11 +197,9 @@ async function run() {
     await sleep(100);
     record('screen recovery preserves logical dimensions and expanded panels');
 
-    const getDisplayMatching = screen.getDisplayMatching;
-    screen.getDisplayMatching = () => ({ ...screen.getPrimaryDisplay(), workArea: { x: 0, y: 0, width: 600, height: 420 } });
+    workArea = { x: 0, y: 0, width: 600, height: 420 };
     await displayChanged();
-    screen.getDisplayMatching = getDisplayMatching;
-    const fitted = await layoutSize();
+    const fitted = layoutSizes.fitted = await layoutSize();
     assert.ok(fitted.width <= 580 && fitted.height <= 400, 'a smaller work area must still fit the card');
     await repeatedDrags('screen fitted', fitted, 3);
     assert.ok(ignoreCalls.length > 0 && ignoreCalls.every(value => value === false),
@@ -201,6 +218,13 @@ server.listen(0, '127.0.0.1', async () => {
     }));
     await app.whenReady();
     screen.getCursorScreenPoint = () => cursor;
+    for (const method of ['getPrimaryDisplay', 'getDisplayNearestPoint', 'getDisplayMatching']) {
+      const original = screen[method].bind(screen);
+      screen[method] = (...args) => {
+        const display = original(...args);
+        return workArea ? { ...display, workArea: { ...workArea } } : display;
+      };
+    }
     app.on('browser-window-created', (_event, created) => {
       win = created;
       // Keep the real HWND and DPI conversion while leaving the user's desktop
@@ -217,6 +241,7 @@ server.listen(0, '127.0.0.1', async () => {
       win.webContents.on('console-message', (_event, level, message) => { if (level >= 3) rendererErrors.push(message); });
     });
     ipcMain.on('busy:drag-start', () => { dragCalls++; });
+    ipcMain.on('busy:resize-start', () => { resizeCalls++; });
     ipcMain.once('busy:ready', () => setTimeout(run, 200));
     const filename = path.join(root, 'src/main.js');
     const main = new Module(filename, module);
