@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
 const Module = require('node:module');
+const assert = require('node:assert/strict');
 
 
 const root = path.resolve(__dirname, '../..');
@@ -13,7 +14,7 @@ app.setPath('userData', profile);
 app.setPath('sessionData', profile);
 app.getVersion = () => JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const checks = [], failures = [], samples = [], errors = [];
+const checks = [], failures = [], samples = [], errors = [], motionStates = [];
 let win, finished = false;
 const server = http.createServer((req, res) => {
   const data = req.url.includes('/usage')
@@ -50,11 +51,14 @@ async function finish(error) {
       (await win.webContents.capturePage()).toPNG());
   }
   fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({
-    ok: !failures.length, checks, failures, samples, rendererErrors: errors,
+    ok: !failures.length, checks, failures, samples, motionStates, rendererErrors: errors,
     electron: process.versions.electron,
   }, null, 2));
   server.closeAllConnections(); server.close();
-  if (win && !win.isDestroyed()) win.destroy();
+  if (win && !win.isDestroyed()) {
+    if (win.webContents.debugger.isAttached()) win.webContents.debugger.detach();
+    win.destroy();
+  }
   app.exit(failures.length ? 1 : 0);
 }
 const rectCode = `r=>({x:r.x,y:r.y,width:r.width,height:r.height})`;
@@ -78,6 +82,32 @@ async function layoutTime(mode) {
   return js(`(()=>{const list=document.getAnimations().filter(a=>a.effect.getKeyframes().some(k=>k.translate));
     for(const a of list){${mode === 'pause' ? 'a.pause();a.currentTime=0;' : 'a.finish();'}}return list.length;})()`);
 }
+async function motionState(name) {
+  const state = await js(`(async()=>{
+    const data=await window.busy.bootstrap();
+    const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const quietMotion=Boolean(data.settings.quietMotion);
+    return {reduced,noPreference:matchMedia('(prefers-reduced-motion: no-preference)').matches,
+      quietMotion,quietClass:document.body.classList.contains('noanim'),motionReduced:reduced||quietMotion};
+  })()`);
+  motionStates.push({ name, ...state });
+  console.log('MOTION', name, JSON.stringify(state));
+  return state;
+}
+async function emulateMotion(value) {
+  // Override only this isolated page; preserve the OS and product preferences.
+  if (!win.webContents.debugger.isAttached()) win.webContents.debugger.attach();
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-motion', value }],
+  });
+  const state = await motionState(value);
+  assert.equal(state.quietMotion, false, 'the test profile must not disable motion');
+  assert.equal(state.quietClass, false, 'the renderer must have applied the test profile');
+  assert.equal(state.reduced, value === 'reduce', 'CDP reduced-motion override must take effect');
+  assert.equal(state.noPreference, value === 'no-preference', 'CDP no-preference override must take effect');
+  assert.equal(state.motionReduced, value === 'reduce', 'the animation case must explicitly enable motion');
+  check(`the isolated renderer applies ${value} motion preference`, true, state);
+}
 async function run() {
   try {
     const send = win.webContents.send.bind(win.webContents);
@@ -90,6 +120,15 @@ async function run() {
       send('magpie:trace', { pid: 12345, seq: ++seq, totals: { requests }, routes });
       if (delay) await sleep(delay);
     };
+    await motionState('host');
+    await emulateMotion('reduce');
+    await update([route(-2), route(-1)]);
+    await update([route(-3)], 50);
+    const reduced = await geometry('reduced-motion behavior');
+    check('reduced motion keeps the hub visible without flights or layout transitions',
+      reduced.hubInside && reduced.birds.length === 0 && reduced.ghosts.length === 0
+        && await layoutTime('pause') === 0, reduced);
+    await emulateMotion('no-preference');
     const a = route(1), b = route(2);
     await update([a]); await sleep(600); await layoutTime('finish');
     const before = (await geometry('single baseline')).hub;
