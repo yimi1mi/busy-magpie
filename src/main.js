@@ -844,7 +844,11 @@ function toggleCompact() {
 
 function recoverWindow() {
   if (!win || win.isDestroyed()) return;
-  const bounds = win.getBounds();
+  const bounds = {
+    ...win.getBounds(),
+    width: frame.compact ? COMPACT_WIDTH : settings.width,
+    height: frame.compact ? COMPACT_HEIGHT : settings.height,
+  };
   const area = screen.getDisplayMatching(bounds).workArea;
   const fitted = fitWindowBounds(bounds, area);
   if (dragState) endDrag();
@@ -1039,6 +1043,12 @@ function startDrag() {
     pointerY: point.y,
     windowX: x,
     windowY: y,
+    // Native bounds round outward at fractional Windows DPI. Reusing their
+    // size on each drag would accumulate that rounding across gestures.
+    width: frame.compact ? COMPACT_WIDTH : settings.width,
+    height: frame.compact ? COMPACT_HEIGHT : settings.height,
+    lastX: x,
+    lastY: y,
     timer: null,
     max: null,
   };
@@ -1048,10 +1058,12 @@ function startDrag() {
       return;
     }
     const now = screen.getCursorScreenPoint();
-    win.setPosition(
-      Math.round(state.windowX + now.x - state.pointerX),
-      Math.round(state.windowY + now.y - state.pointerY),
-    );
+    const x = Math.round(state.windowX + now.x - state.pointerX);
+    const y = Math.round(state.windowY + now.y - state.pointerY);
+    if (x === state.lastX && y === state.lastY) return;
+    win.setBounds({ x, y, width: state.width, height: state.height }, false);
+    state.lastX = x;
+    state.lastY = y;
   }, 16);
   state.max = setTimeout(endDrag, 15000);
   dragState = state;
