@@ -908,7 +908,7 @@ body.menu-open .stage-canvas {
 .stage > .wire { opacity: 0; }
 .node[data-layout-key], .hub { transform-origin: top left; }
 
-.routing-ghost {
+.stage-canvas > .routing-ghost {
   position: absolute;
   display: block;
   z-index: 1;
@@ -1812,11 +1812,10 @@ body.menu-open .stage-canvas {
 
 .fan-hub {
   position: absolute;
-  left: 50%;
-  top: 50%;
+  inset: 0;
+  margin: auto;
   width: 76px;
   height: 76px;
-  transform: translate(-50%, -50%);
 }
 
 .fan-hub .hub-card {

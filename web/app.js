@@ -1573,7 +1573,7 @@ function animateNumber(target, value) {
   if (oldAnimation) cancelAnimationFrame(oldAnimation);
 
   const tick = (now) => {
-    const t = Math.min(1, (now - start) / duration);
+    const t = Math.max(0, Math.min(1, (now - start) / duration));
     const eased = 1 - Math.pow(1 - t, 3);
     const current = Math.round(previous + (next - previous) * eased);
     target.textContent = current.toLocaleString('zh-CN');

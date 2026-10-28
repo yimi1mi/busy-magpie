@@ -53,6 +53,15 @@ jobs:
       - name: Verify Windows fallback pointer routing
         if: runner.os == 'Windows'
         run: node node_modules/electron/cli.js tests/ui/pointer-input.cjs --native --fallback
+      - name: Verify Windows drag bounds at 100 percent scaling
+        if: runner.os == 'Windows'
+        run: node node_modules/electron/cli.js tests/ui/drag-bounds.cjs --scale=1 --label=ci
+      - name: Verify Windows drag bounds at 175 percent scaling
+        if: runner.os == 'Windows'
+        run: node node_modules/electron/cli.js tests/ui/drag-bounds.cjs --scale=1.75 --label=ci
+      - name: Verify Windows bird animation layout
+        if: runner.os == 'Windows'
+        run: node node_modules/electron/cli.js tests/ui/routing-animation-bounds.cjs
       - run: npm run ${{ matrix.script }}
       - name: Verify Windows business updates and rollback
         if: runner.os == 'Windows'
@@ -78,6 +87,8 @@ jobs:
             artifacts/business-update-e2e/**/electron.stderr.log
             artifacts/business-update-e2e/**/lifecycle.ndjson
             artifacts/pointer-input*/result.json
+            artifacts/drag-bounds*/**/result.json
+            artifacts/routing-animation-bounds/**/result.json
           if-no-files-found: ignore
       - name: Verify and describe release assets
         run: node tools/release-artifacts.cjs prepare --directory dist --platform ${{ matrix.artifact }}
