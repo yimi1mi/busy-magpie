@@ -67,6 +67,7 @@ const el = {
   fanHub: $('fanHub'),
   fanBirdPath: $('fanBirdPath'),
   multiFooter: $('multiFooter'),
+  layoutOverlay: $('layoutOverlay'),
 };
 
 let settings = {
@@ -676,6 +677,70 @@ function setupResizeHandles() {
   window.addEventListener('pointerup', finish, true);
   window.busy.onResize?.((value) => {
     document.body.classList.toggle('can-resize', Boolean(value));
+  });
+}
+
+// Layout mode ends on a click and moves on a drag. The overlay was a native
+// drag region before; that swallowed the clicks completion depends on, and the
+// card no longer takes keyboard focus, so Esc alone cannot be the exit.
+function setupLayoutOverlay() {
+  const overlay = el.layoutOverlay;
+  if (!overlay || !window.busy?.dragStart || !window.busy?.endLayout) return;
+  const gesture = createDragGesture();
+  let dragging = false;
+
+  const begin = () => {
+    dragging = true;
+    overlay.classList.add('dragging');
+    window.busy.dragStart();
+  };
+
+  const finish = (event) => {
+    if (!dragging && !gesture.pressing) return;
+    if (event && overlay.hasPointerCapture?.(event.pointerId)) {
+      overlay.releasePointerCapture(event.pointerId);
+    }
+    if (dragging) {
+      dragging = false;
+      overlay.classList.remove('dragging');
+      gesture.cancel();
+      window.busy.dragEnd();
+      return;
+    }
+    if (gesture.up() === 'click') window.busy.endLayout();
+  };
+
+  overlay.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || !layout) return;
+    if (!gesture.down(event.clientX, event.clientY, event.button)) return;
+    event.preventDefault();
+    try {
+      overlay.setPointerCapture(event.pointerId);
+    } catch {
+      // Main-process polling still ends the drag if the release is lost.
+    }
+  });
+
+  window.addEventListener('pointermove', (event) => {
+    if (dragging) {
+      if (event.buttons === 0) finish(event);
+      return;
+    }
+    if (!gesture.pressing) return;
+    if (gesture.move(event.clientX, event.clientY) === 'start') begin();
+  }, true);
+
+  window.addEventListener('pointerup', finish, true);
+  overlay.addEventListener('pointercancel', (event) => {
+    gesture.cancel();
+    overlay.classList.remove('dragging');
+    if (dragging) {
+      dragging = false;
+      window.busy.dragEnd();
+    }
+    if (event && overlay.hasPointerCapture?.(event.pointerId)) {
+      overlay.releasePointerCapture(event.pointerId);
+    }
   });
 }
 
@@ -2382,6 +2447,7 @@ async function boot() {
   reducedMotion.addEventListener('change', render);
   setupDragBar();
   setupDragBar($('compactDragBar'));
+  setupLayoutOverlay();
   setupResizeHandles();
   setupSettingsPanel();
   setupAbout();

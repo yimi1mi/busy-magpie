@@ -2209,9 +2209,11 @@ body.layout .layout-overlay {
   display: grid;
 }
 
-body.layout .card,
-body.layout .layout-overlay {
-  -webkit-app-region: drag;
+/* Layout mode is driven by pointer events in app.js: a click ends it and a
+   drag moves the card. A native drag region would swallow those clicks, and
+   the card no longer takes keyboard focus, so Esc cannot be the only exit. */
+.layout-overlay {
+  -webkit-app-region: no-drag;
 }
 
 .layout-copy {
