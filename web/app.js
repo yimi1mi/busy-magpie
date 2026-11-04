@@ -14,6 +14,7 @@ import { wireCurve, hubCurve, glideProgress } from './flight-path.mjs';
 import { stagedRoutes, wireState, nextRestExpiry } from './routing-state.mjs';
 import { requestActive, requestGroupKey, redactDiagnostic, groupRequests } from './request-model.mjs';
 import { projectRequestModes } from './request-modes.mjs';
+import { createDragGesture } from './drag-gesture.mjs';
 
 const $ = (id) => document.getElementById(id);
 
@@ -567,31 +568,39 @@ function setParts(target, parts) {
 
 function setupDragBar(bar = $('dragBar')) {
   if (!bar || !window.busy?.dragStart) return;
-  let press = null;
-  let dragging = false;
+  // A press on the strip either drags or clicks. The gesture starts the drag
+  // as soon as the pointer moves past 4px, or after a short hold, so moving
+  // never drops a press the way the old 9px cancel rule did.
+  const gesture = createDragGesture();
+  let holdTimer = 0;
   let suppressClick = false;
 
-  const cancelPress = () => {
-    if (!press) return;
-    clearTimeout(press.timer);
-    press = null;
+  const clearHold = () => {
+    clearTimeout(holdTimer);
+    holdTimer = 0;
+  };
+
+  const begin = () => {
+    clearHold();
+    suppressClick = true;
+    bar.classList.add('dragging');
+    window.busy.dragStart();
   };
 
   const finish = (event) => {
-    cancelPress();
-    if (dragging) {
-      dragging = false;
-      bar.classList.remove('dragging');
-      window.busy.dragEnd();
-      window.setTimeout(() => { suppressClick = false; }, 420);
-    }
+    clearHold();
+    const outcome = gesture.up();
     if (event && bar.hasPointerCapture?.(event.pointerId)) {
       bar.releasePointerCapture(event.pointerId);
     }
+    if (outcome !== 'dragged') return;
+    bar.classList.remove('dragging');
+    window.busy.dragEnd();
+    window.setTimeout(() => { suppressClick = false; }, 420);
   };
 
   bar.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return;
+    if (!gesture.down(event.clientX, event.clientY, event.button)) return;
     event.preventDefault();
     event.stopPropagation();
     try {
@@ -599,27 +608,24 @@ function setupDragBar(bar = $('dragBar')) {
     } catch {
       // A release that lands outside the window still ends the drag.
     }
-    press = {
-      x: event.clientX,
-      y: event.clientY,
-      timer: 0,
-    };
-    press.timer = window.setTimeout(() => {
-      if (!press) return;
-      press = null;
-      dragging = true;
-      suppressClick = true;
-      bar.classList.add('dragging');
-      window.busy.dragStart();
-    }, 150);
+    clearHold();
+    holdTimer = window.setTimeout(() => {
+      holdTimer = 0;
+      if (gesture.longPress() === 'start') begin();
+    }, gesture.holdMs);
   });
 
-  bar.addEventListener('pointermove', (event) => {
-    if (!press) return;
-    if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > 9) {
-      cancelPress();
+  // Listening on the window keeps the drag alive when pointer capture is lost
+  // to a native focus change; a release we never saw still ends it.
+  const onMove = (event) => {
+    if (gesture.dragging && event.buttons === 0) {
+      finish(event);
+      return;
     }
-  });
+    if (!gesture.pressing) return;
+    if (gesture.move(event.clientX, event.clientY) === 'start') begin();
+  };
+  window.addEventListener('pointermove', onMove, true);
 
   bar.addEventListener('pointerup', finish);
   bar.addEventListener('pointercancel', finish);
