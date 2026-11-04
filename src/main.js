@@ -374,6 +374,14 @@ function createWindow() {
     minimizable: false,
     fullscreenable: false,
     show: false,
+    // The card must never be activatable. On Windows Electron's setFocusable()
+    // also calls SetSkipTaskbar(), so a focusable window is re-added to the
+    // taskbar (ITaskbarList::AddTab) as the pointer moves over the card — that
+    // is what made the taskbar button flash and stole focus from other apps.
+    // 'toolbar' adds WS_EX_TOOLWINDOW, keeping the card out of the taskbar and
+    // Alt+Tab even beyond Electron's own handling.
+    focusable: false,
+    ...(IS_WIN ? { type: 'toolbar' } : {}),
     skipTaskbar: true,
     alwaysOnTop: settings.topmost,
     backgroundColor: '#00000000',
@@ -794,12 +802,39 @@ function applyTopmost() {
   win.setAlwaysOnTop(settings.topmost, IS_MAC ? 'floating' : 'normal');
 }
 
+// The card never takes keyboard focus. On Windows Electron's setFocusable()
+// also calls SetSkipTaskbar(), so flipping it to true would add a taskbar
+// button (ITaskbarList::AddTab) and let the window activate — stealing the
+// foreground from other applications. If anything still makes the window
+// focusable, undo it; the call is guarded so the common case touches nothing.
+function ensureUnfocusable() {
+  if (!win || win.isDestroyed()) return;
+  let focusable = false;
+  try {
+    focusable = typeof win.isFocusable === 'function' && win.isFocusable();
+  } catch {
+    focusable = false;
+  }
+  if (!focusable) return;
+  win.setFocusable(false);
+  if (typeof win.setSkipTaskbar === 'function') win.setSkipTaskbar(true);
+}
+
 function applyPointerInput() {
   if (!win || win.isDestroyed()) return;
   // Background clicks belong to this panel even when no control is active.
   win.setIgnoreMouseEvents(false);
-  win.setFocusable(Boolean(settingsOpen || settingsClosing || quickMenuOpen
-    || layoutMode || dragState || resizeState || hoverInteractive));
+  ensureUnfocusable();
+}
+
+// The settings pane holds real text fields, so it is the one place that needs
+// the keyboard. Windows adds a taskbar button while the window is focusable,
+// so the button exists only for as long as the pane is open; closing it runs
+// applyPointerInput() again and removes the button.
+function focusForKeyboard() {
+  if (!win || win.isDestroyed()) return;
+  win.setFocusable(true);
+  win.focus();
 }
 
 function showWindow() {
@@ -908,7 +943,6 @@ function setQuickMenuOpen(value) {
   setHoverInteractive(false);
   applyPointerInput();
   send('magpie:quick-menu', open);
-  if (open) win.focus();
 }
 
 function openSettingsPanel(mode = 'settings') {
@@ -925,7 +959,7 @@ function openSettingsPanel(mode = 'settings') {
       send('magpie:settings-panel', { open: true, mode });
     }
     win.showInactive();
-    win.focus();
+    focusForKeyboard();
     return;
   }
   if (!win.isVisible()) win.showInactive();
@@ -936,8 +970,7 @@ function openSettingsPanel(mode = 'settings') {
   applyWindowMode();
   hoverInteractive = false;
   win.setIgnoreMouseEvents(false);
-  win.setFocusable(true);
-  win.focus();
+  focusForKeyboard();
   // The panel covers the card; the window itself never changes size.
   send('magpie:settings-panel', { open: true, mode });
   refreshTrayMenu();
@@ -1036,8 +1069,6 @@ function startDrag() {
   const [x, y] = win.getPosition();
   hoverInteractive = false;
   win.setIgnoreMouseEvents(false);
-  win.setFocusable(true);
-  win.focus();
   const state = {
     pointerX: point.x,
     pointerY: point.y,
@@ -1097,8 +1128,6 @@ function startResize(direction = 'se') {
   const area = display.workArea;
   hoverInteractive = false;
   win.setIgnoreMouseEvents(false);
-  win.setFocusable(true);
-  win.focus();
   const state = {
     direction: dir,
     pointerX: point.x,
@@ -1213,10 +1242,7 @@ function beginLayout() {
   layoutMode = true;
   if (!win.isVisible()) win.showInactive();
   win.setIgnoreMouseEvents(false);
-  win.setFocusable(true);
   win.setAlwaysOnTop(true, IS_MAC ? 'floating' : 'normal');
-  if (IS_MAC) app.focus({ steal: true });
-  win.focus();
   win.webContents.send('magpie:layout', true);
   send('magpie:grab', true);
   clearTimeout(layoutTimer);
