@@ -14,4 +14,13 @@ function fitWindowBounds(bounds, area) {
   return { x: Math.round(Math.max(area.x, Math.min(bounds.x, area.x + area.width - width))),
     y: Math.round(Math.max(area.y, Math.min(bounds.y, area.y + area.height - height))), width, height };
 }
-module.exports = {fitWindowBounds};
+// Folding the card keeps the position the wide window was placed at on its
+// right edge: the compact strip ends where the full card ended, instead of
+// sliding a whole COMPACT_WIDTH-worth of pixels to the left.
+function anchorRightEdge(bounds, width) {
+  return {
+    x: Math.round(bounds.x + bounds.width - width),
+    y: Math.round(bounds.y),
+  };
+}
+module.exports = {fitWindowBounds, anchorRightEdge};

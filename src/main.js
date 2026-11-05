@@ -14,7 +14,7 @@ const autoUpdater = shellRuntime?.updater || require('electron-updater').autoUpd
 const UPDATES_ENABLED = shellRuntime ? shellRuntime.updatesEnabled : app.isPackaged && !process.argv.includes('--preview');
 const { heartbeat } = require('./launch-policy.cjs');
 const { parseGateway, gatewayProblem } = require('./gateway-config.cjs');
-const { fitWindowBounds } = require('./window-bounds.cjs');
+const { fitWindowBounds, anchorRightEdge } = require('./window-bounds.cjs');
 const { windowMaterial } = require('./window-material.cjs');
 const MATERIAL = windowMaterial(process.platform, os.release());
 let activeMaterial = MATERIAL.kind;
@@ -854,11 +854,19 @@ function showWindow() {
 function applyWindowMode() {
   if (!win || win.isDestroyed()) return;
   const compact = Boolean(settings.compact && !settingsOpen && !settingsClosing && !quickMenuOpen);
+  const wasCompact = frame.compact;
   const bounds = win.getBounds();
   if (frame.compact && !compact && settings.compact) compactPosition = { x: bounds.x, y: bounds.y };
   const width = compact ? COMPACT_WIDTH : settings.width;
   const height = compact ? COMPACT_HEIGHT : settings.height;
-  const point = compact && compactPosition ? compactPosition : bounds;
+  // Folding hangs the compact strip off the wide card's own right edge, so the
+  // two modes share one anchor instead of the strip sliding to the left. A
+  // stored compactPosition means the settings pane or the quick menu was
+  // covering the strip: that spot already sits where the user left it.
+  const folding = !wasCompact && compact && !compactPosition;
+  const point = folding
+    ? anchorRightEdge(bounds, COMPACT_WIDTH)
+    : compact && compactPosition ? compactPosition : bounds;
   const position = clampBounds(point.x, point.y, width, height);
   win.setBounds({ ...position, width, height }, false);
   if (compact || !settings.compact) compactPosition = null;

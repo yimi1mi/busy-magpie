@@ -351,7 +351,7 @@ Fast 和思考强度分别显示，缺少哪项就隐藏哪项；两项都没有
 | `enabledPeriods` | 单击胶囊时循环哪几个窗口；至少一个，选中的才参与滚动 |
 | `pillMetric` | 胶囊数值：`total` / `input` / `output` / `cache` |
 | `rollTokens` | 数字是否逐位滚动；`false` 直接替换 |
-| `compact` | 是否使用紧凑模式；默认 `false` |
+| `compact` | 是否使用紧凑模式；默认 `false`。折叠时紧凑窗口以常规窗口的右边缘为定位点，右边缘保持不动 |
 | `quietMotion` | 是否使用安静模式；默认 `false`，开启后仍刷新请求和用量数据 |
 | `showQuota` | 账号卡片里是否显示额度条 |
 | `showTiming` | 是否显示输出速度、首字延迟及耗时明细 |
