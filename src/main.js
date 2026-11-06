@@ -400,7 +400,7 @@ function createWindow() {
   });
   frame = { ...frame, compact, cardHeight: height - 32, windowHeight: height };
   if (MATERIAL.kind === 'blur') {
-    try { windowSurface = (shellRuntime?.attachBlur || require('../shell/windows-blur.cjs').attachBlur)(win); }
+    try { windowSurface = (shellRuntime?.attachBlur || require('../shell/windows-blur.cjs').attachBlur)(win, log); }
     catch (error) { activeMaterial = 'none'; log(`background blur: ${error.message}`); }
   }
 
