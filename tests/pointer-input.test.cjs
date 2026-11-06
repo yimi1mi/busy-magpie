@@ -139,4 +139,38 @@ for (const platform of ['win32', 'darwin']) {
     assert.equal(h.focusable(), false, 'the card must be put back to non-focusable');
     assert.deepEqual(h.taskbar, [true], 'the stray taskbar button must be removed');
   });
+
+  // A dots click that arrives while the settings pane is fading out used to be
+  // dropped by a silent guard. It is now parked and replayed once the pane has
+  // closed, so the click the user made is the click that opens the menu.
+  test(`${platform}: opening the menu closes the settings pane instead of failing`, () => {
+    const h = pointerHarness(platform);
+    h.api.openPanel();
+    h.api.menu(true);
+    assert.equal(h.api.menuPending(), true, 'the open request is parked while the pane fades');
+    h.runTimeouts();
+    assert.equal(h.api.menuOpen(), true, 'the parked request opens the menu once the pane is gone');
+    assert.equal(h.blocksClicks(), true, 'the card must keep blocking clicks');
+  });
+
+  // The input policy used to be reasserted only by the hover poll, which every
+  // open mode suppressed. The assertion loop does it regardless of mode.
+  test(`${platform}: the assertion loop keeps the panel blocking clicks`, () => {
+    const h = pointerHarness(platform);
+    h.api.watchPointerInput();
+    h.tick(1500);
+    assert.equal(h.blocksClicks(), true, 'the periodic assertion must keep clicks blocked');
+    assert.equal(h.focusable(), false, 'the periodic assertion must not steal focus');
+  });
+
+  // Locking the screen or suspending the machine resets input state at the
+  // compositor level. Both events must reassert the policy.
+  test(`${platform}: waking the machine reasserts the input policy`, () => {
+    const h = pointerHarness(platform);
+    h.api.watchPowerEvents();
+    h.powerMonitor.emit('resume');
+    h.powerMonitor.emit('unlock-screen');
+    assert.equal(h.blocksClicks(), true, 'resume must not leave the card click-through');
+    assert.ok(h.calls.every(value => value === false), 'resume must never enable click-through');
+  });
 }

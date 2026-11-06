@@ -454,14 +454,40 @@ function reportHitAreas() {
   window.busy.setHitAreas(payload);
 }
 
-function setupQuickMenu() {
+function setupQuickMenu(initiallyOpen = false) {
   const button = $('quickMenuToggle');
   const menu = $('quickMenu');
   const items = [...menu.querySelectorAll('[role="menuitem"]')];
   let open = false;
 
-  button.addEventListener('click', () => window.busy.toggleMenu());
-  $('compactMenu').addEventListener('click', () => window.busy.toggleMenu());
+  // One place that puts the menu's DOM in step with the truth main reports.
+  // The push channel and a toggle reply both run through it, so a dropped
+  // message can no longer leave the card showing a menu main believes closed.
+  const apply = (value) => {
+    open = Boolean(value);
+    menu.hidden = !open;
+    button.setAttribute('aria-expanded', String(open));
+    $('compactMenuItem').textContent = settings.compact ? '展开主界面' : '紧凑模式';
+    document.body.classList.toggle('menu-open', open);
+    $('quickMenuError').hidden = true;
+    if (open) items[0].focus({ preventScroll: true });
+    else if (menu.contains(document.activeElement)) button.focus({ preventScroll: true });
+  };
+
+  // The reply carries the state main settled on, which is authoritative even
+  // when main had to defer the request until the settings pane finished
+  // fading. A lost reply still leaves the push channel as the source of truth.
+  const toggle = async () => {
+    try {
+      const result = await window.busy.toggleMenu();
+      if (result && typeof result.open === 'boolean') apply(result.open);
+    } catch {
+      // Nothing to do: the menu stays where the last confirmed state put it.
+    }
+  };
+
+  button.addEventListener('click', toggle);
+  $('compactMenu').addEventListener('click', toggle);
   $('compactExpand').addEventListener('click', () => window.busy.toggleCompact());
   menu.addEventListener('click', (event) => {
     const item = event.target.closest('[data-menu-action]');
@@ -496,21 +522,14 @@ function setupQuickMenu() {
     if (next !== undefined) items[next].focus();
   });
 
-  window.busy.onQuickMenu((value) => {
-    open = Boolean(value);
-    menu.hidden = !open;
-    button.setAttribute('aria-expanded', String(open));
-    $('compactMenuItem').textContent = settings.compact ? '展开主界面' : '紧凑模式';
-    document.body.classList.toggle('menu-open', open);
-    $('quickMenuError').hidden = true;
-    if (open) items[0].focus({ preventScroll: true });
-    else if (menu.contains(document.activeElement)) button.focus({ preventScroll: true });
-  });
+  window.busy.onQuickMenu(apply);
   window.busy.onActionError((error) => {
     $('quickMenuError').textContent = error;
     $('quickMenuError').hidden = false;
   });
   new ResizeObserver(() => requestAnimationFrame(reportHitAreas)).observe(button.parentElement);
+  // Bootstrap reports what main believes, so a reload cannot start out of step.
+  apply(initiallyOpen);
 }
 
 function setupTokenPill() {
@@ -2452,7 +2471,7 @@ async function boot() {
   setupSettingsPanel();
   setupAbout();
   setupTokenPill();
-  setupQuickMenu();
+  setupQuickMenu(Boolean(data.quickMenu));
   window.busy.ready?.();
   if (data.update) renderUpdateState?.(data.update);
 }

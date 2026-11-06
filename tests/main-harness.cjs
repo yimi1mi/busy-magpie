@@ -28,6 +28,8 @@ function mainHarness({ writeError = false, preview = false, platform = 'win32' }
     appendFileSync() {},
   };
   const autoUpdater = new EventEmitter();
+  // Lock/unlock and suspend/resume reach main through this emitter.
+  const powerMonitor = new EventEmitter();
   autoUpdater.quitAndInstall = () => { installed++; };
   autoUpdater.downloadUpdate = async () => {};
   autoUpdater.checkForUpdates = async () => {updateChecks++;return null;};
@@ -39,6 +41,7 @@ function mainHarness({ writeError = false, preview = false, platform = 'win32' }
     screen: { getDisplayNearestPoint: () => ({ workArea: {x:0,y:0,width:1920,height:1080} }),
       getCursorScreenPoint: () => ({x:100,y:100}) },
     Notification: { isSupported: () => false }, shell: { openExternal: url => openedUrls.push(url) }, Menu: {},
+    powerMonitor,
   };
   Object.defineProperty(electron, 'globalShortcut', {
     get() { globalShortcutReads++; return {}; },
@@ -83,9 +86,13 @@ function mainHarness({ writeError = false, preview = false, platform = 'win32' }
       beginLayout:()=>beginLayout(),
       endLayout:()=>endLayout(),
       toggleCompact:()=>toggleCompact(),
+      menuOpen:()=>quickMenuOpen,
+      menuPending:()=>pendingQuickMenuOpen,
+      watchPointerInput:()=>watchPointerInput(),
+      watchPowerEvents:()=>watchPowerEvents(),
     };`, context);
   return {
-    api: context.testApi, files, paths, openedUrls,
+    api: context.testApi, files, paths, openedUrls, powerMonitor,
     ipcChannels: [...handlers.keys(), ...listeners.keys()],
     save: input => handlers.get('settings:save')({}, input),
     period: value => handlers.get('usage:set-period')({}, value),

@@ -12,10 +12,15 @@ function attachBlur(win) {
   const hwnd = handle.length === 8 ? handle.readBigUInt64LE() : BigInt(handle.readUInt32LE());
   let regionSize = '';
 
-  function clip() {
+  // `force` rebuilds the region even when the size is unchanged. The cache
+  // key only sees width, height and DPI, so a compositor or display reset that
+  // invalidates the region behind our back would otherwise stay wrong until
+  // the card happened to be resized. Event objects are never `true`, so the
+  // ordinary move/resize path keeps its cheap early return.
+  function clip(force = false) {
     const [width, height] = win.getSize();
     const key = `${width}/${height}/${getDpi(hwnd)}`;
-    if (key === regionSize) return;
+    if (force !== true && key === regionSize) return;
     const radius = Math.min(22, Math.floor(width / 2), Math.floor(height / 2));
     const rects = [];
     const insetAt = y => Math.floor(radius - Math.sqrt(radius * radius - (radius - y - 0.5) ** 2));
@@ -40,7 +45,9 @@ function attachBlur(win) {
     const ok = setComposition(hwnd, { attribute: 19,
       data: { state: 3, flags: 0, color: 0, animation: 0 }, size: koffi.sizeof(AccentPolicy) });
     if (!ok) throw new Error('Windows rejected the background blur');
-    clip();
+    // refresh() is only called on events that can invalidate the region —
+    // show, focus, resume, unlock, a display change — so it rebuilds it.
+    clip(true);
   }
 
   refresh();

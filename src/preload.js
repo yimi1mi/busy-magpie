@@ -30,7 +30,9 @@ contextBridge.exposeInMainWorld('busy', {
   resizeEnd: () => ipcRenderer.send('busy:resize-end'),
   setUsagePeriod: (period) => ipcRenderer.invoke('usage:set-period', period),
   setHitAreas: (areas) => ipcRenderer.send('busy:hit-areas', areas),
-  toggleMenu: () => ipcRenderer.send('busy:menu-toggle'),
+  // Resolves with the state main settled on, so the renderer never has to
+  // guess whether its menu is really open.
+  toggleMenu: () => ipcRenderer.invoke('busy:menu-toggle'),
   closeMenu: () => ipcRenderer.send('busy:menu-close'),
   toggleCompact: () => ipcRenderer.send('busy:compact-toggle'),
   menuAction: (action) => ipcRenderer.send('busy:menu-action', action),
