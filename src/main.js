@@ -15,7 +15,7 @@ const UPDATES_ENABLED = shellRuntime ? shellRuntime.updatesEnabled : app.isPacka
 const { heartbeat } = require('./launch-policy.cjs');
 const { parseGateway, gatewayProblem } = require('./gateway-config.cjs');
 const { fitWindowBounds, anchorRightEdge } = require('./window-bounds.cjs');
-const { windowsPointerState } = require('./pointer-diagnostic.cjs');
+const { windowsPointerState, needsPointerRepair } = require('./pointer-diagnostic.cjs');
 const { windowMaterial } = require('./window-material.cjs');
 const MATERIAL = windowMaterial(process.platform, os.release());
 let activeMaterial = MATERIAL.kind;
@@ -853,13 +853,23 @@ function ensureUnfocusable() {
 // Hover reasserts every 70 ms, so the breadcrumb is throttled: a new reason is
 // always recorded, a repeat at most once a minute.
 let pointerInputLog = { reason: '', at: 0 };
+// setIgnoreMouseEvents() rewrites the window's native hit-test state. Calling
+// it unconditionally every 70 ms / 1.5 s for hours is what made a card that
+// had been left alone stop taking clicks at all: the repeated native rebuild
+// eventually desynchronised Chromium's input route. State transitions force a
+// real write; the high-frequency paths do not.
+let pointerInputState = { ignore: null, at: 0 };
 
-function applyPointerInput(reason = 'unspecified') {
+function applyPointerInput(reason = 'unspecified', force = true) {
   if (!win || win.isDestroyed()) return;
-  // Background clicks belong to this panel even when no control is active.
-  win.setIgnoreMouseEvents(false);
-  ensureUnfocusable();
   const now = Date.now();
+  if (force || pointerInputState.ignore !== false) {
+    // Background clicks belong to this panel even when no control is active.
+    win.setIgnoreMouseEvents(false);
+    pointerInputState = { ignore: false, at: now };
+  }
+  // Already guarded internally by isFocusable().
+  ensureUnfocusable();
   if (reason !== pointerInputLog.reason || now - pointerInputLog.at >= 60_000) {
     pointerInputLog = { reason, at: now };
     log(`pointer input: reasserted (${reason})`);
@@ -1016,15 +1026,23 @@ function commitQuickMenu(open) {
   // than staying silent: a dropped IPC used to leave the menu permanently
   // out of step with what the card showed.
   if (quickMenuOpen === open) {
-    send('magpie:quick-menu', open);
+    pushQuickMenuState(open);
     return true;
   }
   quickMenuOpen = open;
   applyWindowMode();
   setHoverInteractive(false);
   applyPointerInput(open ? 'menu-open' : 'menu-close');
-  send('magpie:quick-menu', open);
+  pushQuickMenuState(open);
   return true;
+}
+
+// A push the renderer never received is the source of a two-sided menu state
+// split. Record it explicitly: the renderer's next busy:bootstrap carries
+// `quickMenu`, which re-syncs the DOM from main's authoritative value.
+function pushQuickMenuState(open) {
+  if (send('magpie:quick-menu', open)) return;
+  log(`quick menu: state push failed (open=${open}); next bootstrap will resync`);
 }
 
 function flushPendingQuickMenu() {
@@ -1143,7 +1161,9 @@ function setHoverInteractive(value, kind = null) {
   if (hoverInteractive === value && hoverKind === kind) return;
   hoverInteractive = value;
   hoverKind = value ? kind : null;
-  applyPointerInput('hover');
+  // Hover changes on every 70 ms poll. The input policy must not be rebuilt
+  // that often, so this path only checks it; real state transitions force it.
+  applyPointerInput('hover', false);
   send('magpie:grab', hoverKind === 'drag');
   send('magpie:resize', hoverKind === 'resize');
 }
@@ -1189,7 +1209,9 @@ let nativeProbeBroken = false;
 function probeNativePointer() {
   if (nativeProbeBroken || !IS_WIN) return null;
   try {
-    return windowsPointerState(win);
+    // Probe the dots button, not the window centre: that is the point whose
+    // ownership decides whether the menu can be clicked.
+    return windowsPointerState(win, undefined, hitAreas);
   } catch (error) {
     // One failed probe disables the rest: a missing user32.dll must not turn
     // the assertion loop into a log spammer.
@@ -1199,19 +1221,36 @@ function probeNativePointer() {
   }
 }
 
+// `moveTop()` is a nudge, not a substitute for `alwaysOnTop`: it only runs
+// when another window is provably covering the dots, and at most once a minute
+// so a persistent overlap cannot turn into a Z-order fight.
+let lastOcclusionFix = 0;
+
 function watchPointerInput() {
   clearInterval(pointerAssertTimer);
   pointerAssertTicks = 0;
+  // One forced write establishes the baseline; from then on the loop does no
+  // native input-state rebuilds unless a probe proves one is needed.
+  applyPointerInput('assert-baseline');
   pointerAssertTimer = setInterval(() => {
     if (!win || win.isDestroyed() || !win.isVisible() || quitting) return;
-    applyPointerInput('assert');
     pointerAssertTicks += 1;
     if (pointerAssertTicks % POINTER_PROBE_EVERY) return;
     const state = probeNativePointer();
-    if (!state || !state.supported || !state.clickThrough) return;
-    log(`pointer input: window became click-through (exStyle=${state.exStyle}); restoring`);
-    applyPointerInput('self-heal');
-    setImmediate(refreshWindowMaterial);
+    if (!state || !state.supported) return;
+    if (needsPointerRepair(state)) {
+      log(`pointer input: native state lost (clickThrough=${state.clickThrough} region=${state.regionKind} exStyle=${state.exStyle}); restoring`);
+      applyPointerInput('self-heal');
+      setImmediate(refreshWindowMaterial);
+      return;
+    }
+    if (state.hitTestOwnsPoint) return;
+    const now = Date.now();
+    if (now - lastOcclusionFix < 60_000) return;
+    lastOcclusionFix = now;
+    log(`pointer input: dots covered by "${state.hitTestTitle}" (${state.hitTestClass}); raising card`);
+    try { win.moveTop(); } catch (error) { log(`pointer input: moveTop failed (${error.message})`); }
+    applyPointerInput('occlusion-fix');
   }, POINTER_ASSERT_MS);
 }
 
@@ -1707,14 +1746,17 @@ function describeError(error) {
 }
 
 function send(channel, payload) {
-  if (!win || win.isDestroyed()) return;
-  if (win.webContents.isDestroyed()) return;
+  if (!win || win.isDestroyed()) return false;
+  if (win.webContents.isDestroyed()) return false;
   try {
     win.webContents.send(channel, payload);
+    return true;
   } catch (error) {
     // A payload the serializer cannot clone (a menu item, a function) used
     // to vanish without a trace: the window grew and the drawer stayed empty.
-    log(`send ${channel}: ${error.message}`);
+    // The failure is now also a signal that the renderer's state may be stale.
+    log(`send ${channel} failed: ${error.message}`);
+    return false;
   }
 }
 
@@ -1747,9 +1789,10 @@ function refreshTrayMenu() {
 // the diagnostic has to work exactly when the card is already misbehaving.
 function diagnosePointer() {
   const alive = Boolean(win && !win.isDestroyed());
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   let native;
   try {
-    native = alive ? windowsPointerState(win) : { supported: false, reason: 'no-window' };
+    native = alive ? windowsPointerState(win, undefined, hitAreas) : { supported: false, reason: 'no-window' };
   } catch (error) {
     native = { supported: false, reason: error && error.message ? error.message : String(error) };
   }
@@ -1761,6 +1804,7 @@ function diagnosePointer() {
   try { visible = alive ? Boolean(win.isVisible()) : false; } catch { visible = false; }
   const report = {
     at: new Date().toISOString(),
+    id,
     visible,
     focusable,
     bounds,
@@ -1772,6 +1816,9 @@ function diagnosePointer() {
   };
   log(`pointer diagnostic: ${JSON.stringify(report)}`);
   log(`pointer diagnostic: log=${logPath}`);
+  // Ask the renderer for its own view. The reply is a separate log line, so a
+  // renderer that cannot answer still leaves the main-process snapshot above.
+  if (alive) send('magpie:diagnose-request', id);
   return report;
 }
 
@@ -2173,6 +2220,19 @@ ipcMain.handle('busy:menu-toggle', () => {
   return { open: quickMenuOpen, pending: pendingQuickMenuOpen };
 });
 ipcMain.on('busy:menu-close', () => setQuickMenuOpen(false));
+// The renderer asks for the authoritative state after a lost reply or push.
+// Main owns the menu, so a read-back is enough to repair a stale DOM.
+ipcMain.handle('busy:menu-state', () => ({ open: quickMenuOpen, pending: pendingQuickMenuOpen }));
+// A paired breadcrumb with "toggle received": it proves the click reached the
+// renderer's click handler even if the IPC bridge then dropped the request.
+ipcMain.on('busy:log', (_event, message) => {
+  if (typeof message === 'string' && message.length <= 300) log(`renderer: ${message}`);
+});
+// The renderer's half of a tray diagnostic. Kept as a separate line from the
+// main-process snapshot so a renderer that cannot answer is visible at once.
+ipcMain.on('busy:diagnose-reply', (_event, id, renderer) => {
+  log(`pointer diagnostic renderer: id=${id} ${JSON.stringify(renderer)}`);
+});
 ipcMain.on('busy:compact-toggle', toggleCompact);
 ipcMain.on('busy:menu-action', (_event, action) => {
   if (!quickMenuOpen) return;

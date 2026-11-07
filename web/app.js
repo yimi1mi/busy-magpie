@@ -15,6 +15,7 @@ import { stagedRoutes, wireState, nextRestExpiry } from './routing-state.mjs';
 import { requestActive, requestGroupKey, redactDiagnostic, groupRequests } from './request-model.mjs';
 import { projectRequestModes } from './request-modes.mjs';
 import { createDragGesture } from './drag-gesture.mjs';
+import { shouldDismissMenu } from './menu-outside.mjs';
 
 const $ = (id) => document.getElementById(id);
 
@@ -478,11 +479,28 @@ function setupQuickMenu(initiallyOpen = false) {
   // when main had to defer the request until the settings pane finished
   // fading. A lost reply still leaves the push channel as the source of truth.
   const toggle = async () => {
+    // Paired with the main-process "toggle received" line: if only one of the
+    // two appears, the click was lost on its way across the IPC bridge.
+    window.busy.log?.('quick menu: toggle sent');
     try {
       const result = await window.busy.toggleMenu();
       if (result && typeof result.open === 'boolean') apply(result.open);
+    } catch (error) {
+      window.busy.log?.(`quick menu: toggle failed (${error?.message || 'unknown'})`);
+      // A lost reply must not leave `open` out of step with main: ask for the
+      // authoritative state instead of trusting the last push message.
+      await resync();
+    }
+  };
+
+  // Main owns the menu state. Whenever the page could have missed a push
+  // message, read it back rather than guessing.
+  const resync = async () => {
+    try {
+      const state = await window.busy.menuState?.();
+      if (state && typeof state.open === 'boolean') apply(state.open);
     } catch {
-      // Nothing to do: the menu stays where the last confirmed state put it.
+      // The push channel stays the source of truth if the query fails too.
     }
   };
 
@@ -494,14 +512,16 @@ function setupQuickMenu(initiallyOpen = false) {
     if (item) window.busy.menuAction(item.dataset.menuAction);
   });
 
-  const outside = (event) => open && !menu.contains(event.target) && !button.contains(event.target);
-  // Consume the entire outside click before dismissing the menu.
-  // In particular, pressing the drag bar must only dismiss this menu.
-  document.addEventListener('pointerdown', (event) => {
-    if (!outside(event)) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-  }, true);
+  // Only a click that really landed inside the card while the menu is open
+  // should dismiss it. The old `outside` swallowed every document-level
+  // pointerdown, including the drag strip and resize handles: if `open` ever
+  // stayed true after main had closed the menu, all three interactions died at
+  // once and no toggle ever reached main. The decision lives in a pure module
+  // so that regression case is tested directly.
+  const outside = (event) => shouldDismissMenu(open, event.target, menu, button);
+  // Dismiss on click, not pointerdown. drag-bar / resize-handle own their
+  // pointerdown in capture phase; consuming it here used to break the gesture
+  // outright while giving the impression the whole card had gone deaf.
   document.addEventListener('click', (event) => {
     if (!outside(event)) return;
     event.preventDefault();
@@ -2409,6 +2429,49 @@ function applySettings(next) {
   render();
 }
 
+// Answers the tray's read-only diagnostic with what the DOM can actually see.
+// The counters are registered in the capture phase before any feature code, so
+// they prove whether the OS handed the renderer a pointerdown at all — the one
+// thing the main-process hover poll cannot tell.
+function setupDiagnostics() {
+  const counters = { pointerdown: 0, click: 0, lastTarget: '', lastAt: 0 };
+  const describe = (node) => {
+    if (!node || typeof node.tagName !== 'string') return String(node);
+    return `${node.tagName.toLowerCase()}${node.id ? '#' + node.id : ''}${node.className && typeof node.className === 'string' ? '.' + node.className.trim().split(/\s+/).join('.') : ''}`;
+  };
+  document.addEventListener('pointerdown', (event) => {
+    counters.pointerdown += 1;
+    counters.lastTarget = describe(event.target);
+    counters.lastAt = Date.now();
+  }, true);
+  document.addEventListener('click', (event) => {
+    counters.click += 1;
+    counters.lastTarget = describe(event.target);
+    counters.lastAt = Date.now();
+  }, true);
+
+  window.busy.onDiagnoseRequest?.((id) => {
+    const button = $('quickMenuToggle');
+    const box = button?.getBoundingClientRect();
+    const at = box ? { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) } : null;
+    const top = at ? document.elementFromPoint(at.x, at.y) : null;
+    const report = {
+      menuOpenClass: document.body.classList.contains('menu-open'),
+      ariaExpanded: button?.getAttribute('aria-expanded') ?? null,
+      quickMenuHidden: $('quickMenu')?.hidden ?? null,
+      settingsOpenClass: document.body.classList.contains('settings-open'),
+      layoutClass: document.body.classList.contains('layout'),
+      buttonRect: box ? { x: box.left, y: box.top, w: box.width, h: box.height } : null,
+      elementAtButton: top ? describe(top) : null,
+      elementIsButton: Boolean(top && (top === button || button?.contains(top))),
+      counters: { ...counters },
+      visibility: document.visibilityState,
+      hasFocus: document.hasFocus(),
+    };
+    window.busy.sendDiagnoseReply?.(id, report);
+  });
+}
+
 async function boot() {
   iconSetup();
   applyGateway();
@@ -2472,6 +2535,7 @@ async function boot() {
   setupAbout();
   setupTokenPill();
   setupQuickMenu(Boolean(data.quickMenu));
+  setupDiagnostics();
   window.busy.ready?.();
   if (data.update) renderUpdateState?.(data.update);
 }

@@ -174,3 +174,58 @@ for (const platform of ['win32', 'darwin']) {
     assert.ok(h.calls.every(value => value === false), 'resume must never enable click-through');
   });
 }
+
+// A stale `open=true` in the renderer used to swallow every document-level
+// pointerdown, killing drag, resize and the dots button at once. The decision
+// now lives in a pure module, so that exact split can be reproduced here.
+test('a stale open menu never swallows drag, resize or dots clicks', async () => {
+  const { shouldDismissMenu } = await import('../web/menu-outside.mjs');
+  const target = (...matches) => ({
+    closest: (selector) => matches.some((part) => selector.includes(part)) ? {} : null,
+  });
+  const outsideMenu = { contains: () => false };
+  const outsideButton = { contains: () => false };
+
+  assert.equal(shouldDismissMenu(false, target('#card'), outsideMenu, outsideButton), false,
+    'a closed menu must never intercept anything');
+  for (const [name, node] of [
+    ['drag strip', target('.drag-bar', '#card')],
+    ['resize handle', target('.resize-handle', '#card')],
+    ['menu action', target('[data-menu-action]', '#card')],
+    ['compact pill', target('#compactPill', '#card')],
+    ['compact expand', target('#compactExpand', '#card')],
+    ['compact menu', target('#compactMenu', '#card')],
+  ]) {
+    assert.equal(shouldDismissMenu(true, node, outsideMenu, outsideButton), false,
+      `${name} must keep its own events even while the menu is open`);
+  }
+  assert.equal(shouldDismissMenu(true, target('#card'), outsideMenu, outsideButton), true,
+    'only a click on the cards plain surface dismisses the menu');
+  assert.equal(shouldDismissMenu(true, target('#card'), { contains: () => true }, outsideButton), false,
+    'a click inside the menu is not an outside click');
+  assert.equal(shouldDismissMenu(true, { tagName: 'TEXT' }, outsideMenu, outsideButton), false,
+    'a target without closest() is ignored instead of crashing');
+});
+
+// Rebuilding the native input state every 70 ms / 1.5 s for hours is what made
+// an idle card stop taking clicks. Only real state transitions may write it.
+test('the input policy is not rebuilt on hover changes or periodic ticks', () => {
+  const h = pointerHarness('win32');
+  h.api.showWindow();
+  const baseline = h.calls.length;
+  assert.equal(baseline, 1, 'show establishes exactly one input baseline');
+  h.api.hover(true, 'control');
+  h.api.hover(false);
+  h.api.hover(true, 'drag');
+  h.api.hover(false);
+  assert.equal(h.calls.length, baseline, 'hover changes must not call setIgnoreMouseEvents again');
+  assert.equal(h.blocksClicks(), true, 'the panel must still block clicks');
+
+  h.api.watchPointerInput();
+  const afterWatch = h.calls.length;
+  assert.equal(afterWatch, baseline + 1, 'the assertion loop writes its own baseline once');
+  h.tick(1500);
+  h.tick(1500);
+  h.tick(1500);
+  assert.equal(h.calls.length, afterWatch, 'periodic ticks must not rebuild the input state');
+});
