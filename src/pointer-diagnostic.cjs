@@ -33,9 +33,15 @@ function core() {
   if (coreApi) return coreApi;
   const koffi = require('koffi');
   const user32 = koffi.load('user32.dll');
+  // WindowFromPoint takes POINT *by value* — 8 bytes in one x64 register.
+  // Declaring it as (int32,int32) put x and y in two separate registers, so
+  // Windows read y from the wrong place and returned the window at a bogus
+  // point (the desktop). That made every probe report hitTestOwnsPoint:false
+  // and drove a hide/show self-heal every minute.
+  koffi.struct('POINT', { x: 'int32', y: 'int32' });
   coreApi = {
     getWindowLong: user32.func('int32 __stdcall GetWindowLongW(uintptr_t,int32)'),
-    windowFromPoint: user32.func('uintptr_t __stdcall WindowFromPoint(int32,int32)'),
+    windowFromPoint: user32.func('uintptr_t __stdcall WindowFromPoint(POINT)'),
     getAncestor: user32.func('uintptr_t __stdcall GetAncestor(uintptr_t,uint32)'),
     isWindowVisible: user32.func('int __stdcall IsWindowVisible(uintptr_t)'),
   };
@@ -111,6 +117,10 @@ function regionState(hwnd) {
     if (!probe) return { regionKind: 'UNKNOWN', regionBox: null };
     const kind = api.getWindowRgn(hwnd, probe);
     if (kind === 1) return { regionKind: 'NULLREGION', regionBox: null };
+    // 0 means the window has no custom region at all, so the probe region is
+    // still holding its 1x1 initial value. Reporting GetRgnBox for it would
+    // claim the card is one pixel wide; a plain rectangle is the healthy case.
+    if (kind === 0) return { regionKind: 'NO_REGION', regionBox: null };
     const box = new Int32Array(4);
     const boxKind = api.getRgnBox(probe, box);
     return {
@@ -126,27 +136,45 @@ function regionState(hwnd) {
   }
 }
 
+// Desktop shells are not "another window covering the card": a point that lands
+// on them means our own probe fell outside the window, not that something is
+// sitting on top of it.
+const DESKTOP_CLASSES = new Set(['Progman', 'WorkerW', 'Shell_TrayWnd', 'Shell_SecondaryTrayWnd']);
+
+function isDesktopWindow(state) {
+  return Boolean(state && state.hitTestClass && DESKTOP_CLASSES.has(state.hitTestClass));
+}
+
 // The dots button is the control that stops answering, so probe there rather
 // than at the window centre (which can sit over another window entirely).
 // `areas` is the renderer's hit-area report; its rightmost control is the dots
 // in both the wide layout and the compact strip.
+//
+// The reported areas can still describe the *previous* layout for a frame
+// after a compact/wide switch, so the point is clamped into the window. A
+// probe outside our own bounds would land on the desktop and look exactly like
+// an occluding window.
 function defaultHitPoint(bounds, areas) {
   const controls = areas && Array.isArray(areas.controls) ? areas.controls : [];
   const rightmost = controls.reduce((best, rect) => {
     if (!rect || !Number.isFinite(rect.x) || !Number.isFinite(rect.width)) return best;
     return !best || rect.x + rect.width > best.x + best.width ? rect : best;
   }, null);
+  const inside = (x, y) => ({
+    x: Math.round(Math.min(bounds.x + bounds.width - 1, Math.max(bounds.x, x))),
+    y: Math.round(Math.min(bounds.y + bounds.height - 1, Math.max(bounds.y, y))),
+  });
   if (rightmost && rightmost.width > 0 && rightmost.height > 0) {
-    return {
-      x: Math.round(bounds.x + rightmost.x + rightmost.width / 2),
-      y: Math.round(bounds.y + rightmost.y + rightmost.height / 2),
-    };
+    return inside(
+      bounds.x + rightmost.x + rightmost.width / 2,
+      bounds.y + rightmost.y + rightmost.height / 2,
+    );
   }
   // Fall back to the top-right corner where the dots live in the wide layout.
-  return {
-    x: Math.round(bounds.x + Math.max(0, bounds.width - 34)),
-    y: Math.round(bounds.y + Math.min(bounds.height, 49)),
-  };
+  return inside(
+    bounds.x + Math.max(0, bounds.width - 34),
+    bounds.y + Math.min(bounds.height - 1, 49),
+  );
 }
 
 function windowsPointerState(win, point, areas) {
@@ -158,7 +186,7 @@ function windowsPointerState(win, point, areas) {
   const target = point && Number.isFinite(point.x) && Number.isFinite(point.y)
     ? { x: Math.round(point.x), y: Math.round(point.y) }
     : defaultHitPoint(bounds, areas);
-  const atPoint = native.windowFromPoint(target.x, target.y);
+  const atPoint = native.windowFromPoint({ x: target.x, y: target.y });
   const root = atPoint ? native.getAncestor(atPoint, GA_ROOT) : 0;
   const owns = hitTestVerdict(root, hwnd);
   const api = extra();
@@ -181,4 +209,4 @@ function windowsPointerState(win, point, areas) {
   };
 }
 
-module.exports = { windowsPointerState, sameWindow, hitTestVerdict, defaultHitPoint, needsPointerRepair };
+module.exports = { windowsPointerState, sameWindow, hitTestVerdict, defaultHitPoint, needsPointerRepair, isDesktopWindow };

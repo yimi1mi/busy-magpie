@@ -130,14 +130,38 @@ for (const platform of ['win32', 'darwin']) {
   });
 
   // Defensive net: if anything leaves the window focusable (an Electron
-  // update, another plugin), the next state change must put it back and drop
-  // its taskbar tab instead of leaving a stray button behind.
+  // update, another plugin), the explicit focus/taskbar pass must put it back
+  // and drop its taskbar tab instead of leaving a stray button behind.
+  // This is deliberately NOT a side effect of showWindow()/applyPointerInput():
+  // those run up to seventy times a second and rebuilding the native focus and
+  // taskbar state that often is what made an idle card stop taking clicks.
   test(`${platform}: a focusable window is put back out of the taskbar`, () => {
     const h = pointerHarness(platform);
     h.setFocusable(true);
-    h.api.showWindow();
+    h.api.ensureUnfocusable('test');
     assert.equal(h.focusable(), false, 'the card must be put back to non-focusable');
     assert.deepEqual(h.taskbar, [true], 'the stray taskbar button must be removed');
+  });
+
+  test(`${platform}: showing or hovering the window does not rebuild the focus state`, () => {
+    const h = pointerHarness(platform);
+    h.api.showWindow();
+    assert.deepEqual(h.taskbar, [], 'showing the panel must not touch the taskbar');
+    h.api.hover(true, 'control');
+    h.api.hover(false);
+    h.api.hover(true, 'drag');
+    h.api.hover(false);
+    assert.deepEqual(h.taskbar, [], 'hover must not touch the taskbar either');
+    assert.equal(h.focusable(), false, 'the card stays non-focusable');
+  });
+
+  test(`${platform}: the confirmed focus state is never rebuilt twice`, () => {
+    const h = pointerHarness(platform);
+    h.api.ensureUnfocusable('first');
+    const afterFirst = h.taskbar.length;
+    h.api.ensureUnfocusable('second');
+    h.api.ensureUnfocusable('third');
+    assert.equal(h.taskbar.length, afterFirst, 'a confirmed window must not be re-set');
   });
 
   // A dots click that arrives while the settings pane is fading out used to be
@@ -228,4 +252,23 @@ test('the input policy is not rebuilt on hover changes or periodic ticks', () =>
   h.tick(1500);
   h.tick(1500);
   assert.equal(h.calls.length, afterWatch, 'periodic ticks must not rebuild the input state');
+});
+
+// The card went deaf in the field because Chromium's native occlusion tracker
+// decided this transparent toolbar window was covered and cleared WS_VISIBLE on
+// Chrome_RenderWidgetHostHWND. Every mouse message then went to the parent
+// frame window and the renderer received nothing: requestAnimationFrame kept
+// running, elementFromPoint still resolved the button, and the pointerdown
+// counters stayed at 0. Same build, two states — the healthy one reported
+// IsWindowVisible=True on that child window, the broken one False.
+//
+// Nothing in our own code can repair that state once it happens, so the
+// feature is disabled at startup and the switch is pinned here.
+test('native window occlusion calculation stays disabled', () => {
+  const h = mainHarness({ platform: 'win32' });
+  assert.match(
+    h.switches.get('disable-features') || '',
+    /CalculateNativeWinOcclusion/,
+    'the card must not let Chromium hide its renderer when it looks covered',
+  );
 });

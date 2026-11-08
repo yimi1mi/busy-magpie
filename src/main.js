@@ -15,7 +15,7 @@ const UPDATES_ENABLED = shellRuntime ? shellRuntime.updatesEnabled : app.isPacka
 const { heartbeat } = require('./launch-policy.cjs');
 const { parseGateway, gatewayProblem } = require('./gateway-config.cjs');
 const { fitWindowBounds, anchorRightEdge } = require('./window-bounds.cjs');
-const { windowsPointerState, needsPointerRepair } = require('./pointer-diagnostic.cjs');
+const { windowsPointerState, needsPointerRepair, isDesktopWindow } = require('./pointer-diagnostic.cjs');
 const { windowMaterial } = require('./window-material.cjs');
 const MATERIAL = windowMaterial(process.platform, os.release());
 let activeMaterial = MATERIAL.kind;
@@ -25,6 +25,35 @@ const IS_PREVIEW = process.argv.includes('--preview');
 app.setName(IS_PREVIEW ? 'Busy Magpie Preview' : 'Busy Magpie');
 if (IS_PREVIEW) {
   app.setPath('userData', path.resolve(process.env.BUSY_MAGPIE_PREVIEW_DIR || path.join(app.getPath('appData'), 'Busy Magpie Preview')));
+}
+
+// Chromium's native window occlusion tracker can decide this transparent,
+// unfocusable toolbar card is fully covered and clear WS_VISIBLE on
+// Chrome_RenderWidgetHostHWND. Once that child window is hidden, Windows
+// delivers every mouse message to the parent frame window and the renderer
+// receives nothing: the card keeps painting (the compositor runs separately)
+// but no click, drag or resize ever arrives.
+//
+// Field evidence, same build, two states:
+//   healthy: Chrome_RenderWidgetHostHWND IsWindowVisible=True, pointerdown
+//            counters increment, WindowFromPoint returns that child window;
+//   broken:  Chrome_RenderWidgetHostHWND IsWindowVisible=False, pointerdown
+//            counters stuck at 0 while requestAnimationFrame still runs at
+//            full speed, and WindowFromPoint returns the parent frame.
+//
+// The occlusion calculation buys nothing for a card meant to sit over other
+// windows, so it is disabled outright rather than worked around.
+if (process.platform === 'win32' && app.commandLine?.appendSwitch) {
+  const SWITCH = 'disable-features';
+  const FEATURE = 'CalculateNativeWinOcclusion';
+  const existing = app.commandLine.getSwitchValue
+    ? app.commandLine.getSwitchValue(SWITCH)
+    : '';
+  const features = existing ? existing.split(',').map((item) => item.trim()).filter(Boolean) : [];
+  if (!features.includes(FEATURE)) {
+    features.push(FEATURE);
+    app.commandLine.appendSwitch(SWITCH, features.join(','));
+  }
 }
 
 const WIDTH = 632;
@@ -416,6 +445,9 @@ function createWindow() {
 
   applyTopmost();
   applyPointerInput('startup');
+  // One explicit focus/taskbar setup for the lifetime of the window. It is no
+  // longer part of applyPointerInput(), which runs thousands of times an hour.
+  ensureUnfocusable('startup');
   win.loadFile(RENDERER);
 
   win.once('ready-to-show', () => {
@@ -832,19 +864,36 @@ function applyTopmost() {
 // The card never takes keyboard focus. On Windows Electron's setFocusable()
 // also calls SetSkipTaskbar(), so flipping it to true would add a taskbar
 // button (ITaskbarList::AddTab) and let the window activate — stealing the
-// foreground from other applications. If anything still makes the window
-// focusable, undo it; the call is guarded so the common case touches nothing.
-function ensureUnfocusable() {
+// foreground from other applications.
+//
+// This used to be re-checked on every pointer reassertion (70 ms while the
+// pointer hovered, 1.5 s otherwise), which is thousands of native focus and
+// taskbar calls per hour. Once the window has been confirmed unfocusable the
+// only thing that can undo it is our own settings pane, and that path clears
+// the flag explicitly, so the answer is cached here instead of re-queried.
+let unfocusableConfirmed = false;
+
+function resetUnfocusableCache() {
+  unfocusableConfirmed = false;
+}
+
+function ensureUnfocusable(reason = 'check') {
   if (!win || win.isDestroyed()) return;
+  if (unfocusableConfirmed) return;
   let focusable = false;
   try {
     focusable = typeof win.isFocusable === 'function' && win.isFocusable();
   } catch {
     focusable = false;
   }
-  if (!focusable) return;
+  if (!focusable) {
+    unfocusableConfirmed = true;
+    return;
+  }
+  log(`window: focusable again (${reason}); putting it back`);
   win.setFocusable(false);
   if (typeof win.setSkipTaskbar === 'function') win.setSkipTaskbar(true);
+  unfocusableConfirmed = true;
 }
 
 // `reason` names the caller, so the log shows when the input policy was last
@@ -868,8 +917,9 @@ function applyPointerInput(reason = 'unspecified', force = true) {
     win.setIgnoreMouseEvents(false);
     pointerInputState = { ignore: false, at: now };
   }
-  // Already guarded internally by isFocusable().
-  ensureUnfocusable();
+  // The focusable/taskbar state is deliberately NOT touched here: this runs
+  // every 70 ms while the pointer moves. It is set once at window creation and
+  // restored explicitly when the settings pane closes.
   if (reason !== pointerInputLog.reason || now - pointerInputLog.at >= 60_000) {
     pointerInputLog = { reason, at: now };
     log(`pointer input: reasserted (${reason})`);
@@ -878,12 +928,21 @@ function applyPointerInput(reason = 'unspecified', force = true) {
 
 // The settings pane holds real text fields, so it is the one place that needs
 // the keyboard. Windows adds a taskbar button while the window is focusable,
-// so the button exists only for as long as the pane is open; closing it runs
-// applyPointerInput() again and removes the button.
+// so the button exists only for as long as the pane is open.
 function focusForKeyboard() {
   if (!win || win.isDestroyed()) return;
+  // Our own call made it focusable, so the cache no longer describes it.
+  resetUnfocusableCache();
   win.setFocusable(true);
   win.focus();
+}
+
+// Undo focusForKeyboard(): put the card back out of the taskbar and out of the
+// keyboard. Explicit rather than a side effect of applyPointerInput().
+function releaseKeyboard() {
+  if (!win || win.isDestroyed()) return;
+  resetUnfocusableCache();
+  ensureUnfocusable('keyboard-release');
 }
 
 function showWindow() {
@@ -1137,6 +1196,9 @@ function closeSettingsPanel() {
     hoverInteractive = false;
     hoverKind = null;
     applyPointerInput('settings-closed');
+    // The pane is gone: give the keyboard and the taskbar back explicitly
+    // instead of hoping a pointer reassertion does it as a side effect.
+    releaseKeyboard();
     if (win && !win.isDestroyed()) {
       win.blur();
       applyTopmost();
@@ -1202,9 +1264,25 @@ const POINTER_ASSERT_MS = 1500;
 // click vanish at once, so it is repaired here rather than waiting for the
 // user to hide and show the card.
 const POINTER_PROBE_EVERY = 20;
+// A read-only heartbeat every five minutes. It changes nothing; it exists so a
+// card that goes deaf an hour later leaves a trail showing what the window
+// looked like while it was still healthy.
+const HEALTH_LOG_MS = 5 * 60 * 1000;
 let pointerAssertTimer = null;
 let pointerAssertTicks = 0;
+let lastHealthLog = 0;
 let nativeProbeBroken = false;
+
+function logPointerHealth(state) {
+  const now = Date.now();
+  if (now - lastHealthLog < HEALTH_LOG_MS) return;
+  lastHealthLog = now;
+  let focusable = null;
+  let bounds = null;
+  try { focusable = win && !win.isDestroyed() ? win.isFocusable() : null; } catch { focusable = null; }
+  try { bounds = win && !win.isDestroyed() ? win.getBounds() : null; } catch { bounds = null; }
+  log(`pointer health: focusable=${focusable} exStyle=${state.exStyle} clickThrough=${state.clickThrough} hitTestOwnsPoint=${state.hitTestOwnsPoint} region=${state.regionKind} visible=${state.visible} hwnd=${state.hwnd} hit=${state.hitTestWindow} hitClass='${state.hitTestClass}' point=(${state.point?.x},${state.point?.y}) bounds=${JSON.stringify(bounds)}`);
+}
 
 function probeNativePointer() {
   if (nativeProbeBroken || !IS_WIN) return null;
@@ -1221,10 +1299,15 @@ function probeNativePointer() {
   }
 }
 
-// `moveTop()` is a nudge, not a substitute for `alwaysOnTop`: it only runs
-// when another window is provably covering the dots, and at most once a minute
-// so a persistent overlap cannot turn into a Z-order fight.
+// `moveTop()` is a nudge for a proven cover; `hide()` + `showInactive()` is the
+// heavier repair the user could always perform by hand from the tray and is
+// what fixed a card whose click routing had gone stale. Both are throttled so
+// a persistent problem cannot become a flicker loop.
 let lastOcclusionFix = 0;
+let lastRevealFix = 0;
+// One miss can be a transient during a move or a display change; two in a row
+// (a minute apart) is a real loss of click ownership.
+let pointerOwnMisses = 0;
 
 function watchPointerInput() {
   clearInterval(pointerAssertTimer);
@@ -1238,19 +1321,64 @@ function watchPointerInput() {
     if (pointerAssertTicks % POINTER_PROBE_EVERY) return;
     const state = probeNativePointer();
     if (!state || !state.supported) return;
+    logPointerHealth(state);
     if (needsPointerRepair(state)) {
       log(`pointer input: native state lost (clickThrough=${state.clickThrough} region=${state.regionKind} exStyle=${state.exStyle}); restoring`);
       applyPointerInput('self-heal');
       setImmediate(refreshWindowMaterial);
       return;
     }
-    if (state.hitTestOwnsPoint) return;
+    if (state.hitTestOwnsPoint) {
+      pointerOwnMisses = 0;
+      return;
+    }
+    // A hit on a desktop shell (Progman/WorkerW/tray) means the probe point
+    // itself landed on the desktop, not that anything covers the card. Treat it
+    // as inconclusive: counting it used to drive a hide/show loop every minute
+    // that changed nothing and only made the card flicker.
+    if (isDesktopWindow(state)) {
+      pointerOwnMisses = 0;
+      return;
+    }
     const now = Date.now();
-    if (now - lastOcclusionFix < 60_000) return;
-    lastOcclusionFix = now;
-    log(`pointer input: dots covered by "${state.hitTestTitle}" (${state.hitTestClass}); raising card`);
-    try { win.moveTop(); } catch (error) { log(`pointer input: moveTop failed (${error.message})`); }
-    applyPointerInput('occlusion-fix');
+    // A real window is provably sitting on the dots: raising the card is enough.
+    if (state.hitTestWindow && state.hitTestWindow !== '0') {
+      if (now - lastOcclusionFix < 60_000) return;
+      lastOcclusionFix = now;
+      log(`pointer input: dots covered by "${state.hitTestTitle}" (${state.hitTestClass}); raising card`);
+      try { win.moveTop(); } catch (error) { log(`pointer input: moveTop failed (${error.message})`); }
+      applyPointerInput('occlusion-fix');
+      return;
+    }
+    // Nobody owns the point at all. That is the state the card went deaf in,
+    // and the only repair that ever worked was hiding and showing it again —
+    // so do exactly that, once a miss has repeated.
+    pointerOwnMisses += 1;
+    if (pointerOwnMisses < 2) return;
+    if (now - lastRevealFix < 60_000) return;
+    lastRevealFix = now;
+    pointerOwnMisses = 0;
+    log(`pointer input: no window owns the dots (exStyle=${state.exStyle}, clickThrough=${state.clickThrough}, region=${state.regionKind}, hit=${state.hitTestWindow}); revealing the card again`);
+    try {
+      win.hide();
+      win.showInactive();
+    } catch (error) {
+      log(`pointer input: reveal failed (${error.message})`);
+    }
+    resetUnfocusableCache();
+    ensureUnfocusable('reveal');
+    applyPointerInput('reveal');
+    // Re-probe after the reveal so the log carries the before/after pair the
+    // next diagnosis needs, instead of only the broken state.
+    setImmediate(() => {
+      refreshWindowMaterial();
+      const after = probeNativePointer();
+      if (!after || !after.supported) {
+        log('pointer input: reveal result unknown (probe unavailable)');
+        return;
+      }
+      log(`pointer input: reveal result before(exStyle=${state.exStyle} hit=${state.hitTestWindow} owns=${state.hitTestOwnsPoint} region=${state.regionKind}) after(exStyle=${after.exStyle} hit=${after.hitTestWindow} owns=${after.hitTestOwnsPoint} region=${after.regionKind})`);
+    });
   }, POINTER_ASSERT_MS);
 }
 

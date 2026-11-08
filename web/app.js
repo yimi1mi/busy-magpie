@@ -16,6 +16,7 @@ import { requestActive, requestGroupKey, redactDiagnostic, groupRequests } from 
 import { projectRequestModes } from './request-modes.mjs';
 import { createDragGesture } from './drag-gesture.mjs';
 import { shouldDismissMenu } from './menu-outside.mjs';
+import { pickProbeTargets, menuControlId } from './diagnostic-probe.mjs';
 
 const $ = (id) => document.getElementById(id);
 
@@ -2451,19 +2452,40 @@ function setupDiagnostics() {
   }, true);
 
   window.busy.onDiagnoseRequest?.((id) => {
-    const button = $('quickMenuToggle');
-    const box = button?.getBoundingClientRect();
-    const at = box ? { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) } : null;
-    const top = at ? document.elementFromPoint(at.x, at.y) : null;
+    // The two layouts share no menu button, so probing the wide one while the
+    // compact strip is showing reports a 0x0 rectangle and hides the real
+    // answer. Everything below is reported per layout.
+    const compact = document.body.classList.contains('compact');
+    const menuId = menuControlId(compact);
+    const probes = pickProbeTargets(compact).map((elementId) => {
+      const node = $(elementId);
+      const rect = node?.getBoundingClientRect();
+      const centre = rect && rect.width > 0 && rect.height > 0
+        ? { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) }
+        : null;
+      const at = centre ? document.elementFromPoint(centre.x, centre.y) : null;
+      return {
+        id: elementId,
+        rect: rect ? { x: rect.left, y: rect.top, w: rect.width, h: rect.height } : null,
+        centre,
+        elementAt: at ? describe(at) : null,
+        elementIsSelf: Boolean(at && node && (at === node || node.contains(at))),
+      };
+    });
+    const button = $(menuId);
+    const menuProbe = probes.find((probe) => probe.id === menuId) || null;
     const report = {
+      compact,
+      menuControl: menuId,
       menuOpenClass: document.body.classList.contains('menu-open'),
       ariaExpanded: button?.getAttribute('aria-expanded') ?? null,
       quickMenuHidden: $('quickMenu')?.hidden ?? null,
       settingsOpenClass: document.body.classList.contains('settings-open'),
       layoutClass: document.body.classList.contains('layout'),
-      buttonRect: box ? { x: box.left, y: box.top, w: box.width, h: box.height } : null,
-      elementAtButton: top ? describe(top) : null,
-      elementIsButton: Boolean(top && (top === button || button?.contains(top))),
+      buttonRect: menuProbe?.rect ?? null,
+      elementAtButton: menuProbe?.elementAt ?? null,
+      elementIsButton: menuProbe?.elementIsSelf ?? false,
+      probes,
       counters: { ...counters },
       visibility: document.visibilityState,
       hasFocus: document.hasFocus(),
