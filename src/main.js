@@ -2,7 +2,7 @@
 
 const {
   app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, screen, shell, Notification,
-  clipboard, nativeTheme,
+  clipboard, nativeTheme, powerMonitor,
 } = require('electron');
 const fs = require('fs');
 const os = require('os');
@@ -14,7 +14,8 @@ const autoUpdater = shellRuntime?.updater || require('electron-updater').autoUpd
 const UPDATES_ENABLED = shellRuntime ? shellRuntime.updatesEnabled : app.isPackaged && !process.argv.includes('--preview');
 const { heartbeat } = require('./launch-policy.cjs');
 const { parseGateway, gatewayProblem } = require('./gateway-config.cjs');
-const { fitWindowBounds } = require('./window-bounds.cjs');
+const { fitWindowBounds, anchorRightEdge } = require('./window-bounds.cjs');
+const { windowsPointerState, needsPointerRepair, isDesktopWindow } = require('./pointer-diagnostic.cjs');
 const { windowMaterial } = require('./window-material.cjs');
 const MATERIAL = windowMaterial(process.platform, os.release());
 let activeMaterial = MATERIAL.kind;
@@ -24,6 +25,35 @@ const IS_PREVIEW = process.argv.includes('--preview');
 app.setName(IS_PREVIEW ? 'Busy Magpie Preview' : 'Busy Magpie');
 if (IS_PREVIEW) {
   app.setPath('userData', path.resolve(process.env.BUSY_MAGPIE_PREVIEW_DIR || path.join(app.getPath('appData'), 'Busy Magpie Preview')));
+}
+
+// Chromium's native window occlusion tracker can decide this transparent,
+// unfocusable toolbar card is fully covered and clear WS_VISIBLE on
+// Chrome_RenderWidgetHostHWND. Once that child window is hidden, Windows
+// delivers every mouse message to the parent frame window and the renderer
+// receives nothing: the card keeps painting (the compositor runs separately)
+// but no click, drag or resize ever arrives.
+//
+// Field evidence, same build, two states:
+//   healthy: Chrome_RenderWidgetHostHWND IsWindowVisible=True, pointerdown
+//            counters increment, WindowFromPoint returns that child window;
+//   broken:  Chrome_RenderWidgetHostHWND IsWindowVisible=False, pointerdown
+//            counters stuck at 0 while requestAnimationFrame still runs at
+//            full speed, and WindowFromPoint returns the parent frame.
+//
+// The occlusion calculation buys nothing for a card meant to sit over other
+// windows, so it is disabled outright rather than worked around.
+if (process.platform === 'win32' && app.commandLine?.appendSwitch) {
+  const SWITCH = 'disable-features';
+  const FEATURE = 'CalculateNativeWinOcclusion';
+  const existing = app.commandLine.getSwitchValue
+    ? app.commandLine.getSwitchValue(SWITCH)
+    : '';
+  const features = existing ? existing.split(',').map((item) => item.trim()).filter(Boolean) : [];
+  if (!features.includes(FEATURE)) {
+    features.push(FEATURE);
+    app.commandLine.appendSwitch(SWITCH, features.join(','));
+  }
 }
 
 const WIDTH = 632;
@@ -399,7 +429,7 @@ function createWindow() {
   });
   frame = { ...frame, compact, cardHeight: height - 32, windowHeight: height };
   if (MATERIAL.kind === 'blur') {
-    try { windowSurface = (shellRuntime?.attachBlur || require('../shell/windows-blur.cjs').attachBlur)(win); }
+    try { windowSurface = (shellRuntime?.attachBlur || require('../shell/windows-blur.cjs').attachBlur)(win, log); }
     catch (error) { activeMaterial = 'none'; log(`background blur: ${error.message}`); }
   }
 
@@ -414,13 +444,16 @@ function createWindow() {
   }
 
   applyTopmost();
-  applyPointerInput();
+  applyPointerInput('startup');
+  // One explicit focus/taskbar setup for the lifetime of the window. It is no
+  // longer part of applyPointerInput(), which runs thousands of times an hour.
+  ensureUnfocusable('startup');
   win.loadFile(RENDERER);
 
   win.once('ready-to-show', () => {
     if (Number(settings.pauseUntil) > Date.now()) return;
     win.showInactive();
-    applyPointerInput();
+    applyPointerInput('ready-to-show');
     applyTopmost();
   });
 
@@ -450,7 +483,13 @@ function createWindow() {
     refreshTrayMenu();
   });
 
-  win.on('show', () => { refreshTrayMenu(); setImmediate(refreshWindowMaterial); });
+  // `show` and `restore` are how the window comes back after being hidden or
+  // minimised by the system. Reassert the input policy and the blur surface
+  // here instead of relying on the tray path alone: those are the two things a
+  // card that stopped answering is missing.
+  win.on('show', () => { refreshTrayMenu(); reassertSurface('window-show'); });
+  win.on('restore', () => reassertSurface('window-restore'));
+  win.on('focus', () => reassertSurface('window-focus'));
   win.on('hide', () => {
     setQuickMenuOpen(false);
     if (settingsOpen) closeSettingsPanel();
@@ -483,6 +522,26 @@ function refreshWindowMaterial() {
   if (!windowSurface || !win || win.isDestroyed() || !win.isVisible()) return;
   try { windowSurface.refresh(); }
   catch (error) { log(`background blur refresh: ${error.message}`); }
+}
+
+// One reassertion point for every event that can invalidate the card's input
+// state or its blur surface: show, restore, focus, power resume, screen unlock
+// and a display change. A card that lost its clicks after hours of idleness
+// has exactly these two things missing, so they are restored together.
+function reassertSurface(reason) {
+  applyPointerInput(reason);
+  setImmediate(refreshWindowMaterial);
+}
+
+// A lock/unlock or a suspend/resume can reset the window's input state and its
+// blur surface at the compositor level. Both are exactly the moments the card
+// used to go dead until it was hidden and shown again. The guard keeps a test
+// harness (or any host without powerMonitor) from breaking startup.
+function watchPowerEvents() {
+  if (!powerMonitor || typeof powerMonitor.on !== 'function') return false;
+  powerMonitor.on('resume', () => reassertSurface('power-resume'));
+  powerMonitor.on('unlock-screen', () => reassertSurface('screen-unlock'));
+  return true;
 }
 
 function publicSettings() {
@@ -805,36 +864,85 @@ function applyTopmost() {
 // The card never takes keyboard focus. On Windows Electron's setFocusable()
 // also calls SetSkipTaskbar(), so flipping it to true would add a taskbar
 // button (ITaskbarList::AddTab) and let the window activate — stealing the
-// foreground from other applications. If anything still makes the window
-// focusable, undo it; the call is guarded so the common case touches nothing.
-function ensureUnfocusable() {
+// foreground from other applications.
+//
+// This used to be re-checked on every pointer reassertion (70 ms while the
+// pointer hovered, 1.5 s otherwise), which is thousands of native focus and
+// taskbar calls per hour. Once the window has been confirmed unfocusable the
+// only thing that can undo it is our own settings pane, and that path clears
+// the flag explicitly, so the answer is cached here instead of re-queried.
+let unfocusableConfirmed = false;
+
+function resetUnfocusableCache() {
+  unfocusableConfirmed = false;
+}
+
+function ensureUnfocusable(reason = 'check') {
   if (!win || win.isDestroyed()) return;
+  if (unfocusableConfirmed) return;
   let focusable = false;
   try {
     focusable = typeof win.isFocusable === 'function' && win.isFocusable();
   } catch {
     focusable = false;
   }
-  if (!focusable) return;
+  if (!focusable) {
+    unfocusableConfirmed = true;
+    return;
+  }
+  log(`window: focusable again (${reason}); putting it back`);
   win.setFocusable(false);
   if (typeof win.setSkipTaskbar === 'function') win.setSkipTaskbar(true);
+  unfocusableConfirmed = true;
 }
 
-function applyPointerInput() {
+// `reason` names the caller, so the log shows when the input policy was last
+// reasserted and by whom. That is what separates a card whose input policy was
+// never renewed from one whose clicks are lost below this process.
+// Hover reasserts every 70 ms, so the breadcrumb is throttled: a new reason is
+// always recorded, a repeat at most once a minute.
+let pointerInputLog = { reason: '', at: 0 };
+// setIgnoreMouseEvents() rewrites the window's native hit-test state. Calling
+// it unconditionally every 70 ms / 1.5 s for hours is what made a card that
+// had been left alone stop taking clicks at all: the repeated native rebuild
+// eventually desynchronised Chromium's input route. State transitions force a
+// real write; the high-frequency paths do not.
+let pointerInputState = { ignore: null, at: 0 };
+
+function applyPointerInput(reason = 'unspecified', force = true) {
   if (!win || win.isDestroyed()) return;
-  // Background clicks belong to this panel even when no control is active.
-  win.setIgnoreMouseEvents(false);
-  ensureUnfocusable();
+  const now = Date.now();
+  if (force || pointerInputState.ignore !== false) {
+    // Background clicks belong to this panel even when no control is active.
+    win.setIgnoreMouseEvents(false);
+    pointerInputState = { ignore: false, at: now };
+  }
+  // The focusable/taskbar state is deliberately NOT touched here: this runs
+  // every 70 ms while the pointer moves. It is set once at window creation and
+  // restored explicitly when the settings pane closes.
+  if (reason !== pointerInputLog.reason || now - pointerInputLog.at >= 60_000) {
+    pointerInputLog = { reason, at: now };
+    log(`pointer input: reasserted (${reason})`);
+  }
 }
 
 // The settings pane holds real text fields, so it is the one place that needs
 // the keyboard. Windows adds a taskbar button while the window is focusable,
-// so the button exists only for as long as the pane is open; closing it runs
-// applyPointerInput() again and removes the button.
+// so the button exists only for as long as the pane is open.
 function focusForKeyboard() {
   if (!win || win.isDestroyed()) return;
+  // Our own call made it focusable, so the cache no longer describes it.
+  resetUnfocusableCache();
   win.setFocusable(true);
   win.focus();
+}
+
+// Undo focusForKeyboard(): put the card back out of the taskbar and out of the
+// keyboard. Explicit rather than a side effect of applyPointerInput().
+function releaseKeyboard() {
+  if (!win || win.isDestroyed()) return;
+  resetUnfocusableCache();
+  ensureUnfocusable('keyboard-release');
 }
 
 function showWindow() {
@@ -846,7 +954,7 @@ function showWindow() {
     touchAlive();
   }
   if (!win.isVisible()) win.showInactive();
-  applyPointerInput();
+  applyPointerInput('show');
   applyTopmost();
   refreshTrayMenu();
 }
@@ -854,11 +962,19 @@ function showWindow() {
 function applyWindowMode() {
   if (!win || win.isDestroyed()) return;
   const compact = Boolean(settings.compact && !settingsOpen && !settingsClosing && !quickMenuOpen);
+  const wasCompact = frame.compact;
   const bounds = win.getBounds();
   if (frame.compact && !compact && settings.compact) compactPosition = { x: bounds.x, y: bounds.y };
   const width = compact ? COMPACT_WIDTH : settings.width;
   const height = compact ? COMPACT_HEIGHT : settings.height;
-  const point = compact && compactPosition ? compactPosition : bounds;
+  // Folding hangs the compact strip off the wide card's own right edge, so the
+  // two modes share one anchor instead of the strip sliding to the left. A
+  // stored compactPosition means the settings pane or the quick menu was
+  // covering the strip: that spot already sits where the user left it.
+  const folding = !wasCompact && compact && !compactPosition;
+  const point = folding
+    ? anchorRightEdge(bounds, COMPACT_WIDTH)
+    : compact && compactPosition ? compactPosition : bounds;
   const position = clampBounds(point.x, point.y, width, height);
   win.setBounds({ ...position, width, height }, false);
   if (compact || !settings.compact) compactPosition = null;
@@ -894,6 +1010,10 @@ function recoverWindow() {
   frame = { ...frame, cardHeight: fitted.height - 32, windowHeight: fitted.height };
   send('magpie:frame', frame);
   savePosition();
+  // A display change can reset the window's hit-test state along with its
+  // bounds; put the card back in charge of its own clicks.
+  applyPointerInput('display-recovered');
+  setImmediate(refreshWindowMaterial);
 }
 
 function resetPlacement() {
@@ -932,17 +1052,99 @@ function pauseDisplay() {
   refreshTrayMenu();
 }
 
-function setQuickMenuOpen(value) {
-  if (!win || win.isDestroyed()) return;
-  const open = Boolean(value);
-  if (open && (!win.isVisible() || settingsOpen || settingsClosing
-    || layoutMode || dragState || resizeState)) return;
-  if (quickMenuOpen === open) return;
+// Why an open request cannot be honoured right now, as one stable token.
+// The token is logged whenever it blocks a click, so a card that stopped
+// answering can be told apart from a click that never reached this process.
+function quickMenuBlockReason() {
+  if (!win || win.isDestroyed()) return 'no-window';
+  if (!win.isVisible()) return 'hidden';
+  if (settingsOpen) return 'settings-open';
+  if (settingsClosing) return 'settings-closing';
+  if (layoutMode) return 'layout-mode';
+  if (dragState) return 'drag';
+  if (resizeState) return 'resize';
+  return '';
+}
+
+// A request to open the menu that arrived while the settings pane was still
+// fading out. Dismissing the pane takes 180 ms, so the request is parked
+// instead of dropped; the close handler flushes it.
+let pendingQuickMenuOpen = false;
+
+function settleForQuickMenu() {
+  // Close whatever transient mode was holding the card. These are the modes'
+  // own exit paths, so nothing is forced into an inconsistent state.
+  if (dragState) endDrag();
+  if (resizeState) endResize();
+  if (layoutMode) endLayout();
+  if (settingsOpen) closeSettingsPanel();
+}
+
+function commitQuickMenu(open) {
+  // The renderer asked for the state it is already in. Echo it back rather
+  // than staying silent: a dropped IPC used to leave the menu permanently
+  // out of step with what the card showed.
+  if (quickMenuOpen === open) {
+    pushQuickMenuState(open);
+    return true;
+  }
   quickMenuOpen = open;
   applyWindowMode();
   setHoverInteractive(false);
-  applyPointerInput();
-  send('magpie:quick-menu', open);
+  applyPointerInput(open ? 'menu-open' : 'menu-close');
+  pushQuickMenuState(open);
+  return true;
+}
+
+// A push the renderer never received is the source of a two-sided menu state
+// split. Record it explicitly: the renderer's next busy:bootstrap carries
+// `quickMenu`, which re-syncs the DOM from main's authoritative value.
+function pushQuickMenuState(open) {
+  if (send('magpie:quick-menu', open)) return;
+  log(`quick menu: state push failed (open=${open}); next bootstrap will resync`);
+}
+
+function flushPendingQuickMenu() {
+  if (!pendingQuickMenuOpen) return;
+  pendingQuickMenuOpen = false;
+  if (quickMenuBlockReason()) {
+    // Still not openable: tell the renderer the truth so it stops showing an
+    // open menu it cannot dismiss.
+    log(`quick menu: deferred open abandoned (${quickMenuBlockReason()})`);
+    send('magpie:quick-menu', false);
+    return;
+  }
+  commitQuickMenu(true);
+}
+
+function setQuickMenuOpen(value) {
+  if (!win || win.isDestroyed()) return false;
+  const open = Boolean(value);
+  if (!open) {
+    pendingQuickMenuOpen = false;
+    return commitQuickMenu(false);
+  }
+  const blocked = quickMenuBlockReason();
+  if (blocked === 'hidden') {
+    // A hidden card has nothing to show a menu on. Report the real state so
+    // the renderer does not keep a menu it cannot close.
+    log('quick menu: open refused (hidden)');
+    send('magpie:quick-menu', false);
+    return false;
+  }
+  if (blocked) {
+    // The card is mid-gesture or mid-panel. Finish that first instead of
+    // swallowing the click the way the old guard did.
+    log(`quick menu: settling ${blocked} before opening`);
+    settleForQuickMenu();
+  }
+  if (settingsClosing) {
+    // The pane is still fading; the close handler flushes this request.
+    pendingQuickMenuOpen = true;
+    return true;
+  }
+  pendingQuickMenuOpen = false;
+  return commitQuickMenu(true);
 }
 
 function openSettingsPanel(mode = 'settings') {
@@ -993,12 +1195,17 @@ function closeSettingsPanel() {
     applyWindowMode();
     hoverInteractive = false;
     hoverKind = null;
-    applyPointerInput();
+    applyPointerInput('settings-closed');
+    // The pane is gone: give the keyboard and the taskbar back explicitly
+    // instead of hoping a pointer reassertion does it as a side effect.
+    releaseKeyboard();
     if (win && !win.isDestroyed()) {
       win.blur();
       applyTopmost();
     }
     refreshTrayMenu();
+    // A dots click that arrived during the fade was parked, not dropped.
+    flushPendingQuickMenu();
   }, 180);
 }
 
@@ -1016,7 +1223,9 @@ function setHoverInteractive(value, kind = null) {
   if (hoverInteractive === value && hoverKind === kind) return;
   hoverInteractive = value;
   hoverKind = value ? kind : null;
-  applyPointerInput();
+  // Hover changes on every 70 ms poll. The input policy must not be rebuilt
+  // that often, so this path only checks it; real state transitions force it.
+  applyPointerInput('hover', false);
   send('magpie:grab', hoverKind === 'drag');
   send('magpie:resize', hoverKind === 'resize');
 }
@@ -1041,6 +1250,136 @@ function watchHover() {
     const kind = onControl ? 'control' : onBorder ? 'resize' : onTopBar ? 'drag' : null;
     setHoverInteractive(Boolean(kind), kind);
   }, 70);
+}
+
+// Hover is advice: it may skip a frame whenever a mode is active. The input
+// policy is not advice. A card left untouched for hours can still lose it —
+// after a session lock, a display change or a compositor reset — and until
+// now the only thing that ever reasserted it was the hover poll, which every
+// open mode suppressed. This loop is deliberately independent of every mode
+// flag: the card keeps clicks whatever it is doing.
+const POINTER_ASSERT_MS = 1500;
+// Every twentieth tick (~30 s) the loop also asks Windows what it thinks. A
+// window that became click-through is the one native fault that makes every
+// click vanish at once, so it is repaired here rather than waiting for the
+// user to hide and show the card.
+const POINTER_PROBE_EVERY = 20;
+// A read-only heartbeat every five minutes. It changes nothing; it exists so a
+// card that goes deaf an hour later leaves a trail showing what the window
+// looked like while it was still healthy.
+const HEALTH_LOG_MS = 5 * 60 * 1000;
+let pointerAssertTimer = null;
+let pointerAssertTicks = 0;
+let lastHealthLog = 0;
+let nativeProbeBroken = false;
+
+function logPointerHealth(state) {
+  const now = Date.now();
+  if (now - lastHealthLog < HEALTH_LOG_MS) return;
+  lastHealthLog = now;
+  let focusable = null;
+  let bounds = null;
+  try { focusable = win && !win.isDestroyed() ? win.isFocusable() : null; } catch { focusable = null; }
+  try { bounds = win && !win.isDestroyed() ? win.getBounds() : null; } catch { bounds = null; }
+  log(`pointer health: focusable=${focusable} exStyle=${state.exStyle} clickThrough=${state.clickThrough} hitTestOwnsPoint=${state.hitTestOwnsPoint} region=${state.regionKind} visible=${state.visible} hwnd=${state.hwnd} hit=${state.hitTestWindow} hitClass='${state.hitTestClass}' point=(${state.point?.x},${state.point?.y}) bounds=${JSON.stringify(bounds)}`);
+}
+
+function probeNativePointer() {
+  if (nativeProbeBroken || !IS_WIN) return null;
+  try {
+    // Probe the dots button, not the window centre: that is the point whose
+    // ownership decides whether the menu can be clicked.
+    return windowsPointerState(win, undefined, hitAreas);
+  } catch (error) {
+    // One failed probe disables the rest: a missing user32.dll must not turn
+    // the assertion loop into a log spammer.
+    nativeProbeBroken = true;
+    log(`pointer probe: unavailable (${error && error.message ? error.message : error})`);
+    return null;
+  }
+}
+
+// `moveTop()` is a nudge for a proven cover; `hide()` + `showInactive()` is the
+// heavier repair the user could always perform by hand from the tray and is
+// what fixed a card whose click routing had gone stale. Both are throttled so
+// a persistent problem cannot become a flicker loop.
+let lastOcclusionFix = 0;
+let lastRevealFix = 0;
+// One miss can be a transient during a move or a display change; two in a row
+// (a minute apart) is a real loss of click ownership.
+let pointerOwnMisses = 0;
+
+function watchPointerInput() {
+  clearInterval(pointerAssertTimer);
+  pointerAssertTicks = 0;
+  // One forced write establishes the baseline; from then on the loop does no
+  // native input-state rebuilds unless a probe proves one is needed.
+  applyPointerInput('assert-baseline');
+  pointerAssertTimer = setInterval(() => {
+    if (!win || win.isDestroyed() || !win.isVisible() || quitting) return;
+    pointerAssertTicks += 1;
+    if (pointerAssertTicks % POINTER_PROBE_EVERY) return;
+    const state = probeNativePointer();
+    if (!state || !state.supported) return;
+    logPointerHealth(state);
+    if (needsPointerRepair(state)) {
+      log(`pointer input: native state lost (clickThrough=${state.clickThrough} region=${state.regionKind} exStyle=${state.exStyle}); restoring`);
+      applyPointerInput('self-heal');
+      setImmediate(refreshWindowMaterial);
+      return;
+    }
+    if (state.hitTestOwnsPoint) {
+      pointerOwnMisses = 0;
+      return;
+    }
+    // A hit on a desktop shell (Progman/WorkerW/tray) means the probe point
+    // itself landed on the desktop, not that anything covers the card. Treat it
+    // as inconclusive: counting it used to drive a hide/show loop every minute
+    // that changed nothing and only made the card flicker.
+    if (isDesktopWindow(state)) {
+      pointerOwnMisses = 0;
+      return;
+    }
+    const now = Date.now();
+    // A real window is provably sitting on the dots: raising the card is enough.
+    if (state.hitTestWindow && state.hitTestWindow !== '0') {
+      if (now - lastOcclusionFix < 60_000) return;
+      lastOcclusionFix = now;
+      log(`pointer input: dots covered by "${state.hitTestTitle}" (${state.hitTestClass}); raising card`);
+      try { win.moveTop(); } catch (error) { log(`pointer input: moveTop failed (${error.message})`); }
+      applyPointerInput('occlusion-fix');
+      return;
+    }
+    // Nobody owns the point at all. That is the state the card went deaf in,
+    // and the only repair that ever worked was hiding and showing it again —
+    // so do exactly that, once a miss has repeated.
+    pointerOwnMisses += 1;
+    if (pointerOwnMisses < 2) return;
+    if (now - lastRevealFix < 60_000) return;
+    lastRevealFix = now;
+    pointerOwnMisses = 0;
+    log(`pointer input: no window owns the dots (exStyle=${state.exStyle}, clickThrough=${state.clickThrough}, region=${state.regionKind}, hit=${state.hitTestWindow}); revealing the card again`);
+    try {
+      win.hide();
+      win.showInactive();
+    } catch (error) {
+      log(`pointer input: reveal failed (${error.message})`);
+    }
+    resetUnfocusableCache();
+    ensureUnfocusable('reveal');
+    applyPointerInput('reveal');
+    // Re-probe after the reveal so the log carries the before/after pair the
+    // next diagnosis needs, instead of only the broken state.
+    setImmediate(() => {
+      refreshWindowMaterial();
+      const after = probeNativePointer();
+      if (!after || !after.supported) {
+        log('pointer input: reveal result unknown (probe unavailable)');
+        return;
+      }
+      log(`pointer input: reveal result before(exStyle=${state.exStyle} hit=${state.hitTestWindow} owns=${state.hitTestOwnsPoint} region=${state.regionKind}) after(exStyle=${after.exStyle} hit=${after.hitTestWindow} owns=${after.hitTestOwnsPoint} region=${after.regionKind})`);
+    });
+  }, POINTER_ASSERT_MS);
 }
 
 function setHitAreas(raw) {
@@ -1109,7 +1448,7 @@ function endDrag() {
   savePosition();
   hoverInteractive = false;
   if (win && !win.isDestroyed()) {
-    applyPointerInput();
+    applyPointerInput('drag-end');
     win.blur();
     applyTopmost();
     send('magpie:grab', false);
@@ -1220,7 +1559,7 @@ function endResize() {
   if (win && !win.isDestroyed()) {
     // Keep keyboard focus in the drawer while it remains open.
     if (!settingsOpen) {
-      applyPointerInput();
+      applyPointerInput('resize-end');
       win.blur();
     }
     applyTopmost();
@@ -1259,7 +1598,7 @@ function endLayout() {
   savePosition();
   if (win && !win.isDestroyed()) {
     win.webContents.send('magpie:layout', false);
-    applyPointerInput();
+    applyPointerInput('layout-end');
     win.blur();
     applyTopmost();
     send('magpie:grab', false);
@@ -1535,14 +1874,17 @@ function describeError(error) {
 }
 
 function send(channel, payload) {
-  if (!win || win.isDestroyed()) return;
-  if (win.webContents.isDestroyed()) return;
+  if (!win || win.isDestroyed()) return false;
+  if (win.webContents.isDestroyed()) return false;
   try {
     win.webContents.send(channel, payload);
+    return true;
   } catch (error) {
     // A payload the serializer cannot clone (a menu item, a function) used
     // to vanish without a trace: the window grew and the drawer stayed empty.
-    log(`send ${channel}: ${error.message}`);
+    // The failure is now also a signal that the renderer's state may be stale.
+    log(`send ${channel} failed: ${error.message}`);
+    return false;
   }
 }
 
@@ -1567,6 +1909,45 @@ function trayImage() {
 function refreshTrayMenu() {
   if (!tray) return;
   tray.setContextMenu(buildTrayMenu());
+}
+
+// Prints the card's pointer state to the log. Read-only by design: the point
+// is to find out which layer lost the click, and a repair would hide that.
+// A missing window or an unavailable user32.dll is reported, not thrown:
+// the diagnostic has to work exactly when the card is already misbehaving.
+function diagnosePointer() {
+  const alive = Boolean(win && !win.isDestroyed());
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  let native;
+  try {
+    native = alive ? windowsPointerState(win, undefined, hitAreas) : { supported: false, reason: 'no-window' };
+  } catch (error) {
+    native = { supported: false, reason: error && error.message ? error.message : String(error) };
+  }
+  let focusable = null;
+  let bounds = null;
+  try { focusable = alive ? win.isFocusable() : null; } catch { focusable = null; }
+  try { bounds = alive ? win.getBounds() : null; } catch { bounds = null; }
+  let visible = false;
+  try { visible = alive ? Boolean(win.isVisible()) : false; } catch { visible = false; }
+  const report = {
+    at: new Date().toISOString(),
+    id,
+    visible,
+    focusable,
+    bounds,
+    modes: { quickMenuOpen, settingsOpen, settingsClosing, layoutMode, drag: Boolean(dragState), resize: Boolean(resizeState) },
+    hover: { interactive: hoverInteractive, kind: hoverKind },
+    hitAreas: { controls: hitAreas.controls.length, resize: hitAreas.resize.length },
+    rendererReady,
+    native,
+  };
+  log(`pointer diagnostic: ${JSON.stringify(report)}`);
+  log(`pointer diagnostic: log=${logPath}`);
+  // Ask the renderer for its own view. The reply is a separate log line, so a
+  // renderer that cannot answer still leaves the main-process snapshot above.
+  if (alive) send('magpie:diagnose-request', id);
+  return report;
 }
 
 function buildTrayMenu() {
@@ -1645,6 +2026,13 @@ function buildTrayMenu() {
       click: () => openAbout(),
     },
     { label: '恢复默认位置和大小', click: resetPlacement },
+    {
+      // Read-only: reports what Windows says about this window's pointer
+      // routing, so a card that stopped answering can be told apart from a
+      // click that never arrived. Nothing here changes any state.
+      label: '诊断鼠标输入…',
+      click: () => diagnosePointer(),
+    },
     {
       label: '重新连接',
       click: () => {
@@ -1734,6 +2122,8 @@ function quit() {
   clearTimeout(pauseTimer);
   clearTimeout(layoutTimer);
   clearInterval(hoverTimer);
+  clearInterval(pointerAssertTimer);
+  pointerAssertTimer = null;
   clearInterval(usageTimer);
   clearInterval(updateTimer);
   clearInterval(quietTimer);
@@ -1773,6 +2163,9 @@ ipcMain.handle('busy:bootstrap', () => ({
   usageStatus,
   layout: layoutMode,
   frame,
+  // The renderer calibrates its menu against this, so a reload cannot start
+  // out of step with what main believes is open.
+  quickMenu: quickMenuOpen,
 }));
 
 ipcMain.handle('settings:get', () => {
@@ -1944,8 +2337,30 @@ ipcMain.on('busy:about-open', () => {
   openAbout();
 });
 
-ipcMain.on('busy:menu-toggle', () => setQuickMenuOpen(!quickMenuOpen));
+// A click on the dots reaches main only through this channel. Logging it is
+// what tells "the click never arrived" apart from "it arrived and was refused"
+// in the field: the refusal line below always follows this one.
+// `invoke` rather than `send` so the renderer learns the state main actually
+// settled on, even when the request had to be deferred or dismissed.
+ipcMain.handle('busy:menu-toggle', () => {
+  log(`quick menu: toggle received (open=${quickMenuOpen})`);
+  setQuickMenuOpen(!quickMenuOpen);
+  return { open: quickMenuOpen, pending: pendingQuickMenuOpen };
+});
 ipcMain.on('busy:menu-close', () => setQuickMenuOpen(false));
+// The renderer asks for the authoritative state after a lost reply or push.
+// Main owns the menu, so a read-back is enough to repair a stale DOM.
+ipcMain.handle('busy:menu-state', () => ({ open: quickMenuOpen, pending: pendingQuickMenuOpen }));
+// A paired breadcrumb with "toggle received": it proves the click reached the
+// renderer's click handler even if the IPC bridge then dropped the request.
+ipcMain.on('busy:log', (_event, message) => {
+  if (typeof message === 'string' && message.length <= 300) log(`renderer: ${message}`);
+});
+// The renderer's half of a tray diagnostic. Kept as a separate line from the
+// main-process snapshot so a renderer that cannot answer is visible at once.
+ipcMain.on('busy:diagnose-reply', (_event, id, renderer) => {
+  log(`pointer diagnostic renderer: id=${id} ${JSON.stringify(renderer)}`);
+});
 ipcMain.on('busy:compact-toggle', toggleCompact);
 ipcMain.on('busy:menu-action', (_event, action) => {
   if (!quickMenuOpen) return;
@@ -2016,12 +2431,14 @@ function init() {
   };
   screen.on('display-removed', screenChanged);
   screen.on('display-metrics-changed', screenChanged);
+  watchPowerEvents();
   createTray();
   applyAutostart();
   touchAlive();
   schedulePauseResume();
   aliveTimer = setInterval(touchAlive, 10000);
   watchHover();
+  watchPointerInput();
   rebuildClient();
   watchTrace();
   usageTimer = setInterval(refreshUsage, 20000);

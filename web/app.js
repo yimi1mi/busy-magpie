@@ -15,6 +15,8 @@ import { stagedRoutes, wireState, nextRestExpiry } from './routing-state.mjs';
 import { requestActive, requestGroupKey, redactDiagnostic, groupRequests } from './request-model.mjs';
 import { projectRequestModes } from './request-modes.mjs';
 import { createDragGesture } from './drag-gesture.mjs';
+import { shouldDismissMenu } from './menu-outside.mjs';
+import { pickProbeTargets, menuControlId } from './diagnostic-probe.mjs';
 
 const $ = (id) => document.getElementById(id);
 
@@ -454,28 +456,73 @@ function reportHitAreas() {
   window.busy.setHitAreas(payload);
 }
 
-function setupQuickMenu() {
+function setupQuickMenu(initiallyOpen = false) {
   const button = $('quickMenuToggle');
   const menu = $('quickMenu');
   const items = [...menu.querySelectorAll('[role="menuitem"]')];
   let open = false;
 
-  button.addEventListener('click', () => window.busy.toggleMenu());
-  $('compactMenu').addEventListener('click', () => window.busy.toggleMenu());
+  // One place that puts the menu's DOM in step with the truth main reports.
+  // The push channel and a toggle reply both run through it, so a dropped
+  // message can no longer leave the card showing a menu main believes closed.
+  const apply = (value) => {
+    open = Boolean(value);
+    menu.hidden = !open;
+    button.setAttribute('aria-expanded', String(open));
+    $('compactMenuItem').textContent = settings.compact ? '展开主界面' : '紧凑模式';
+    document.body.classList.toggle('menu-open', open);
+    $('quickMenuError').hidden = true;
+    if (open) items[0].focus({ preventScroll: true });
+    else if (menu.contains(document.activeElement)) button.focus({ preventScroll: true });
+  };
+
+  // The reply carries the state main settled on, which is authoritative even
+  // when main had to defer the request until the settings pane finished
+  // fading. A lost reply still leaves the push channel as the source of truth.
+  const toggle = async () => {
+    // Paired with the main-process "toggle received" line: if only one of the
+    // two appears, the click was lost on its way across the IPC bridge.
+    window.busy.log?.('quick menu: toggle sent');
+    try {
+      const result = await window.busy.toggleMenu();
+      if (result && typeof result.open === 'boolean') apply(result.open);
+    } catch (error) {
+      window.busy.log?.(`quick menu: toggle failed (${error?.message || 'unknown'})`);
+      // A lost reply must not leave `open` out of step with main: ask for the
+      // authoritative state instead of trusting the last push message.
+      await resync();
+    }
+  };
+
+  // Main owns the menu state. Whenever the page could have missed a push
+  // message, read it back rather than guessing.
+  const resync = async () => {
+    try {
+      const state = await window.busy.menuState?.();
+      if (state && typeof state.open === 'boolean') apply(state.open);
+    } catch {
+      // The push channel stays the source of truth if the query fails too.
+    }
+  };
+
+  button.addEventListener('click', toggle);
+  $('compactMenu').addEventListener('click', toggle);
   $('compactExpand').addEventListener('click', () => window.busy.toggleCompact());
   menu.addEventListener('click', (event) => {
     const item = event.target.closest('[data-menu-action]');
     if (item) window.busy.menuAction(item.dataset.menuAction);
   });
 
-  const outside = (event) => open && !menu.contains(event.target) && !button.contains(event.target);
-  // Consume the entire outside click before dismissing the menu.
-  // In particular, pressing the drag bar must only dismiss this menu.
-  document.addEventListener('pointerdown', (event) => {
-    if (!outside(event)) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-  }, true);
+  // Only a click that really landed inside the card while the menu is open
+  // should dismiss it. The old `outside` swallowed every document-level
+  // pointerdown, including the drag strip and resize handles: if `open` ever
+  // stayed true after main had closed the menu, all three interactions died at
+  // once and no toggle ever reached main. The decision lives in a pure module
+  // so that regression case is tested directly.
+  const outside = (event) => shouldDismissMenu(open, event.target, menu, button);
+  // Dismiss on click, not pointerdown. drag-bar / resize-handle own their
+  // pointerdown in capture phase; consuming it here used to break the gesture
+  // outright while giving the impression the whole card had gone deaf.
   document.addEventListener('click', (event) => {
     if (!outside(event)) return;
     event.preventDefault();
@@ -496,21 +543,14 @@ function setupQuickMenu() {
     if (next !== undefined) items[next].focus();
   });
 
-  window.busy.onQuickMenu((value) => {
-    open = Boolean(value);
-    menu.hidden = !open;
-    button.setAttribute('aria-expanded', String(open));
-    $('compactMenuItem').textContent = settings.compact ? '展开主界面' : '紧凑模式';
-    document.body.classList.toggle('menu-open', open);
-    $('quickMenuError').hidden = true;
-    if (open) items[0].focus({ preventScroll: true });
-    else if (menu.contains(document.activeElement)) button.focus({ preventScroll: true });
-  });
+  window.busy.onQuickMenu(apply);
   window.busy.onActionError((error) => {
     $('quickMenuError').textContent = error;
     $('quickMenuError').hidden = false;
   });
   new ResizeObserver(() => requestAnimationFrame(reportHitAreas)).observe(button.parentElement);
+  // Bootstrap reports what main believes, so a reload cannot start out of step.
+  apply(initiallyOpen);
 }
 
 function setupTokenPill() {
@@ -2390,6 +2430,70 @@ function applySettings(next) {
   render();
 }
 
+// Answers the tray's read-only diagnostic with what the DOM can actually see.
+// The counters are registered in the capture phase before any feature code, so
+// they prove whether the OS handed the renderer a pointerdown at all — the one
+// thing the main-process hover poll cannot tell.
+function setupDiagnostics() {
+  const counters = { pointerdown: 0, click: 0, lastTarget: '', lastAt: 0 };
+  const describe = (node) => {
+    if (!node || typeof node.tagName !== 'string') return String(node);
+    return `${node.tagName.toLowerCase()}${node.id ? '#' + node.id : ''}${node.className && typeof node.className === 'string' ? '.' + node.className.trim().split(/\s+/).join('.') : ''}`;
+  };
+  document.addEventListener('pointerdown', (event) => {
+    counters.pointerdown += 1;
+    counters.lastTarget = describe(event.target);
+    counters.lastAt = Date.now();
+  }, true);
+  document.addEventListener('click', (event) => {
+    counters.click += 1;
+    counters.lastTarget = describe(event.target);
+    counters.lastAt = Date.now();
+  }, true);
+
+  window.busy.onDiagnoseRequest?.((id) => {
+    // The two layouts share no menu button, so probing the wide one while the
+    // compact strip is showing reports a 0x0 rectangle and hides the real
+    // answer. Everything below is reported per layout.
+    const compact = document.body.classList.contains('compact');
+    const menuId = menuControlId(compact);
+    const probes = pickProbeTargets(compact).map((elementId) => {
+      const node = $(elementId);
+      const rect = node?.getBoundingClientRect();
+      const centre = rect && rect.width > 0 && rect.height > 0
+        ? { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) }
+        : null;
+      const at = centre ? document.elementFromPoint(centre.x, centre.y) : null;
+      return {
+        id: elementId,
+        rect: rect ? { x: rect.left, y: rect.top, w: rect.width, h: rect.height } : null,
+        centre,
+        elementAt: at ? describe(at) : null,
+        elementIsSelf: Boolean(at && node && (at === node || node.contains(at))),
+      };
+    });
+    const button = $(menuId);
+    const menuProbe = probes.find((probe) => probe.id === menuId) || null;
+    const report = {
+      compact,
+      menuControl: menuId,
+      menuOpenClass: document.body.classList.contains('menu-open'),
+      ariaExpanded: button?.getAttribute('aria-expanded') ?? null,
+      quickMenuHidden: $('quickMenu')?.hidden ?? null,
+      settingsOpenClass: document.body.classList.contains('settings-open'),
+      layoutClass: document.body.classList.contains('layout'),
+      buttonRect: menuProbe?.rect ?? null,
+      elementAtButton: menuProbe?.elementAt ?? null,
+      elementIsButton: menuProbe?.elementIsSelf ?? false,
+      probes,
+      counters: { ...counters },
+      visibility: document.visibilityState,
+      hasFocus: document.hasFocus(),
+    };
+    window.busy.sendDiagnoseReply?.(id, report);
+  });
+}
+
 async function boot() {
   iconSetup();
   applyGateway();
@@ -2452,7 +2556,8 @@ async function boot() {
   setupSettingsPanel();
   setupAbout();
   setupTokenPill();
-  setupQuickMenu();
+  setupQuickMenu(Boolean(data.quickMenu));
+  setupDiagnostics();
   window.busy.ready?.();
   if (data.update) renderUpdateState?.(data.update);
 }

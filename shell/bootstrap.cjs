@@ -106,7 +106,7 @@ if (!app.requestSingleInstanceLock()) {
         ? `v${lastFailure.descriptor.version} 上次更新未成功，当前运行 v${selection.version}。` : '',
       ownsInstanceLock: true, updater, updatesEnabled: Boolean(testFeed) || (app.isPackaged && !preview),
       updateInProgress: Boolean(selection.token || rollbackToken),
-      attachBlur: window => require('./windows-blur.cjs').attachBlur(window) });
+      attachBlur: (window, logger) => require('./windows-blur.cjs').attachBlur(window, logger) });
     // The marker follows an actual renderer/bootstrap round trip. Being offline
     // is a supported state and is deliberately not a failed startup condition.
     const expectedUrl = pathToFileURL(path.join(selection.root, 'web', 'index.html')).href;

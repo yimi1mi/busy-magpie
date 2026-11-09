@@ -30,7 +30,13 @@ contextBridge.exposeInMainWorld('busy', {
   resizeEnd: () => ipcRenderer.send('busy:resize-end'),
   setUsagePeriod: (period) => ipcRenderer.invoke('usage:set-period', period),
   setHitAreas: (areas) => ipcRenderer.send('busy:hit-areas', areas),
-  toggleMenu: () => ipcRenderer.send('busy:menu-toggle'),
+  // Resolves with the state main settled on, so the renderer never has to
+  // guess whether its menu is really open.
+  toggleMenu: () => ipcRenderer.invoke('busy:menu-toggle'),
+  // Read back the authoritative menu state and let the renderer leave a
+  // breadcrumb in the same log main writes to.
+  menuState: () => ipcRenderer.invoke('busy:menu-state'),
+  log: (message) => ipcRenderer.send('busy:log', message),
   closeMenu: () => ipcRenderer.send('busy:menu-close'),
   toggleCompact: () => ipcRenderer.send('busy:compact-toggle'),
   menuAction: (action) => ipcRenderer.send('busy:menu-action', action),
@@ -86,6 +92,13 @@ contextBridge.exposeInMainWorld('busy', {
   onQuickMenu: (callback) => {
     ipcRenderer.on('magpie:quick-menu', (_event, open) => callback(open));
   },
+  // A tray diagnostic asks the renderer what it can see. The reply is written
+  // to the same log as the main-process snapshot, so a dead card can be told
+  // apart at the DOM layer too.
+  onDiagnoseRequest: (callback) => {
+    ipcRenderer.on('magpie:diagnose-request', (_event, id) => callback(id));
+  },
+  sendDiagnoseReply: (id, report) => ipcRenderer.send('busy:diagnose-reply', id, report),
   onActionError: (callback) => {
     ipcRenderer.on('magpie:action-error', (_event, error) => callback(error));
   },

@@ -28,17 +28,28 @@ function mainHarness({ writeError = false, preview = false, platform = 'win32' }
     appendFileSync() {},
   };
   const autoUpdater = new EventEmitter();
+  // Lock/unlock and suspend/resume reach main through this emitter.
+  const powerMonitor = new EventEmitter();
   autoUpdater.quitAndInstall = () => { installed++; };
   autoUpdater.downloadUpdate = async () => {};
   autoUpdater.checkForUpdates = async () => {updateChecks++;return null;};
   const app = new EventEmitter();
+  // main.js turns off Chromium's native window occlusion calculation at
+  // startup. The harness records the switch so the regression can assert it.
+  const switches = new Map();
+  const commandLine = {
+    appendSwitch(name, value) { switches.set(name, value === undefined ? '' : String(value)); },
+    getSwitchValue(name) { return switches.get(name) || ''; },
+  };
   Object.assign(app, { setName() {}, getVersion: () => '1.3.10', isPackaged: true,
+    commandLine, switches,
     getPath: () => '/test', setPath: (key,value) => paths.set(key,value), setLoginItemSettings() {loginChanges++;}, requestSingleInstanceLock: () => false, quit() {}, focus() {} });
   const electron = {
     app, ipcMain: { handle: (name, fn) => handlers.set(name, fn), on: (name, fn) => listeners.set(name, fn) },
     screen: { getDisplayNearestPoint: () => ({ workArea: {x:0,y:0,width:1920,height:1080} }),
       getCursorScreenPoint: () => ({x:100,y:100}) },
     Notification: { isSupported: () => false }, shell: { openExternal: url => openedUrls.push(url) }, Menu: {},
+    powerMonitor,
   };
   Object.defineProperty(electron, 'globalShortcut', {
     get() { globalShortcutReads++; return {}; },
@@ -83,9 +94,18 @@ function mainHarness({ writeError = false, preview = false, platform = 'win32' }
       beginLayout:()=>beginLayout(),
       endLayout:()=>endLayout(),
       toggleCompact:()=>toggleCompact(),
+      menuOpen:()=>quickMenuOpen,
+      menuPending:()=>pendingQuickMenuOpen,
+      watchPointerInput:()=>watchPointerInput(),
+      watchPowerEvents:()=>watchPowerEvents(),
+      // The focus/taskbar policy is no longer a side effect of the pointer
+      // path, so these are exposed for the regression that pins that down.
+      ensureUnfocusable:(reason)=>ensureUnfocusable(reason || 'test'),
+      releaseKeyboard:()=>releaseKeyboard(),
+      resetUnfocusableCache:()=>resetUnfocusableCache(),
     };`, context);
   return {
-    api: context.testApi, files, paths, openedUrls,
+    api: context.testApi, files, paths, openedUrls, powerMonitor, switches,
     ipcChannels: [...handlers.keys(), ...listeners.keys()],
     save: input => handlers.get('settings:save')({}, input),
     period: value => handlers.get('usage:set-period')({}, value),
