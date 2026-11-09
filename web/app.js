@@ -14,6 +14,7 @@ import { wireCurve, hubCurve, glideProgress } from './flight-path.mjs';
 import { stagedRoutes, wireState, nextRestExpiry } from './routing-state.mjs';
 import { requestActive, requestGroupKey, redactDiagnostic, groupRequests } from './request-model.mjs';
 import { projectRequestModes } from './request-modes.mjs';
+import { createDragGesture } from './drag-gesture.mjs';
 
 const $ = (id) => document.getElementById(id);
 
@@ -66,6 +67,7 @@ const el = {
   fanHub: $('fanHub'),
   fanBirdPath: $('fanBirdPath'),
   multiFooter: $('multiFooter'),
+  layoutOverlay: $('layoutOverlay'),
 };
 
 let settings = {
@@ -567,31 +569,39 @@ function setParts(target, parts) {
 
 function setupDragBar(bar = $('dragBar')) {
   if (!bar || !window.busy?.dragStart) return;
-  let press = null;
-  let dragging = false;
+  // A press on the strip either drags or clicks. The gesture starts the drag
+  // as soon as the pointer moves past 4px, or after a short hold, so moving
+  // never drops a press the way the old 9px cancel rule did.
+  const gesture = createDragGesture();
+  let holdTimer = 0;
   let suppressClick = false;
 
-  const cancelPress = () => {
-    if (!press) return;
-    clearTimeout(press.timer);
-    press = null;
+  const clearHold = () => {
+    clearTimeout(holdTimer);
+    holdTimer = 0;
+  };
+
+  const begin = () => {
+    clearHold();
+    suppressClick = true;
+    bar.classList.add('dragging');
+    window.busy.dragStart();
   };
 
   const finish = (event) => {
-    cancelPress();
-    if (dragging) {
-      dragging = false;
-      bar.classList.remove('dragging');
-      window.busy.dragEnd();
-      window.setTimeout(() => { suppressClick = false; }, 420);
-    }
+    clearHold();
+    const outcome = gesture.up();
     if (event && bar.hasPointerCapture?.(event.pointerId)) {
       bar.releasePointerCapture(event.pointerId);
     }
+    if (outcome !== 'dragged') return;
+    bar.classList.remove('dragging');
+    window.busy.dragEnd();
+    window.setTimeout(() => { suppressClick = false; }, 420);
   };
 
   bar.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return;
+    if (!gesture.down(event.clientX, event.clientY, event.button)) return;
     event.preventDefault();
     event.stopPropagation();
     try {
@@ -599,27 +609,24 @@ function setupDragBar(bar = $('dragBar')) {
     } catch {
       // A release that lands outside the window still ends the drag.
     }
-    press = {
-      x: event.clientX,
-      y: event.clientY,
-      timer: 0,
-    };
-    press.timer = window.setTimeout(() => {
-      if (!press) return;
-      press = null;
-      dragging = true;
-      suppressClick = true;
-      bar.classList.add('dragging');
-      window.busy.dragStart();
-    }, 150);
+    clearHold();
+    holdTimer = window.setTimeout(() => {
+      holdTimer = 0;
+      if (gesture.longPress() === 'start') begin();
+    }, gesture.holdMs);
   });
 
-  bar.addEventListener('pointermove', (event) => {
-    if (!press) return;
-    if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > 9) {
-      cancelPress();
+  // Listening on the window keeps the drag alive when pointer capture is lost
+  // to a native focus change; a release we never saw still ends it.
+  const onMove = (event) => {
+    if (gesture.dragging && event.buttons === 0) {
+      finish(event);
+      return;
     }
-  });
+    if (!gesture.pressing) return;
+    if (gesture.move(event.clientX, event.clientY) === 'start') begin();
+  };
+  window.addEventListener('pointermove', onMove, true);
 
   bar.addEventListener('pointerup', finish);
   bar.addEventListener('pointercancel', finish);
@@ -670,6 +677,70 @@ function setupResizeHandles() {
   window.addEventListener('pointerup', finish, true);
   window.busy.onResize?.((value) => {
     document.body.classList.toggle('can-resize', Boolean(value));
+  });
+}
+
+// Layout mode ends on a click and moves on a drag. The overlay was a native
+// drag region before; that swallowed the clicks completion depends on, and the
+// card no longer takes keyboard focus, so Esc alone cannot be the exit.
+function setupLayoutOverlay() {
+  const overlay = el.layoutOverlay;
+  if (!overlay || !window.busy?.dragStart || !window.busy?.endLayout) return;
+  const gesture = createDragGesture();
+  let dragging = false;
+
+  const begin = () => {
+    dragging = true;
+    overlay.classList.add('dragging');
+    window.busy.dragStart();
+  };
+
+  const finish = (event) => {
+    if (!dragging && !gesture.pressing) return;
+    if (event && overlay.hasPointerCapture?.(event.pointerId)) {
+      overlay.releasePointerCapture(event.pointerId);
+    }
+    if (dragging) {
+      dragging = false;
+      overlay.classList.remove('dragging');
+      gesture.cancel();
+      window.busy.dragEnd();
+      return;
+    }
+    if (gesture.up() === 'click') window.busy.endLayout();
+  };
+
+  overlay.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || !layout) return;
+    if (!gesture.down(event.clientX, event.clientY, event.button)) return;
+    event.preventDefault();
+    try {
+      overlay.setPointerCapture(event.pointerId);
+    } catch {
+      // Main-process polling still ends the drag if the release is lost.
+    }
+  });
+
+  window.addEventListener('pointermove', (event) => {
+    if (dragging) {
+      if (event.buttons === 0) finish(event);
+      return;
+    }
+    if (!gesture.pressing) return;
+    if (gesture.move(event.clientX, event.clientY) === 'start') begin();
+  }, true);
+
+  window.addEventListener('pointerup', finish, true);
+  overlay.addEventListener('pointercancel', (event) => {
+    gesture.cancel();
+    overlay.classList.remove('dragging');
+    if (dragging) {
+      dragging = false;
+      window.busy.dragEnd();
+    }
+    if (event && overlay.hasPointerCapture?.(event.pointerId)) {
+      overlay.releasePointerCapture(event.pointerId);
+    }
   });
 }
 
@@ -2376,6 +2447,7 @@ async function boot() {
   reducedMotion.addEventListener('change', render);
   setupDragBar();
   setupDragBar($('compactDragBar'));
+  setupLayoutOverlay();
   setupResizeHandles();
   setupSettingsPanel();
   setupAbout();

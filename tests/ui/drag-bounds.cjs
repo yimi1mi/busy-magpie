@@ -117,6 +117,38 @@ async function repeatedDrags(name, expectedSize, attempts = 12) {
   record(`${name}: movement, stationary hold, release and ${attempts} successive drags preserve size`);
 }
 
+// The strip must start a drag from the movement alone: before the 4px
+// threshold existed, only holding still for 150ms could start one, so a
+// normal press-and-drag did nothing while the cursor already said "grab".
+async function pressAndMove(name, expectedSize) {
+  const before = win.getBounds();
+  const pointer = { x: before.x + 100, y: before.y + 20 };
+  cursor = { ...pointer };
+  await sleep(85);
+  const calls = dragCalls;
+  await js(`document.getElementById(document.body.classList.contains('compact') ? 'compactDragBar' : 'dragBar').dispatchEvent(new PointerEvent('pointerdown',
+    {bubbles:true,button:0,buttons:1,pointerId:1,clientX:100,clientY:20}))`);
+  await js(`window.dispatchEvent(new PointerEvent('pointermove',
+    {bubbles:true,button:0,buttons:1,pointerId:1,clientX:118,clientY:20}))`);
+  // 80ms is safely inside the 150ms hold, so reaching the handler here can
+  // only come from the movement.
+  await sleep(80);
+  assert.equal(dragCalls, calls + 1, 'moving on a press must start the drag before the long-press delay');
+  const callsBeforeMove = boundsCalls.length;
+  cursor = { x: pointer.x + 30, y: pointer.y + 24 };
+  await sleep(60);
+  const moved = sample(`${name} moved`);
+  assert.ok(Math.abs(moved.x - before.x - 30) <= 1 && Math.abs(moved.y - before.y - 24) <= 1,
+    'the window must follow a drag that started from movement');
+  assert.equal(boundsCalls.length, callsBeforeMove + 1, 'one pointer change needs one native bounds write');
+  assert.deepEqual(size(boundsCalls.at(-1)), expectedSize, 'a press-and-move drag must reuse the application layout size');
+  cursor = pointer;
+  await sleep(55);
+  await release();
+  assert.deepEqual(win.getBounds(), before, 'release must return the window to where the press began');
+  record(`${name}: a press followed by movement starts the drag without the long-press delay`);
+}
+
 async function displayChanged() {
   screen.emit('display-metrics-changed', {}, screen.getPrimaryDisplay(), ['workArea']);
   await sleep(260);
@@ -144,6 +176,7 @@ async function run() {
     // that accepted size fixed across every gesture, rather than assuming a
     // 632x432 desktop or reading the rounded native bounds back as the target.
     layoutSizes.normal = await layoutSize();
+    await pressAndMove('normal', layoutSizes.normal);
     await repeatedDrags('normal', layoutSizes.normal);
     await js('window.busy.toggleCompact()');
     await sleep(120);
