@@ -145,7 +145,19 @@ async function pressAndMove(name, expectedSize) {
   cursor = pointer;
   await sleep(55);
   await release();
-  assert.deepEqual(win.getBounds(), before, 'release must return the window to where the press began');
+  const home = sample(`${name} released`);
+  // Windows can constrain the initial native window on a small CI desktop.
+  // Dragging submits the logical layout size, and fractional DPI rounds the
+  // native result outward. Compare position and layout size independently.
+  assert.ok(Math.abs(home.x - before.x) <= 1 && Math.abs(home.y - before.y) <= 1,
+    'release must return the window to where the press began within native rounding');
+  assert.deepEqual(size(boundsCalls.at(-1)), expectedSize, 'returning must reuse the application layout size');
+  assert.ok(home.width >= expectedSize.width && home.width <= expectedSize.width + 2
+    && home.height >= expectedSize.height && home.height <= expectedSize.height + 2,
+    'a press-and-move drag must preserve the logical size within native rounding');
+  cursor = { x: pointer.x + 90, y: pointer.y + 75 };
+  await sleep(50);
+  assert.deepEqual(win.getBounds(), home, 'release must stop a press-and-move drag');
   record(`${name}: a press followed by movement starts the drag without the long-press delay`);
 }
 
