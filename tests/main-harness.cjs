@@ -10,6 +10,7 @@ function mainHarness({ writeError = false, preview = false, platform = 'win32' }
   const intervals = new Map();
   const timeouts = new Map();
   const files = new Map();
+  const logs = [];
   let now = 0;
   let nextTimer = 0;
   let installed = 0;
@@ -25,7 +26,7 @@ function mainHarness({ writeError = false, preview = false, platform = 'win32' }
     writeFileSync(file, value) { if (writeError) throw new Error('disk is read-only'); files.set(file, value); },
     renameSync(from, to) { if (writeError) throw new Error('disk is read-only'); files.set(to, files.get(from)); files.delete(from); },
     rmSync(file) { files.delete(file); },
-    appendFileSync() {},
+    appendFileSync(file, value) { logs.push(String(value)); },
   };
   const autoUpdater = new EventEmitter();
   // Lock/unlock and suspend/resume reach main through this emitter.
@@ -60,7 +61,7 @@ function mainHarness({ writeError = false, preview = false, platform = 'win32' }
     __dirname: path.join(root,'src'), process: {platform,argv:preview?['--preview']:[],env:preview?{BUSY_MAGPIE_PREVIEW_DIR:'/test/preview'}:{},on() {}},
     console, URL, AbortController, Date: class extends Date { static now() { return now; } },
     fetch: async () => ({ok:true,json:async()=>({period:'today',input:1})}),
-    setTimeout: fn => {const id=++nextTimer;timeouts.set(id,fn);return id;},
+    setTimeout: (fn, ms) => {const id=++nextTimer;timeouts.set(id,{fn,ms});return id;},
     clearTimeout: id => timeouts.delete(id), setImmediate: fn => fn(),
     setInterval: fn => {const id=++nextTimer;intervals.set(id,fn);return id;},
     clearInterval: id => intervals.delete(id),
@@ -74,6 +75,8 @@ function mainHarness({ writeError = false, preview = false, platform = 'win32' }
       usage:()=>refreshUsage(),
       usageData:()=>usageData,
       usageStatus:()=>usageStatus,
+      traceClient:base=>new TraceClient(base),
+      watchTrace:value=>{client=value;watchTrace();},
       schedule:()=>scheduleQuietInstall(),
       prepareUpdate:(kind='shell')=>{updateState.ready=true;updateState.available=true;updateState.latest='1.4.0';updateState.kind=kind;updateState.releaseUrl='https://github.com/yimi1mi/busy-magpie/releases/tag/v1.4.0';},
       changeMode:mode=>{settings.updateMode=mode;},
@@ -105,13 +108,19 @@ function mainHarness({ writeError = false, preview = false, platform = 'win32' }
       resetUnfocusableCache:()=>resetUnfocusableCache(),
     };`, context);
   return {
-    api: context.testApi, files, paths, openedUrls, powerMonitor, switches,
+    api: context.testApi, files, logs, paths, openedUrls, powerMonitor, switches,
     ipcChannels: [...handlers.keys(), ...listeners.keys()],
     save: input => handlers.get('settings:save')({}, input),
     period: value => handlers.get('usage:set-period')({}, value),
     setFetch(fn) { context.fetch = fn; },
     tick(ms) {now+=ms;for(const fn of [...intervals.values()])fn();},
-    runTimeouts() {const pending=[...timeouts.values()];timeouts.clear();for(const fn of pending)fn();},
+    runTimeouts() {const pending=[...timeouts.values()];timeouts.clear();for(const {fn} of pending)fn();},
+    get pendingTimeouts() {return [...timeouts.values()].map(({ms})=>ms);},
+    runNextTimeout() {
+      const next=[...timeouts.entries()].sort((a,b)=>a[1].ms-b[1].ms)[0];
+      if(!next) throw new Error('No pending timeout');
+      const [id,{fn,ms}]=next;timeouts.delete(id);now+=ms;fn();return ms;
+    },
     get installed() {return installed;},
     get updateChecks() {return updateChecks;},
     get loginChanges() {return loginChanges;},
