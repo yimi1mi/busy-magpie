@@ -1301,12 +1301,12 @@ function probeNativePointer() {
 
 // `moveTop()` is a nudge for a proven cover; `hide()` + `showInactive()` is the
 // heavier repair the user could always perform by hand from the tray and is
-// what fixed a card whose click routing had gone stale. Both are throttled so
-// a persistent problem cannot become a flicker loop.
-let lastOcclusionFix = 0;
-let lastRevealFix = 0;
+// what fixed a card whose click routing had gone stale. A foreign hit alone
+// does not prove that either action will help. Try once per uninterrupted
+// loss of ownership; only a confirmed healthy probe rearms the recovery.
+let pointerRecoveryAttempted = false;
 // One miss can be a transient during a move or a display change; two in a row
-// (a minute apart) is a real loss of click ownership.
+// (thirty seconds apart) warrants one recovery attempt.
 let pointerOwnMisses = 0;
 
 function watchPointerInput() {
@@ -1330,6 +1330,7 @@ function watchPointerInput() {
     }
     if (state.hitTestOwnsPoint) {
       pointerOwnMisses = 0;
+      pointerRecoveryAttempted = false;
       return;
     }
     // A hit on a desktop shell (Progman/WorkerW/tray) means the probe point
@@ -1340,14 +1341,16 @@ function watchPointerInput() {
       pointerOwnMisses = 0;
       return;
     }
-    const now = Date.now();
-    // A real window is provably sitting on the dots: raising the card is enough.
+    if (pointerRecoveryAttempted) return;
+    // WindowFromPoint may keep returning the window beneath a transparent
+    // surface even after moveTop(). Bound the attempt and record its result.
     if (state.hitTestWindow && state.hitTestWindow !== '0') {
-      if (now - lastOcclusionFix < 60_000) return;
-      lastOcclusionFix = now;
-      log(`pointer input: dots covered by "${state.hitTestTitle}" (${state.hitTestClass}); raising card`);
+      pointerOwnMisses = 0;
+      pointerRecoveryAttempted = true;
+      log(`pointer input: dots hit "${state.hitTestTitle}" (${state.hitTestClass}); raising card once`);
       try { win.moveTop(); } catch (error) { log(`pointer input: moveTop failed (${error.message})`); }
       applyPointerInput('occlusion-fix');
+      setImmediate(() => logPointerRecoveryResult('occlusion', state));
       return;
     }
     // Nobody owns the point at all. That is the state the card went deaf in,
@@ -1355,8 +1358,7 @@ function watchPointerInput() {
     // so do exactly that, once a miss has repeated.
     pointerOwnMisses += 1;
     if (pointerOwnMisses < 2) return;
-    if (now - lastRevealFix < 60_000) return;
-    lastRevealFix = now;
+    pointerRecoveryAttempted = true;
     pointerOwnMisses = 0;
     log(`pointer input: no window owns the dots (exStyle=${state.exStyle}, clickThrough=${state.clickThrough}, region=${state.regionKind}, hit=${state.hitTestWindow}); revealing the card again`);
     try {
@@ -1372,14 +1374,19 @@ function watchPointerInput() {
     // next diagnosis needs, instead of only the broken state.
     setImmediate(() => {
       refreshWindowMaterial();
-      const after = probeNativePointer();
-      if (!after || !after.supported) {
-        log('pointer input: reveal result unknown (probe unavailable)');
-        return;
-      }
-      log(`pointer input: reveal result before(exStyle=${state.exStyle} hit=${state.hitTestWindow} owns=${state.hitTestOwnsPoint} region=${state.regionKind}) after(exStyle=${after.exStyle} hit=${after.hitTestWindow} owns=${after.hitTestOwnsPoint} region=${after.regionKind})`);
+      logPointerRecoveryResult('reveal', state);
     });
   }, POINTER_ASSERT_MS);
+}
+
+function logPointerRecoveryResult(kind, before) {
+  if (!win || win.isDestroyed()) return;
+  const after = probeNativePointer();
+  if (!after || !after.supported) {
+    log(`pointer input: ${kind} result unknown (probe unavailable)`);
+    return;
+  }
+  log(`pointer input: ${kind} result before(exStyle=${before.exStyle} hit=${before.hitTestWindow} owns=${before.hitTestOwnsPoint} region=${before.regionKind}) after(exStyle=${after.exStyle} hit=${after.hitTestWindow} owns=${after.hitTestOwnsPoint} region=${after.regionKind})`);
 }
 
 function setHitAreas(raw) {

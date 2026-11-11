@@ -3,13 +3,14 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 
-function mainHarness({ writeError = false, preview = false, platform = 'win32' } = {}) {
+function mainHarness({ writeError = false, preview = false, platform = 'win32', pointerState } = {}) {
   const root = path.resolve(__dirname, '..');
   const handlers = new Map();
   const listeners = new Map();
   const intervals = new Map();
   const timeouts = new Map();
   const files = new Map();
+  const logs = [];
   let now = 0;
   let nextTimer = 0;
   let installed = 0;
@@ -25,7 +26,7 @@ function mainHarness({ writeError = false, preview = false, platform = 'win32' }
     writeFileSync(file, value) { if (writeError) throw new Error('disk is read-only'); files.set(file, value); },
     renameSync(from, to) { if (writeError) throw new Error('disk is read-only'); files.set(to, files.get(from)); files.delete(from); },
     rmSync(file) { files.delete(file); },
-    appendFileSync() {},
+    appendFileSync(file, value) { logs.push(String(value)); },
   };
   const autoUpdater = new EventEmitter();
   // Lock/unlock and suspend/resume reach main through this emitter.
@@ -56,7 +57,10 @@ function mainHarness({ writeError = false, preview = false, platform = 'win32' }
   });
   const context = vm.createContext({
     require: id => id === 'electron' ? electron : id === 'electron-updater' ? {autoUpdater}
-      : id === 'fs' ? disk : require(id.startsWith('.') ? path.resolve(root,'src',id) : id),
+      : id === 'fs' ? disk
+      : id === './pointer-diagnostic.cjs' && pointerState
+        ? { ...require(path.join(root, 'src', 'pointer-diagnostic.cjs')), windowsPointerState: pointerState }
+        : require(id.startsWith('.') ? path.resolve(root,'src',id) : id),
     __dirname: path.join(root,'src'), process: {platform,argv:preview?['--preview']:[],env:preview?{BUSY_MAGPIE_PREVIEW_DIR:'/test/preview'}:{},on() {}},
     console, URL, AbortController, Date: class extends Date { static now() { return now; } },
     fetch: async () => ({ok:true,json:async()=>({period:'today',input:1})}),
@@ -105,7 +109,7 @@ function mainHarness({ writeError = false, preview = false, platform = 'win32' }
       resetUnfocusableCache:()=>resetUnfocusableCache(),
     };`, context);
   return {
-    api: context.testApi, files, paths, openedUrls, powerMonitor, switches,
+    api: context.testApi, files, logs, paths, openedUrls, powerMonitor, switches,
     ipcChannels: [...handlers.keys(), ...listeners.keys()],
     save: input => handlers.get('settings:save')({}, input),
     period: value => handlers.get('usage:set-period')({}, value),
