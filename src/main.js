@@ -14,6 +14,7 @@ const autoUpdater = shellRuntime?.updater || require('electron-updater').autoUpd
 const UPDATES_ENABLED = shellRuntime ? shellRuntime.updatesEnabled : app.isPackaged && !process.argv.includes('--preview');
 const { heartbeat } = require('./launch-policy.cjs');
 const { parseGateway, gatewayProblem } = require('./gateway-config.cjs');
+const { GatewayRetry } = require('./gateway-retry.cjs');
 const { fitWindowBounds, anchorRightEdge } = require('./window-bounds.cjs');
 const { windowsPointerState, needsPointerRepair, isDesktopWindow } = require('./pointer-diagnostic.cjs');
 const { windowMaterial } = require('./window-material.cjs');
@@ -120,6 +121,8 @@ let lastTrace = null;
 let usageData = null;
 let usageStatus = { loading: false, stale: false, at: 0, error: '', period: '' };
 let usageRequest = null;
+const usageRetry = new GatewayRetry(20000, 120000);
+let usageRetryGateway = '';
 let usageTimer = null;
 let connection = { online: false, detail: '正在连接' };
 let layoutMode = false;
@@ -1643,6 +1646,15 @@ function rebuildClient() {
 
 async function refreshUsage(requestedPeriod) {
   if (requestedPeriod === undefined && usageRequest) return usageRequest.promise;
+  const info = gatewayInfo();
+  const gateway = info.url || info.error;
+  if (gateway !== usageRetryGateway) {
+    usageRetryGateway = gateway;
+    usageRetry.reset();
+  }
+  // Background polls honor backoff. A period click or explicit rebuild still
+  // tries immediately, so the user never has to wait for a stale retry clock.
+  if (requestedPeriod === undefined && !usageRetry.ready(Date.now())) return null;
   const period = normalizePeriod(requestedPeriod ?? settings.usagePeriod);
   if (usageRequest) usageRequest.controller.abort();
   const controller = new AbortController();
@@ -1656,21 +1668,21 @@ async function refreshUsage(requestedPeriod) {
   async function readUsage() {
     const timeout = setTimeout(() => controller.abort(), 6000);
     try {
-      const info = gatewayInfo();
-      if (!info.url) throw new Error(info.error);
+      if (!info.url) throw Object.assign(new Error(info.error), { code: 'GATEWAY_CONFIG' });
       const response = await fetch(`${info.url}/v1/magpie/usage?period=${period}`, {
         signal: controller.signal,
         headers: { Accept: 'application/json' },
         cache: 'no-store',
       });
       if (!response.ok) {
-        throw new Error(`用量接口返回 HTTP ${response.status}`);
+        throw Object.assign(new Error(`用量接口返回 HTTP ${response.status}`), { status: response.status });
       }
       const data = await response.json();
       if (usageRequest !== request) return null;
       if (!data || typeof data !== 'object' || !['input', 'output', 'cache_read', 'cache_write'].some(key => key in data)) {
-        throw new Error('用量接口未返回统计数据');
+        throw Object.assign(new Error('用量接口未返回统计数据'), { code: 'INVALID_USAGE' });
       }
+      if (usageRetry.recover()) log('usage recovered');
       usageData = { ...data, period };
       usageStatus = { loading: false, stale: false, at: Date.now(), error: '', period };
       send('magpie:usage', usageData);
@@ -1680,7 +1692,7 @@ async function refreshUsage(requestedPeriod) {
       if (usageRequest !== request) return null;
       const detail = error.name === 'AbortError' ? '读取用量超时' : error.message;
       usageStatus = { ...usageStatus, loading: false, stale: Boolean(usageData), error: detail, period };
-      log(`usage unavailable: ${detail}`);
+      if (usageRetry.fail(error, Date.now()).report) log(`usage unavailable: ${detail}`);
       send('magpie:usage-status', usageStatus);
       return null;
     } finally {
@@ -1721,9 +1733,9 @@ class TraceClient {
     this.first = true;
     this.stopped = false;
     this.controller = null;
-    this.lastError = '';
-    // Failed reads in a row: they decide how long the next retry waits.
-    this.misses = 0;
+    this.retry = new GatewayRetry(1000, 60000);
+    this.retryTimer = null;
+    this.wakeRetry = null;
     // The gateway's pid: a different one is a magpie that started again, so
     // its sequence and routes are not the ones this client remembers.
     this.pid = 0;
@@ -1750,16 +1762,32 @@ class TraceClient {
   stop() {
     this.stopped = true;
     if (this.controller) this.controller.abort();
+    this.wakeRetry?.();
   }
 
   reconnect() {
     if (this.controller) this.controller.abort();
+    this.wakeRetry?.();
   }
 
   // A loop that is retrying still touches lastBeat; one that is stuck in a
   // read should never sit there much past the read's own 40 s abort.
   idleFor() {
-    return Date.now() - this.lastBeat;
+    // A deliberate backoff is not a stuck read. Without this allowance the
+    // watchdog rebuilds a healthy retry loop and resets all its outage state.
+    return Math.max(0, Date.now() - Math.max(this.lastBeat, this.retry.retryAt));
+  }
+
+  waitForRetry(ms) {
+    return new Promise(resolve => {
+      this.wakeRetry = () => {
+        clearTimeout(this.retryTimer);
+        this.retryTimer = null;
+        this.wakeRetry = null;
+        resolve();
+      };
+      this.retryTimer = setTimeout(this.wakeRetry, ms);
+    });
   }
 
   async loop() {
@@ -1802,8 +1830,7 @@ class TraceClient {
         this.pid = pid || this.pid;
         this.seq = Number(data.seq) || 0;
         this.first = false;
-        this.lastError = '';
-        this.misses = 0;
+        if (this.retry.recover()) log(`trace recovered at ${this.base}`);
         for (const route of Array.isArray(data.routes) ? data.routes : []) {
           this.routes.set(String(route.id), route);
         }
@@ -1826,8 +1853,8 @@ class TraceClient {
       } catch (error) {
         if (this.stopped) break;
         const detail = describeError(error);
-        if (detail !== this.lastError) {
-          this.lastError = detail;
+        const retry = this.retry.fail(error, Date.now());
+        if (retry.report) {
           log(`trace unavailable at ${this.base}: ${detail}`);
         }
         // magpie may come back on another port than the one it left on: the
@@ -1844,12 +1871,11 @@ class TraceClient {
         connection = { online: false, detail, retry: true, at: Date.now() };
         fitWindow(0);
         send('magpie:connection', connection);
-        // Back off instead of hammering a gateway that is down: 1 s, 2 s, 4 s,
-        // then a steady 5 s. The card shows "重连中" while the loop retries,
-        // so no click and no setting is needed once magpie is back.
-        this.misses = Math.min(this.misses + 1, 5);
-        const wait = Math.min(1000 * 2 ** (this.misses - 1), 5000);
-        await delay(wait);
+        // Release this attempt's abort before sleeping. Offline retries back
+        // off to one minute, with stop/reconnect able to wake the wait.
+        clearTimeout(timeout);
+        timeout = null;
+        await this.waitForRetry(retry.wait);
         continue;
       } finally {
         if (timeout) clearTimeout(timeout);
@@ -1893,10 +1919,6 @@ function send(channel, payload) {
     log(`send ${channel} failed: ${error.message}`);
     return false;
   }
-}
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function trayImage() {
@@ -2282,7 +2304,7 @@ ipcMain.handle('settings:save', (_event, input) => {
     send('magpie:settings', publicSettings());
     applyWindowMode();
     if (gatewayChanged) rebuildClient();
-    else if (periodChanged) refreshUsage();
+    else if (periodChanged) refreshUsage(settings.usagePeriod);
     if (settings.updateMode === 'idle') {
       if (updateState.ready) scheduleQuietInstall();
       else if (updateState.available) downloadUpdate();
