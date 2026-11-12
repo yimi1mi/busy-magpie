@@ -275,6 +275,11 @@ server.listen(0, '127.0.0.1', async () => {
       // Keep the real HWND and DPI conversion while leaving the user's desktop
       // visually unchanged. Focus is the only native interaction suppressed.
       win.setOpacity(0);
+      // This geometry-only fixture hides the entire HWND, unlike the product's
+      // CSS background opacity. Keep its synthetic gesture timers running;
+      // pointer-visibility.cjs tests the shipped throttling policy with real
+      // mouse input and visible windows across actual hide/show transitions.
+      win.webContents.setBackgroundThrottling(false);
       win.focus = () => {};
       win.blur = () => win.emit('blur');
       const setBounds = win.setBounds.bind(win);

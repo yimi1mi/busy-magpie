@@ -28,22 +28,10 @@ if (IS_PREVIEW) {
   app.setPath('userData', path.resolve(process.env.BUSY_MAGPIE_PREVIEW_DIR || path.join(app.getPath('appData'), 'Busy Magpie Preview')));
 }
 
-// Chromium's native window occlusion tracker can decide this transparent,
-// unfocusable toolbar card is fully covered and clear WS_VISIBLE on
-// Chrome_RenderWidgetHostHWND. Once that child window is hidden, Windows
-// delivers every mouse message to the parent frame window and the renderer
-// receives nothing: the card keeps painting (the compositor runs separately)
-// but no click, drag or resize ever arrives.
-//
-// Field evidence, same build, two states:
-//   healthy: Chrome_RenderWidgetHostHWND IsWindowVisible=True, pointerdown
-//            counters increment, WindowFromPoint returns that child window;
-//   broken:  Chrome_RenderWidgetHostHWND IsWindowVisible=False, pointerdown
-//            counters stuck at 0 while requestAnimationFrame still runs at
-//            full speed, and WindowFromPoint returns the parent frame.
-//
-// The occlusion calculation buys nothing for a card meant to sit over other
-// windows, so it is disabled outright rather than worked around.
+// Keep native occlusion from hiding this transparent toolbar while it is on
+// screen. Explicit BrowserWindow.hide() is a separate path: it still hides
+// Chrome_RenderWidgetHostHWND, and needs normal background throttling below
+// so Chromium restores that input child when the card is shown again.
 if (process.platform === 'win32' && app.commandLine?.appendSwitch) {
   const SWITCH = 'disable-features';
   const FEATURE = 'CalculateNativeWinOcclusion';
@@ -427,7 +415,11 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: false,
       spellcheck: false,
-      backgroundThrottling: false,
+      // On Windows, disabling throttling skips host WasHidden() but Chromium
+      // still hides its native input child. The next show then skips the
+      // WasShown/UpdateLegacyWin path and real mouse presses never arrive.
+      // Hidden cards can sleep; trace/usage polling lives in the main process.
+      backgroundThrottling: IS_WIN,
     },
   });
   frame = { ...frame, compact, cardHeight: height - 32, windowHeight: height };
@@ -1284,7 +1276,7 @@ function logPointerHealth(state) {
   let bounds = null;
   try { focusable = win && !win.isDestroyed() ? win.isFocusable() : null; } catch { focusable = null; }
   try { bounds = win && !win.isDestroyed() ? win.getBounds() : null; } catch { bounds = null; }
-  log(`pointer health: focusable=${focusable} exStyle=${state.exStyle} clickThrough=${state.clickThrough} hitTestOwnsPoint=${state.hitTestOwnsPoint} region=${state.regionKind} visible=${state.visible} hwnd=${state.hwnd} hit=${state.hitTestWindow} hitClass='${state.hitTestClass}' point=(${state.point?.x},${state.point?.y}) bounds=${JSON.stringify(bounds)}`);
+  log(`pointer health: focusable=${focusable} exStyle=${state.exStyle} clickThrough=${state.clickThrough} hitTestOwnsPoint=${state.hitTestOwnsPoint} region=${state.regionKind} visible=${state.visible} rendererVisible=${state.rendererVisible} rendererWindow=${state.rendererWindow} hwnd=${state.hwnd} hit=${state.hitTestWindow} hitClass='${state.hitTestClass}' point=(${state.point?.x},${state.point?.y}) bounds=${JSON.stringify(bounds)}`);
 }
 
 function probeNativePointer() {

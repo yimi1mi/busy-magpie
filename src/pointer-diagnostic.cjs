@@ -60,6 +60,7 @@ function extra() {
     extraApi = {
       getWindowTextW: user32.func('int __stdcall GetWindowTextW(uintptr_t, _Out_ uint16 *, int32)'),
       getClassNameW: user32.func('int __stdcall GetClassNameW(uintptr_t, _Out_ uint16 *, int32)'),
+      findWindowExW: user32.func('uintptr_t __stdcall FindWindowExW(uintptr_t, uintptr_t, str16, str16)'),
       getWindowRgn: user32.func('int __stdcall GetWindowRgn(uintptr_t, uintptr_t)'),
       createRectRgn: gdi32.func('uintptr_t __stdcall CreateRectRgn(int32,int32,int32,int32)'),
       getRgnBox: gdi32.func('int __stdcall GetRgnBox(uintptr_t, _Out_ int32 *)'),
@@ -190,6 +191,9 @@ function windowsPointerState(win, point, areas) {
   const root = atPoint ? native.getAncestor(atPoint, GA_ROOT) : 0;
   const owns = hitTestVerdict(root, hwnd);
   const api = extra();
+  // The root can own the point even while Chromium's input child is hidden.
+  // Report both: root ownership alone does not prove mouse presses can arrive.
+  const renderer = api ? api.findWindowExW(hwnd, 0, 'Chrome_RenderWidgetHostHWND', null) : 0;
   return {
     supported: true,
     hwnd: hwnd.toString(),
@@ -206,6 +210,8 @@ function windowsPointerState(win, point, areas) {
     hitTestClass: !owns && root && api ? readWindowString(api.getClassNameW, root) : '',
     ...regionState(hwnd),
     visible: Boolean(native.isWindowVisible(hwnd)),
+    rendererWindow: renderer ? renderer.toString() : '0',
+    rendererVisible: renderer ? Boolean(native.isWindowVisible(renderer)) : null,
   };
 }
 

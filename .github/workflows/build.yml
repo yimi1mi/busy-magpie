@@ -53,6 +53,9 @@ jobs:
       - name: Verify Windows fallback pointer routing
         if: runner.os == 'Windows'
         run: node node_modules/electron/cli.js tests/ui/pointer-input.cjs --native --fallback
+      - name: Verify real Windows mouse input after hiding the card
+        if: runner.os == 'Windows'
+        run: node node_modules/electron/cli.js tests/ui/pointer-visibility.cjs
       - name: Verify Windows drag bounds at 100 percent scaling
         if: runner.os == 'Windows'
         run: node node_modules/electron/cli.js tests/ui/drag-bounds.cjs --scale=1 --label=ci
@@ -87,6 +90,7 @@ jobs:
             artifacts/business-update-e2e/**/electron.stderr.log
             artifacts/business-update-e2e/**/lifecycle.ndjson
             artifacts/pointer-input*/result.json
+            artifacts/pointer-visibility/result.json
             artifacts/drag-bounds*/**/result.json
             artifacts/routing-animation-bounds/**/result.json
           if-no-files-found: ignore
